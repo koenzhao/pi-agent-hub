@@ -91,6 +91,10 @@ export async function loadActiveTheme(activeTheme: ActiveThemeSnapshot | undefin
   return resolved;
 }
 
+export async function loadManagedSessionTheme(session: { activeTheme?: ActiveThemeSnapshot; cwd: string }): Promise<SessionsTheme> {
+  return (await loadActiveTheme(session.activeTheme, { cwd: session.cwd })) ?? loadSessionsTheme({ cwd: session.cwd });
+}
+
 export function styleToken(theme: SessionsTheme, token: ThemeToken, text: string): string {
   const value = theme[token];
   if (value === "" || text === "") return text;

@@ -73,6 +73,14 @@ export async function killSession(name: string, exec: TmuxExec = realTmuxExec): 
   await exec.exec("tmux", ["kill-session", "-t", name]);
 }
 
+export async function switchClient(name: string, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["switch-client", "-t", name]);
+}
+
+export function attachSessionCommand(name: string): { command: "tmux"; args: ["attach-session", "-t", string] } {
+  return { command: "tmux", args: ["attach-session", "-t", name] };
+}
+
 export interface CapturePaneOptions {
   preserveStyles?: boolean;
 }
@@ -372,7 +380,7 @@ function shellCasePrefix(value: string): string {
   return value.replace(/[\\[\]?*]/g, "\\$&");
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 

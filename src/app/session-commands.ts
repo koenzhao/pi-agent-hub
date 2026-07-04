@@ -12,8 +12,8 @@ import { recordRepoUsage } from "../core/repo-history.js";
 import { createSessionRecord, loadRegistry, updateRegistry, upsertSession } from "../core/registry.js";
 import { nextOrderInGroup } from "../core/session-order.js";
 import { isSubagentSession } from "../core/session-tree.js";
-import { configureManagedSessionStatusBar, killSession, newSession, sessionExists } from "../core/tmux.js";
-import { loadActiveTheme, loadSessionsTheme } from "../tui/theme.js";
+import { configureManagedSessionStatusBar, killSession, newSession, sessionExists, shellQuote } from "../core/tmux.js";
+import { loadManagedSessionTheme } from "../tui/theme.js";
 import { resolveSession } from "./delete-session.js";
 import type { ManagedSession } from "../core/types.js";
 
@@ -91,7 +91,7 @@ export async function startManagedSession(id: string): Promise<void> {
   let session = findSession(registry, id);
   if (isSubagentSession(session)) throw new Error(`Cannot start subagent row: ${session.title}`);
   if (await sessionExists(session.tmuxSession)) {
-    await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await sessionTheme(session) });
+    await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await loadManagedSessionTheme(session) });
     return;
   }
   session = await ensureMultiRepoWorkspace(session);
@@ -103,7 +103,7 @@ export async function startManagedSession(id: string): Promise<void> {
     command: managedPiCommand({ piArgs, prelude: await effectiveSessionPrelude() }),
     env: { [SESSION_ID_ENV]: session.id, [STATE_ENV]: sessionsStateDir() },
   });
-  await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await sessionTheme(session) });
+  await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await loadManagedSessionTheme(session) });
 }
 
 export async function stopManagedSession(id: string): Promise<void> {
@@ -153,7 +153,7 @@ export async function syncManagedSessionStatusBars(): Promise<void> {
   const registry = await loadRegistry();
   for (const session of registry.sessions) {
     if (await sessionExists(session.tmuxSession)) {
-      await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await sessionTheme(session) });
+      await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await loadManagedSessionTheme(session) });
     }
   }
 }
@@ -184,7 +184,7 @@ export async function forkManagedSession(sourceId: string, input: ForkInput = {}
     command: managedPiCommand({ piArgs, prelude: await effectiveSessionPrelude() }),
     env: { [SESSION_ID_ENV]: record.id, [STATE_ENV]: sessionsStateDir() },
   });
-  await configureManagedSessionStatusBar({ name: record.tmuxSession, title: record.title, cwd: record.cwd, theme: await sessionTheme(record) });
+  await configureManagedSessionStatusBar({ name: record.tmuxSession, title: record.title, cwd: record.cwd, theme: await loadManagedSessionTheme(record) });
   return record;
 }
 
@@ -215,10 +215,6 @@ async function rollbackStartedRecord(record: ManagedSession): Promise<void> {
   if (errors.length) throw new Error(errors.map(errorMessage).join("; "));
 }
 
-async function sessionTheme(session: ManagedSession) {
-  return (await loadActiveTheme(session.activeTheme, { cwd: session.cwd })) ?? loadSessionsTheme({ cwd: session.cwd });
-}
-
 async function savedSessionFile(source: ManagedSession): Promise<string> {
   if (!source.sessionFile) throw new Error(`Cannot fork ${source.title}: Pi session history is not saved yet`);
   try {
@@ -231,10 +227,6 @@ async function savedSessionFile(source: ManagedSession): Promise<string> {
 
 function findSession(registry: Parameters<typeof resolveSession>[0], id: string | undefined) {
   return resolveSession(registry, id) as ReturnType<typeof resolveSession> & { sessionFile?: string; status: string; updatedAt: number };
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 function errorMessage(error: unknown): string {

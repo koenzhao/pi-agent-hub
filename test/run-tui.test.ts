@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNewFormContext, loadDashboardTheme, resolveDashboardThemeSessionId } from "../src/app/run-tui.js";
+import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId } from "../src/app/run-tui.js";
 import type { ManagedSession } from "../src/core/types.js";
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
 
 function session(id: string, cwd: string, group: string, additionalCwds?: string[]): ManagedSession {
   return {
@@ -32,6 +42,80 @@ test("loadDashboardTheme follows the pinned session instead of selection movemen
   const theme = await loadDashboardTheme("/dashboard", [first, second], "first");
 
   assert.equal(theme.accent, "#111111");
+});
+
+test("registry mutator pauses runs refreshes renders and resumes in order", async () => {
+  const events: string[] = [];
+  const mutate = createRegistryMutator({
+    pause: async () => { events.push("pause"); },
+    resume: () => { events.push("resume"); },
+    refresh: async () => { events.push("refresh"); },
+    render: () => { events.push("render"); },
+  });
+
+  await mutate(async () => { events.push("action"); });
+
+  assert.deepEqual(events, ["pause", "action", "refresh", "render", "resume"]);
+});
+
+test("registry mutator serializes overlapping mutations", async () => {
+  const firstAction = deferred();
+  const events: string[] = [];
+  const mutate = createRegistryMutator({
+    pause: async () => { events.push("pause"); },
+    resume: () => { events.push("resume"); },
+    refresh: async () => { events.push("refresh"); },
+    render: () => { events.push("render"); },
+  });
+
+  const first = mutate(async () => {
+    events.push("first-action");
+    await firstAction.promise;
+  });
+  const second = mutate(async () => { events.push("second-action"); });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(events, ["pause", "first-action"]);
+  firstAction.resolve();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(events, [
+    "pause", "first-action", "refresh", "render", "resume",
+    "pause", "second-action", "refresh", "render", "resume",
+  ]);
+});
+
+test("registry mutator resumes and propagates action failures", async () => {
+  const events: string[] = [];
+  const mutate = createRegistryMutator({
+    pause: async () => { events.push("pause"); },
+    resume: () => { events.push("resume"); },
+    refresh: async () => { events.push("refresh"); },
+    render: () => { events.push("render"); },
+  });
+
+  await assert.rejects(() => mutate(async () => {
+    events.push("action");
+    throw new Error("boom");
+  }), /boom/);
+
+  assert.deepEqual(events, ["pause", "action", "resume"]);
+});
+
+test("registry mutator queue survives rejections", async () => {
+  const events: string[] = [];
+  const mutate = createRegistryMutator({
+    pause: async () => { events.push("pause"); },
+    resume: () => { events.push("resume"); },
+    refresh: async () => { events.push("refresh"); },
+    render: () => { events.push("render"); },
+  });
+
+  await assert.rejects(() => mutate(async () => { throw new Error("boom"); }), /boom/);
+  await mutate(async () => { events.push("action"); });
+
+  assert.deepEqual(events, ["pause", "resume", "pause", "action", "refresh", "render", "resume"]);
 });
 
 test("buildNewFormContext defaults to selected session cwd, group, and additional repos", () => {

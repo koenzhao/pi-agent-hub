@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { capturePane, cliTuiCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, restoreSwitchReturnBinding, sendTextToSession, sessionPresence, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, restoreSwitchReturnBinding, sendTextToSession, sessionPresence, shellQuote, switchClient, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -29,6 +29,25 @@ test("dashboard tui command uses current node and CLI file", () => {
 
   assert.equal(command, "'/opt/node bin/node' '/pkg/pi-agent-hub/dist/cli'\\''s.js' tui");
   assert.doesNotMatch(command, /^pi-hub tui$/);
+});
+
+test("switchClient switches the current tmux client", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await switchClient("pi-agent-hub-dashboard", exec);
+
+  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["switch-client", "-t", "pi-agent-hub-dashboard"] }]);
+});
+
+test("attachSessionCommand returns tmux attach argv", () => {
+  assert.deepEqual(attachSessionCommand("pi-agent-hub-dashboard"), {
+    command: "tmux",
+    args: ["attach-session", "-t", "pi-agent-hub-dashboard"],
+  });
+});
+
+test("shellQuote uses POSIX single quote escaping", () => {
+  assert.equal(shellQuote("pkg's path"), "'pkg'\\''s path'");
 });
 
 test("sessionPresence distinguishes missing sessions from unknown tmux failures", async () => {

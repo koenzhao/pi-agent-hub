@@ -1,3 +1,4 @@
+import { attachSessionCommand } from "../core/tmux.js";
 import type { ManagedSession } from "../core/types.js";
 
 export type AttachPlan =
@@ -9,5 +10,5 @@ export function attachPlan(session: ManagedSession, env: NodeJS.ProcessEnv = pro
     const command = `tmux switch-client -t ${session.tmuxSession}`;
     return { type: "inside-tmux", command, message: `inside tmux: ${command}` };
   }
-  return { type: "attach", command: "tmux", args: ["attach-session", "-t", session.tmuxSession] };
+  return { type: "attach", ...attachSessionCommand(session.tmuxSession) };
 }

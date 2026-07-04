@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildRenderModel } from "../src/tui/render-model.js";
 import { renderSessions, renderForm } from "../src/tui/layout.js";
-import { darkTheme, lightTheme, loadActiveTheme, loadSessionsTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, themeFromPiTheme } from "../src/tui/theme.js";
+import { darkTheme, lightTheme, loadActiveTheme, loadManagedSessionTheme, loadSessionsTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, themeFromPiTheme } from "../src/tui/theme.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function session(): ManagedSession {
@@ -184,6 +184,28 @@ test("loadActiveTheme uses in-memory token snapshots", async () => {
 
   assert.equal(theme?.accent, "#111111");
   assert.equal(theme?.muted, 244);
+});
+
+test("loadManagedSessionTheme prefers active heartbeat theme", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-managed-theme-"));
+  const project = join(root, "project");
+  await mkdir(project, { recursive: true });
+
+  const theme = await loadManagedSessionTheme({ cwd: project, activeTheme: { name: "<in-memory>", tokens: { accent: "#111111" } } });
+
+  assert.equal(theme.accent, "#111111");
+});
+
+test("loadManagedSessionTheme falls back to persisted session cwd theme", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-managed-theme-"));
+  const project = join(root, "project");
+  await mkdir(join(project, ".pi", "themes"), { recursive: true });
+  await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ theme: "managed" }), "utf8");
+  await writeFile(join(project, ".pi", "themes", "managed.json"), JSON.stringify({ colors: { accent: "#222222" } }), "utf8");
+
+  const theme = await loadManagedSessionTheme({ cwd: project });
+
+  assert.equal(theme.accent, "#222222");
 });
 
 test("loadSessionsTheme returns built-in light theme for Pi light", async () => {

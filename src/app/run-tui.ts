@@ -4,14 +4,14 @@ import { SessionsController } from "./controller.js";
 import { startRefreshLoop, type RefreshLoopHandle } from "./refresh-loop.js";
 import { SessionsView } from "../tui/sessions-view.js";
 import type { NewFormContext } from "../tui/new-form.js";
-import { loadActiveTheme, loadSessionsTheme, type SessionsTheme } from "../tui/theme.js";
+import { loadManagedSessionTheme, loadSessionsTheme, type SessionsTheme } from "../tui/theme.js";
 import { loadProjectSkillsState, setProjectSkills } from "../skills/attach.js";
 import { listSkillPool } from "../skills/catalog.js";
 import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mcp/config.js";
 import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
-import { configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, switchClientWithReturn } from "../core/tmux.js";
+import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, switchClientWithReturn } from "../core/tmux.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
@@ -91,6 +91,32 @@ function themeKey(theme: SessionsTheme): string {
   return JSON.stringify(theme);
 }
 
+export interface RegistryMutatorDeps {
+  pause(): Promise<void>;
+  resume(): void;
+  refresh(): Promise<void>;
+  render(): void;
+}
+
+export function createRegistryMutator(deps: RegistryMutatorDeps): (action: () => Promise<void>) => Promise<void> {
+  let queue = Promise.resolve();
+  return (action) => {
+    const run = async () => {
+      try {
+        await deps.pause();
+        await action();
+        await deps.refresh();
+        deps.render();
+      } finally {
+        deps.resume();
+      }
+    };
+    const result = queue.then(run, run);
+    queue = result.catch(() => {});
+    return result;
+  };
+}
+
 export async function runTui(): Promise<void> {
   const cwd = process.cwd();
   const controller = new SessionsController();
@@ -144,24 +170,18 @@ export async function runTui(): Promise<void> {
     void restoreSwitchReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {});
     tui.stop();
   };
-  let mutationQueue = Promise.resolve();
-  const mutateRegistry = (action: () => Promise<void>) => {
-    const run = async () => {
+  const mutateRegistry = createRegistryMutator({
+    async pause() {
       const loop = stopLoop;
       stopLoop = undefined;
-      try {
-        await loop?.stop();
-        await action();
-        await controller.refresh();
-        tui.requestRender();
-      } finally {
-        if (!stopped) stopLoop = startRefreshLoop(controller, tui);
-      }
-    };
-    const result = mutationQueue.then(run, run);
-    mutationQueue = result.catch(() => {});
-    return result;
-  };
+      await loop?.stop();
+    },
+    resume() {
+      if (!stopped) stopLoop = startRefreshLoop(controller, tui);
+    },
+    refresh: () => controller.refresh(),
+    render: () => tui.requestRender(),
+  });
   const scheduleShortcutNameSync = (sessionId: string, delayMs: number) => {
     const timer = setTimeout(() => {
       shortcutTimers.delete(timer);
@@ -186,13 +206,14 @@ export async function runTui(): Promise<void> {
       const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
       if (session) pinDashboardThemeSession(session);
       stop();
-      spawn("tmux", ["attach-session", "-t", tmuxSession], { stdio: "inherit" });
+      const attach = attachSessionCommand(tmuxSession);
+      spawn(attach.command, attach.args, { stdio: "inherit" });
     },
     async switchInsideTmux(tmuxSession) {
       const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
       if (session) {
         pinDashboardThemeSession(session);
-        const sessionTheme = await loadManagedTheme(session);
+        const sessionTheme = await loadManagedSessionTheme(session);
         view.setTheme(sessionTheme);
         syncDashboardChrome(sessionTheme);
         tui.invalidate();
@@ -366,12 +387,8 @@ export function resolveDashboardThemeSessionId(sessions: ManagedSession[], confi
 
 export async function loadDashboardTheme(cwd: string, sessions: ManagedSession[], sessionId: string | undefined): Promise<SessionsTheme> {
   const session = sessions.find((item) => item.id === sessionId);
-  if (session) return loadManagedTheme(session);
+  if (session) return loadManagedSessionTheme(session);
   return loadSessionsTheme({ cwd });
-}
-
-async function loadManagedTheme(session: ManagedSession): Promise<SessionsTheme> {
-  return (await loadActiveTheme(session.activeTheme, { cwd: session.cwd })) ?? loadSessionsTheme({ cwd: session.cwd });
 }
 
 function startDashboardActionLoop(processAction: () => Promise<void>, intervalMs = 250): () => void {
