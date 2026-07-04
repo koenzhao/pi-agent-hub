@@ -37,6 +37,21 @@ npm run package:check
 
 Do not run these concurrently: both rebuild `dist`.
 
+## Git hooks
+
+This repo includes lightweight local hooks in `.githooks/`:
+
+- `pre-commit` runs `npm run typecheck` so commits fail on TypeScript errors without rebuilding `dist`.
+- `pre-push` runs `npm test`, which rebuilds and runs the full Node test suite.
+
+Enable them once per clone:
+
+```bash
+npm run hooks:install
+```
+
+Use Git's normal `--no-verify` escape hatch for intentional bypasses.
+
 ## Pi package declaration
 
 The package declares its extension in `package.json`:
