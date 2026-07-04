@@ -190,3 +190,30 @@
   created_at: '2026-07-03'
   plan_file: agent-work/history/20260704_split-view-001_sidebar_workspace.md
   completed_at: '2026-07-04'
+- epic: split-view
+  description: 'Sidebar workspace v2: two stacked session content panes (top/bottom)
+    beside the persistent sidebar; o targets the top slot, O the bottom slot, each
+    open/retarget/toggle statelessly; a session never shows in two panes.'
+  priority: 1
+  depends_on: []
+  id: split-view-002
+  status: done
+  created_at: '2026-07-04'
+  plan_file: agent-work/history/20260704_split-view-002_stacked_side_panes.md
+  completed_at: '2026-07-04'
+- epic: split-view
+  status: pending
+  title: Show side-pane slot indicators
+  description: User can see which dashboard sessions are currently rendered in the
+    top or bottom side pane while using the sidebar workspace.
+  steps:
+  - Derive indicators from live tmux pane/client inspection, not registry state.
+  - Show compact top/bottom badges only for Hub-owned side panes and preserve user-created
+    panes.
+  priority: 3
+  depends_on: []
+  discovered_from: split-view-002 review discussion
+  plan_file: null
+  references: []
+  created_at: '2026-07-04'
+  id: split-view-003

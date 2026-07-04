@@ -85,21 +85,27 @@ export interface WindowPane {
   id: string;
   tty: string;
   active: boolean;
+  top: number;
 }
 
 export async function listWindowPanes(pane: string, exec: TmuxExec = realTmuxExec): Promise<WindowPane[]> {
-  const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", "#{pane_id} #{pane_tty} #{pane_active}"]);
+  const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top}"]);
   return result.stdout.split(/\r?\n/).flatMap((line) => {
     if (!line.trim()) return [];
-    const [id, tty, active] = line.split(" ");
-    if (!id || !tty) return [];
-    return [{ id, tty, active: active === "1" }];
+    const [id, tty, active, topText] = line.split(" ");
+    const top = Number(topText);
+    if (!id || !tty || !Number.isFinite(top)) return [];
+    return [{ id, tty, active: active === "1", top }];
   });
 }
 
 export async function splitWindowAttach(options: { pane: string; target: string; sidebarWidth: number }, exec: TmuxExec = realTmuxExec): Promise<void> {
   await exec.exec("tmux", ["split-window", "-h", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
   await exec.exec("tmux", ["resize-pane", "-t", options.pane, "-x", String(options.sidebarWidth)]);
+}
+
+export async function splitPaneBelowAttach(options: { pane: string; target: string }, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["split-window", "-v", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
 }
 
 export async function switchClientTo(options: { clientTty: string; target: string }, exec: TmuxExec = realTmuxExec): Promise<void> {

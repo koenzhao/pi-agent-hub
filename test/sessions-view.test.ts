@@ -92,7 +92,7 @@ test("help overlay opens and closes", () => {
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
   assert.match(help, /zero counts are hidden/);
-  assert.match(help, /o side pane/);
+  assert.match(help, /o\/O side panes/);
   assert.match(help, /v toggle groups\/stages view/);
   assert.match(help, /Stages view lanes active sessions by workflow step/);
   view.handleInput("\u001b");
@@ -291,20 +291,22 @@ test("stages view snaps selection to a visible lane row", () => {
   assert.equal(controller.snapshot().selectedId, "a");
 });
 
-test("o opens the selected live session in a side pane", async () => {
+test("o and O open the selected live session in top and bottom side panes", async () => {
   const opened: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: async (sessionId) => {
-      opened.push(sessionId);
+    openSidePane: async (sessionId, slot) => {
+      opened.push(`${sessionId}:${slot}`);
       return { kind: "opened" };
     },
   });
 
   view.handleInput("o");
   await new Promise((resolve) => setImmediate(resolve));
+  view.handleInput("O");
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(opened, ["api"]);
+  assert.deepEqual(opened, ["api:top", "api:bottom"]);
   assert.match(stripAnsi(view.render(100).join("\n")), /side: api/);
 });
 

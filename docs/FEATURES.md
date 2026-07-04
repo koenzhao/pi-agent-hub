@@ -39,7 +39,7 @@ Ctrl+Q returns to the dashboard
 | --- | --- |
 | `n` | Create a new Pi session |
 | `Enter` | Open or switch to the selected session |
-| `o` | Open, retarget, or close the selected session in the side pane |
+| `o` / `O` | Open, retarget, or close the selected session in the top/bottom side pane |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
@@ -96,17 +96,20 @@ When the dashboard is running inside tmux, `Enter` switches the current tmux cli
 
 ### Sidebar workspace
 
-Press `o` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and the selected session is attached interactively in the right pane.
+Press `o` or `O` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and up to two selected sessions are attached interactively in stacked right-side panes.
 
-`o` is a single toggle/retarget key:
+The keys target positional slots:
 
-- no side pane: split the current tmux window and attach the selected managed session;
-- side pane showing another managed session: switch that nested client to the selected session in place;
-- side pane already showing the selected session: close the side pane.
+- `o` targets the top content pane;
+- `O` targets the bottom content pane;
+- no side pane: either key opens the first right-side pane;
+- one side pane and `O`: split it vertically to create a bottom pane;
+- selected session already visible in either pane: close that pane;
+- otherwise: switch the targeted nested client to the selected session in place.
 
-Native tmux keys handle the layout after that: `prefix+←/→` moves focus, `prefix+z` zooms the content pane to hide/show the sidebar, and `prefix+x` closes the content pane. `Enter` and `Ctrl+Q` keep their full-screen switch/return behavior unchanged; if `Enter` opens the same session currently shown in the side pane, Hub closes that pane first to avoid tmux size flapping.
+Native tmux keys handle the layout after that: `prefix+←/→/↑/↓` moves focus, `prefix+z` zooms the focused pane to hide/show neighbors, `prefix+x` closes a pane, and `prefix+{` / `prefix+}` swaps panes. `Enter` and `Ctrl+Q` keep their full-screen switch/return behavior unchanged; if `Enter` opens a session currently shown in any side pane, Hub closes that pane first to avoid tmux size flapping.
 
-The side pane is stateless and self-healing. Hub inspects the current window live and only owns panes whose tty maps to a nested client attached to a `pi-agent-hub-*` managed session. User-created shell/editor panes are never killed or retargeted. If the shown session exits, tmux normally closes the nested pane automatically.
+The side panes are stateless and self-healing. Hub inspects the current window live and only owns panes whose tty maps to a nested client attached to a `pi-agent-hub-*` managed session. User-created shell/editor panes are never killed or retargeted. If a shown session exits, tmux normally closes its nested pane automatically.
 
 If the dashboard tmux session is missing, the temporary return binding recreates it before switching back.
 

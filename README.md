@@ -39,6 +39,7 @@ Inside the dashboard:
 | --- | --- |
 | `n` | Create a new Pi session |
 | `Enter` | Open or switch to the selected session |
+| `o` / `O` | Open, retarget, or close the selected session in the top/bottom side pane |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |

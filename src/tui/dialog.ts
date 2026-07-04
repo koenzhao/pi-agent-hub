@@ -18,12 +18,13 @@ export interface SessionDialogInput {
   worktree?: { branch: string };
 }
 
+export type SidePaneSlot = "top" | "bottom";
 export type OpenSidePaneResult = { kind: "opened" } | { kind: "retargeted" } | { kind: "closed" };
 
 export interface SessionsViewActions {
   attachOutsideTmux?: (tmuxSession: string) => void | Promise<void>;
   switchInsideTmux?: (tmuxSession: string) => void | Promise<void>;
-  openSidePane?: (sessionId: string) => OpenSidePaneResult | Promise<OpenSidePaneResult>;
+  openSidePane?: (sessionId: string, slot: SidePaneSlot) => OpenSidePaneResult | Promise<OpenSidePaneResult>;
   restart?: (sessionId: string) => unknown;
   restartNew?: (sessionId: string) => unknown;
   restartAll?: () => unknown;

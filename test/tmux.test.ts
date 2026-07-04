@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, shellQuote, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, shellQuote, splitPaneBelowAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -51,13 +51,13 @@ test("shellQuote uses POSIX single quote escaping", () => {
 });
 
 test("listWindowPanes parses panes for the current window", async () => {
-  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1\n%2 /dev/ttys002 0\n", stderr: "" }));
+  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 12\n%3 /dev/ttys003 0 nope\n", stderr: "" }));
 
   assert.deepEqual(await listWindowPanes("%1", exec), [
-    { id: "%1", tty: "/dev/ttys001", active: true },
-    { id: "%2", tty: "/dev/ttys002", active: false },
+    { id: "%1", tty: "/dev/ttys001", active: true, top: 0 },
+    { id: "%2", tty: "/dev/ttys002", active: false, top: 12 },
   ]);
-  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active}"] }]);
+  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top}"] }]);
 });
 
 test("splitWindowAttach creates an attached side pane and resizes the sidebar", async () => {
@@ -68,6 +68,16 @@ test("splitWindowAttach creates an attached side pane and resizes the sidebar", 
   assert.deepEqual(exec.calls, [
     { command: "tmux", args: ["split-window", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'\\''s'"] },
     { command: "tmux", args: ["resize-pane", "-t", "%1", "-x", "42"] },
+  ]);
+});
+
+test("splitPaneBelowAttach creates a stacked attached content pane", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await splitPaneBelowAttach({ pane: "%2", target: "pi-agent-hub-api's" }, exec);
+
+  assert.deepEqual(exec.calls, [
+    { command: "tmux", args: ["split-window", "-v", "-t", "%2", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'\\''s'"] },
   ]);
 });
 

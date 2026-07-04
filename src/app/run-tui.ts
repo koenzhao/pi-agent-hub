@@ -12,7 +12,7 @@ import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiv
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
 import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, switchClientWithReturn } from "../core/tmux.js";
-import { closeSidePaneShowing, openInSidePane } from "./side-pane.js";
+import { closeSidePaneShowing, closeSidePanes, openInSidePane } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
@@ -171,6 +171,7 @@ export async function runTui(): Promise<void> {
   const shortcutTimers = new Set<NodeJS.Timeout>();
   let stopped = false;
   const stop = () => {
+    if (stopped) return;
     stopped = true;
     stopThemeLoop?.();
     stopActionLoop?.();
@@ -178,7 +179,10 @@ export async function runTui(): Promise<void> {
     shortcutTimers.clear();
     void stopLoop?.stop();
     void restoreSwitchReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {});
-    tui.stop();
+    const ownPane = process.env.TMUX_PANE;
+    const finish = () => { tui.stop(); };
+    if (ownPane) void closeSidePanes({ ownPane }).catch(() => {}).finally(finish);
+    else finish();
   };
   const mutateRegistry = createRegistryMutator({
     async pause() {
@@ -230,13 +234,13 @@ export async function runTui(): Promise<void> {
         returnSession: { name: DASHBOARD_SESSION, cwd, command: "pi-agent-hub tui", env: dashboardEnv() },
       });
     },
-    async openSidePane(sessionId) {
+    async openSidePane(sessionId, slot) {
       const session = controller.snapshot().registry.sessions.find((item) => item.id === sessionId);
       if (!session) throw new Error("session not found");
       const ownPane = process.env.TMUX_PANE;
       if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
       if (session.status === "waiting") await mutateRegistry(() => controller.acknowledgeSession(session.id));
-      const result = await openInSidePane({ target: session.tmuxSession, ownPane });
+      const result = await openInSidePane({ target: session.tmuxSession, ownPane, slot });
       if (result.kind !== "closed") await applyManagedSessionTheme(session);
       return result;
     },

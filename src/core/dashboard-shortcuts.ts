@@ -6,7 +6,7 @@ export interface DashboardShortcut {
 }
 
 const RESERVED_DASHBOARD_KEYS = new Set([
-  "n", "f", "g", "G", "e", "R", "r", "d", "w", "s", "m", "o", "p", "a", "A", "B", "U", "i", "N", "K", "J", "v", "?", "q", "/",
+  "n", "f", "g", "G", "e", "R", "r", "d", "w", "s", "m", "o", "O", "p", "a", "A", "B", "U", "i", "N", "K", "J", "v", "?", "q", "/",
   "Enter", "Esc", "Up", "Down", "j", "k", "Shift+Up", "Shift+Down",
   "M-n", "M-e", "C-q", "M-r", "C-m", "C-j", "C-[",
 ]);
