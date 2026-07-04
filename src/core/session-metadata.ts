@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { isErrno } from "./atomic-json.js";
 import { sessionMetadataPath } from "./paths.js";
 import type { SessionMetadata } from "./types.js";
 
@@ -7,7 +8,7 @@ export async function readSessionMetadata(sessionId: string, env: NodeJS.Process
   try {
     text = await readFile(sessionMetadataPath(sessionId, env), "utf8");
   } catch (error) {
-    if (isNotFound(error)) return undefined;
+    if (isErrno(error, "ENOENT")) return undefined;
     throw error;
   }
 
@@ -54,8 +55,4 @@ function optionalNumber<K extends string>(key: K, value: unknown): Partial<Recor
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

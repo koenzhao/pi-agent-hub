@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { isErrno } from "../core/atomic-json.js";
 import { effectiveSkillPoolDirs } from "../core/config.js";
 
 export interface SkillCatalogEntry {
@@ -27,7 +28,7 @@ async function listPoolDir(pool: string): Promise<SkillCatalogEntry[]> {
       .filter((entry) => entry.isDirectory())
       .map((entry) => ({ name: entry.name, path: join(pool, entry.name) }));
   } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return [];
+    if (isErrno(error, "ENOENT")) return [];
     throw error;
   }
 }

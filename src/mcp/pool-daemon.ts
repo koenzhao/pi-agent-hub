@@ -1,6 +1,7 @@
 import { mkdir, unlink } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
+import { isErrno } from "../core/atomic-json.js";
 import { loadMcpCatalog } from "./config.js";
 import { createDirectMcpClient, type DirectMcpClient } from "./direct-client.js";
 import type { PoolRequest, PoolResponse } from "./pool-protocol.js";
@@ -28,7 +29,7 @@ export async function startMcpPool(options: StartMcpPoolOptions): Promise<McpPoo
 
   await mkdir(dirname(options.socketPath), { recursive: true });
   await unlink(options.socketPath).catch((error: unknown) => {
-    if (!isNotFound(error)) throw error;
+    if (!isErrno(error, "ENOENT")) throw error;
   });
 
   const server = createServer((socket) => handleSocket(socket, clients));
@@ -46,7 +47,7 @@ export async function startMcpPool(options: StartMcpPoolOptions): Promise<McpPoo
       await closeServer(server);
       await Promise.all([...clients.values()].map((client) => client.close()));
       await unlink(options.socketPath).catch((error: unknown) => {
-        if (!isNotFound(error)) throw error;
+        if (!isErrno(error, "ENOENT")) throw error;
       });
     },
   };
@@ -98,8 +99,4 @@ function safeId(line: string): string {
 
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isErrno } from "../core/atomic-json.js";
 import { agentDir } from "../core/paths.js";
 import type { ActiveThemeSnapshot } from "../core/types.js";
 
@@ -196,7 +197,7 @@ async function readSettings(path: string): Promise<PiSettings> {
   try {
     return JSON.parse(await readFile(path, "utf8")) as PiSettings;
   } catch (error) {
-    if (isNotFound(error)) return {};
+    if (isErrno(error, "ENOENT")) return {};
     throw error;
   }
 }
@@ -264,7 +265,7 @@ async function packageManifestThemeEntries(packageRoot: string): Promise<string[
       ? manifest.pi.themes
       : undefined;
   } catch (error) {
-    if (isNotFound(error)) return undefined;
+    if (isErrno(error, "ENOENT")) return undefined;
     throw error;
   }
 }
@@ -326,7 +327,7 @@ async function readThemeJson(path: string): Promise<PiThemeFile | undefined> {
   try {
     return JSON.parse(await readFile(path, "utf8")) as PiThemeFile;
   } catch (error) {
-    if (isNotFound(error)) return undefined;
+    if (isErrno(error, "ENOENT")) return undefined;
     throw error;
   }
 }
@@ -349,8 +350,4 @@ function ansi(value: string | number, layer: 38 | 48 = 38): string {
   const g = Number.parseInt(hex.slice(2, 4), 16);
   const b = Number.parseInt(hex.slice(4, 6), 16);
   return `\u001b[${layer};2;${r};${g};${b}m`;
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

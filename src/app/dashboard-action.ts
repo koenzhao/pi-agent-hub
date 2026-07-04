@@ -1,5 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { isErrno } from "../core/atomic-json.js";
 import { sessionsStateDir } from "../core/paths.js";
 
 export type DashboardAction = { action: "rename"; tmuxSession: string };
@@ -13,7 +14,7 @@ export async function consumeDashboardAction(path = dashboardActionPath()): Prom
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if (isErrno(error, "ENOENT")) return undefined;
     throw error;
   }
   await rm(path, { force: true });

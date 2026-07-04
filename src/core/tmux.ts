@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
+import { isErrno } from "./atomic-json.js";
 import { tmuxChromeFromTheme, type ChromeThemeTokens } from "./chrome.js";
 import { MANAGED_SESSION_PREFIX } from "./names.js";
 import { sessionsStateDir } from "./paths.js";
@@ -253,7 +254,7 @@ export async function inspectSwitchReturnBinding(options: { stateDir?: string } 
     const active = JSON.parse(await readFile(activePath, "utf8")) as ActiveReturnBinding;
     return { ...active, active: true, stale: !isProcessAlive(active.ownerPid) };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { active: false };
+    if (isErrno(error, "ENOENT")) return { active: false };
     throw error;
   }
 }
@@ -278,7 +279,7 @@ export async function restoreSwitchReturnBinding(
   try {
     active = JSON.parse(await readFile(activePath, "utf8")) as ActiveReturnBinding;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if (isErrno(error, "ENOENT")) return;
     throw error;
   }
 
@@ -300,7 +301,7 @@ export async function restoreSwitchReturnBinding(
     try {
       previous = await readFile(binding.restorePath, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!isErrno(error, "ENOENT")) throw error;
     }
     if (previous.trim()) await exec.exec("tmux", ["source-file", binding.restorePath]);
     await rm(binding.restorePath, { force: true });
@@ -351,7 +352,7 @@ function isProcessAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    return isErrno(error, "EPERM");
   }
 }
 

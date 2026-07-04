@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join, resolve } from "node:path";
-import { mkdir, rm } from "node:fs/promises";
-import { readJsonOr, writeJsonAtomic } from "./atomic-json.js";
+import { basename, resolve } from "node:path";
+import { loadStore, updateStore, writeJsonAtomic, type JsonStore } from "./atomic-json.js";
 import { multiRepoWorkspaceDir, normalizeAdditionalCwds } from "./multi-repo.js";
 import { MANAGED_SESSION_PREFIX } from "./names.js";
 import { registryPath } from "./paths.js";
@@ -9,49 +8,32 @@ import type { SessionsRegistry, ManagedSession } from "./types.js";
 
 export const emptyRegistry = (): SessionsRegistry => ({ version: 1, sessions: [] });
 
+function registryStore(path: string): JsonStore<SessionsRegistry> {
+  return {
+    path,
+    empty: emptyRegistry,
+    parse: (registry) => {
+      if (registry.version !== 1 || !Array.isArray(registry.sessions)) {
+        throw new Error(`Unsupported registry format: ${path}`);
+      }
+      return registry;
+    },
+  };
+}
+
 export async function loadRegistry(path = registryPath()): Promise<SessionsRegistry> {
-  const registry = await readJsonOr<SessionsRegistry>(path, emptyRegistry());
-  if (registry.version !== 1 || !Array.isArray(registry.sessions)) {
-    throw new Error(`Unsupported registry format: ${path}`);
-  }
-  return registry;
+  return loadStore(registryStore(path));
 }
 
 export async function saveRegistry(registry: SessionsRegistry, path = registryPath()): Promise<void> {
   await writeJsonAtomic(path, registry);
 }
 
-export async function withRegistryLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
-  await mkdir(dirname(path), { recursive: true });
-  const lockDir = join(dirname(path), "registry.lock");
-  const started = Date.now();
-  while (true) {
-    try {
-      await mkdir(lockDir);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (Date.now() - started > 5000) throw new Error(`Timed out waiting for registry lock: ${lockDir}`);
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    await rm(lockDir, { recursive: true, force: true });
-  }
-}
-
 export async function updateRegistry(
   mutate: (registry: SessionsRegistry) => SessionsRegistry | void,
   path = registryPath(),
 ): Promise<SessionsRegistry> {
-  return withRegistryLock(path, async () => {
-    const registry = await loadRegistry(path);
-    const next = mutate(registry) ?? registry;
-    await saveRegistry(next, path);
-    return next;
-  });
+  return updateStore(registryStore(path), mutate);
 }
 
 export interface NewSessionInput {

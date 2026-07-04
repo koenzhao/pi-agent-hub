@@ -144,3 +144,15 @@
   references: []
   created_at: '2026-07-03'
   id: tui-dialogs-002
+- epic: json-store
+  description: 'Deepen JSON persistence: one JsonStore module (load, locked update,
+    version guard, atomic write) behind registry, repo-history, project MCP state,
+    and project skills state; consolidate duplicated ENOENT/EEXIST checks into one
+    isErrno helper.'
+  priority: 2
+  depends_on: []
+  id: json-store-001
+  status: done
+  created_at: '2026-07-03'
+  plan_file: agent-work/history/20260703_json-store-001_json_store.md
+  completed_at: '2026-07-03'

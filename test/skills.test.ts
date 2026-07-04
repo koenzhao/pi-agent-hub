@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { writeJsonAtomic } from "../src/core/atomic-json.js";
 import { projectSkillsStatePath } from "../src/core/paths.js";
 import { attachSkill, detachSkill, loadProjectSkillsState, setProjectSkills } from "../src/skills/attach.js";
 import { listSkillPool } from "../src/skills/catalog.js";
@@ -101,6 +102,22 @@ test("detach refuses unmanaged skill names", async () => {
 
   assert.equal(await detachSkill(project, "manual"), false);
   assert.match(await readFile(join(project, ".pi", "skills", "manual", "SKILL.md"), "utf8"), /manual/);
+});
+
+test("detach missing skill does not create project skills state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-skills-"));
+  const project = join(root, "project");
+
+  assert.equal(await detachSkill(project, "missing"), false);
+  await assert.rejects(() => access(projectSkillsStatePath(project)), /ENOENT/);
+});
+
+test("project skills state rejects invalid shape", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-skills-"));
+  const project = join(root, "project");
+  await writeJsonAtomic(projectSkillsStatePath(project), { version: 2, attached: [] });
+
+  await assert.rejects(() => loadProjectSkillsState(project), /Invalid project skills state/);
 });
 
 test("listSkillPool discovers pool skills", async () => {

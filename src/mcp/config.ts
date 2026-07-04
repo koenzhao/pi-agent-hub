@@ -1,4 +1,4 @@
-import { readJsonOr, writeJsonAtomic } from "../core/atomic-json.js";
+import { loadStore, updateStore, type JsonStore } from "../core/atomic-json.js";
 import { effectiveMcpCatalogPath } from "../core/config.js";
 import { sessionsStateDir, projectMcpStatePath } from "../core/paths.js";
 import { join } from "node:path";
@@ -22,9 +22,14 @@ export function mcpCatalogPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export async function loadMcpCatalog(path?: string, env: NodeJS.ProcessEnv = process.env): Promise<McpCatalog> {
-  const catalog = await readJsonOr<McpCatalog>(path ?? await effectiveMcpCatalogPath(env), { version: 1, servers: {} });
-  validateMcpCatalog(catalog);
-  return catalog;
+  return loadStore({
+    path: path ?? await effectiveMcpCatalogPath(env),
+    empty: () => ({ version: 1, servers: {} }),
+    parse: (catalog) => {
+      validateMcpCatalog(catalog);
+      return catalog;
+    },
+  });
 }
 
 export function validateMcpCatalog(catalog: McpCatalog): void {
@@ -44,20 +49,30 @@ export function validateMcpCatalog(catalog: McpCatalog): void {
   }
 }
 
+function projectMcpStore(projectCwd: string): JsonStore<ProjectMcpState> {
+  return {
+    path: projectMcpStatePath(projectCwd),
+    empty: () => ({ version: 1, enabledServers: [] }),
+    parse: (state) => {
+      if (state.version !== 1 || !Array.isArray(state.enabledServers)) throw new Error("Invalid project MCP state");
+      return state;
+    },
+  };
+}
+
 export async function loadProjectMcpState(projectCwd: string): Promise<ProjectMcpState> {
-  return readJsonOr<ProjectMcpState>(projectMcpStatePath(projectCwd), { version: 1, enabledServers: [] });
+  return loadStore(projectMcpStore(projectCwd));
 }
 
 export async function setProjectMcpServer(projectCwd: string, serverId: string, enabled: boolean): Promise<ProjectMcpState> {
-  const state = await loadProjectMcpState(projectCwd);
-  const enabledServers = new Set(state.enabledServers);
-  if (enabled) enabledServers.add(serverId);
-  else enabledServers.delete(serverId);
-  return setProjectMcpServers(projectCwd, [...enabledServers]);
+  return updateStore(projectMcpStore(projectCwd), (state) => {
+    const enabledServers = new Set(state.enabledServers);
+    if (enabled) enabledServers.add(serverId);
+    else enabledServers.delete(serverId);
+    return { version: 1 as const, enabledServers: [...enabledServers].sort() };
+  });
 }
 
 export async function setProjectMcpServers(projectCwd: string, enabledServers: string[]): Promise<ProjectMcpState> {
-  const next: ProjectMcpState = { version: 1, enabledServers: [...new Set(enabledServers)].sort() };
-  await writeJsonAtomic(projectMcpStatePath(projectCwd), next);
-  return next;
+  return updateStore(projectMcpStore(projectCwd), () => ({ version: 1 as const, enabledServers: [...new Set(enabledServers)].sort() }));
 }

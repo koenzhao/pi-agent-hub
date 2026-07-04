@@ -1,4 +1,5 @@
 import { unlink } from "node:fs/promises";
+import { isErrno } from "../core/atomic-json.js";
 import { removeMultiRepoWorkspace } from "../core/multi-repo.js";
 import { heartbeatPath, sessionMetadataPath } from "../core/paths.js";
 import { loadRegistry, normalizeGroup, renameGroup as renameRegistryGroup, saveRegistry, updateRegistry } from "../core/registry.js";
@@ -188,7 +189,7 @@ export class SessionsController {
     try {
       name = await readPiSessionName(selected.sessionFile);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "unavailable" };
+      if (isErrno(error, "ENOENT")) return { status: "unavailable" };
       throw error;
     }
     if (!name) return { status: "unnamed" };
@@ -265,13 +266,9 @@ async function expiredArchivedCascadeIds(sessions: ManagedSession[], now: number
 async function removeDashboardState(session: ManagedSession): Promise<void> {
   await removeMultiRepoWorkspace(session);
   await unlink(heartbeatPath(session.id)).catch((error: unknown) => {
-    if (!isNotFound(error)) throw error;
+    if (!isErrno(error, "ENOENT")) throw error;
   });
   await unlink(sessionMetadataPath(session.id)).catch((error: unknown) => {
-    if (!isNotFound(error)) throw error;
+    if (!isErrno(error, "ENOENT")) throw error;
   });
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

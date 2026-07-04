@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { isErrno } from "./atomic-json.js";
 import { worktreePath, worktreesDir } from "./paths.js";
 import type { ManagedSession, ManagedWorktree } from "./types.js";
 
@@ -323,7 +324,7 @@ async function pathExists(path: string): Promise<boolean> {
     await access(path);
     return true;
   } catch (error) {
-    if (isNotFound(error)) return false;
+    if (isErrno(error, "ENOENT")) return false;
     throw error;
   }
 }
@@ -369,8 +370,4 @@ function errorMessage(error: unknown): string {
 function isRootPiStatusLine(line: string): boolean {
   const path = line.slice(3);
   return path === ".pi" || path.startsWith(".pi/");
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

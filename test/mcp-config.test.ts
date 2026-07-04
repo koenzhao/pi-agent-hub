@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { writeJsonAtomic } from "../src/core/atomic-json.js";
+import { projectMcpStatePath } from "../src/core/paths.js";
 import { mcpResultToText, normalizeMcpInputSchema } from "../src/mcp/adapter.js";
-import { setProjectMcpServer, setProjectMcpServers, validateMcpCatalog } from "../src/mcp/config.js";
+import { loadProjectMcpState, setProjectMcpServer, setProjectMcpServers, validateMcpCatalog } from "../src/mcp/config.js";
 import { toPiToolName } from "../src/mcp/tool-names.js";
 
 test("catalog validation accepts stdio and HTTP direct servers", () => {
@@ -35,6 +37,23 @@ test("project bulk enable writes final sorted state once", async () => {
   assert.deepEqual(state.enabledServers, ["a", "z"]);
   const next = await setProjectMcpServers(project, ["docs"]);
   assert.deepEqual(next.enabledServers, ["docs"]);
+});
+
+test("concurrent project toggles preserve both enabled servers", async () => {
+  const project = await mkdtemp(join(tmpdir(), "pi-agent-hub-mcp-"));
+  await Promise.all([
+    setProjectMcpServer(project, "docs", true),
+    setProjectMcpServer(project, "fs", true),
+  ]);
+
+  assert.deepEqual((await loadProjectMcpState(project)).enabledServers, ["docs", "fs"]);
+});
+
+test("project MCP state rejects invalid shape", async () => {
+  const project = await mkdtemp(join(tmpdir(), "pi-agent-hub-mcp-"));
+  await writeJsonAtomic(projectMcpStatePath(project), { version: 2, enabledServers: [] });
+
+  await assert.rejects(() => loadProjectMcpState(project), /Invalid project MCP state/);
 });
 
 test("tool name sanitizer handles collisions", () => {

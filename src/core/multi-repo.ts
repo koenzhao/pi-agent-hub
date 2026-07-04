@@ -1,5 +1,6 @@
 import { mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+import { isErrno } from "./atomic-json.js";
 import { multiRepoWorkspacePath } from "./paths.js";
 import { primaryWorktree } from "./worktree.js";
 import type { ManagedSession } from "./types.js";
@@ -97,7 +98,7 @@ async function canonicalProjectPaths(paths: string[]): Promise<Array<{ path: str
   for (const path of paths) {
     const resolved = resolve(path);
     const info = await stat(resolved).catch((error: unknown) => {
-      if (isNotFound(error)) throw new Error(`Project path does not exist: ${resolved}`);
+      if (isErrno(error, "ENOENT")) throw new Error(`Project path does not exist: ${resolved}`);
       throw error;
     });
     if (!info.isDirectory()) throw new Error(`Project path is not a directory: ${resolved}`);
@@ -134,7 +135,7 @@ async function readProjectContextFile(projectPath: string): Promise<{ path: stri
     try {
       return { path, content: await readFile(path, "utf8") };
     } catch (error) {
-      if (isNotFound(error)) continue;
+      if (isErrno(error, "ENOENT")) continue;
       throw error;
     }
   }
@@ -168,8 +169,4 @@ function assertOwnedWorkspace(sessionId: string, workspaceCwd: string, env: Node
 function stripQuotes(value: string): string {
   if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) return value.slice(1, -1);
   return value;
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

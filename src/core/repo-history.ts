@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { readJsonOr, writeJsonAtomic } from "./atomic-json.js";
+import { loadStore, updateStore, type JsonStore } from "./atomic-json.js";
 import { repoHistoryPath } from "./paths.js";
 
 export interface RepoHistoryEntry {
@@ -16,26 +16,28 @@ export interface RepoHistory {
 
 const MAX_REPO_HISTORY = 50;
 
+function repoHistoryStore(path: string): JsonStore<RepoHistory> {
+  return { path, empty: emptyRepoHistory, parse: normalizeHistory };
+}
+
 export async function loadRepoHistory(path = repoHistoryPath()): Promise<RepoHistory> {
-  const history = await readJsonOr<RepoHistory>(path, emptyRepoHistory());
-  return normalizeHistory(history);
+  return loadStore(repoHistoryStore(path));
 }
 
 export async function recordRepoUsage(cwds: string[], now = Date.now(), path = repoHistoryPath()): Promise<RepoHistory> {
-  const history = await loadRepoHistory(path);
-  const byCwd = new Map(history.repos.map((entry) => [entry.cwd, entry]));
-  for (const cwd of normalizeCwds(cwds)) {
-    const existing = byCwd.get(cwd);
-    byCwd.set(cwd, {
-      cwd,
-      lastUsedAt: now,
-      useCount: (existing?.useCount ?? 0) + 1,
-      ...(existing?.favorite ? { favorite: true } : {}),
-    });
-  }
-  const next = { version: 1 as const, repos: rankEntries([...byCwd.values()]).slice(0, MAX_REPO_HISTORY) };
-  await writeJsonAtomic(path, next);
-  return next;
+  return updateStore(repoHistoryStore(path), (history) => {
+    const byCwd = new Map(history.repos.map((entry) => [entry.cwd, entry]));
+    for (const cwd of normalizeCwds(cwds)) {
+      const existing = byCwd.get(cwd);
+      byCwd.set(cwd, {
+        cwd,
+        lastUsedAt: now,
+        useCount: (existing?.useCount ?? 0) + 1,
+        ...(existing?.favorite ? { favorite: true } : {}),
+      });
+    }
+    return { version: 1 as const, repos: rankEntries([...byCwd.values()]).slice(0, MAX_REPO_HISTORY) };
+  });
 }
 
 export function rankedRepoCwds(entries: RepoHistoryEntry[]): string[] {
