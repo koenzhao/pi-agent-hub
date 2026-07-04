@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { attachSessionCommand, capturePane, cliTuiCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, restoreSwitchReturnBinding, sendTextToSession, sessionPresence, shellQuote, switchClient, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, shellQuote, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -48,6 +48,66 @@ test("attachSessionCommand returns tmux attach argv", () => {
 
 test("shellQuote uses POSIX single quote escaping", () => {
   assert.equal(shellQuote("pkg's path"), "'pkg'\\''s path'");
+});
+
+test("listWindowPanes parses panes for the current window", async () => {
+  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1\n%2 /dev/ttys002 0\n", stderr: "" }));
+
+  assert.deepEqual(await listWindowPanes("%1", exec), [
+    { id: "%1", tty: "/dev/ttys001", active: true },
+    { id: "%2", tty: "/dev/ttys002", active: false },
+  ]);
+  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active}"] }]);
+});
+
+test("splitWindowAttach creates an attached side pane and resizes the sidebar", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await splitWindowAttach({ pane: "%1", target: "pi-agent-hub-api's", sidebarWidth: 42 }, exec);
+
+  assert.deepEqual(exec.calls, [
+    { command: "tmux", args: ["split-window", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'\\''s'"] },
+    { command: "tmux", args: ["resize-pane", "-t", "%1", "-x", "42"] },
+  ]);
+});
+
+test("switchClientTo switches a nested client by tty", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await switchClientTo({ clientTty: "/dev/ttys002", target: "pi-agent-hub-docs" }, exec);
+
+  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["switch-client", "-c", "/dev/ttys002", "-t", "pi-agent-hub-docs"] }]);
+});
+
+test("killPane and selectPane target pane ids directly", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await killPane("%2", exec);
+  await selectPane("%2", exec);
+
+  assert.deepEqual(exec.calls, [
+    { command: "tmux", args: ["kill-pane", "-t", "%2"] },
+    { command: "tmux", args: ["select-pane", "-t", "%2"] },
+  ]);
+});
+
+test("clientSessionsByTty parses session names after the first space", async () => {
+  const exec = fakeTmux(() => ({ stdout: "/dev/ttys001 pi-agent-hub-api\n/dev/ttys002 session with spaces\n", stderr: "" }));
+
+  assert.deepEqual(await clientSessionsByTty(exec), new Map([
+    ["/dev/ttys001", "pi-agent-hub-api"],
+    ["/dev/ttys002", "session with spaces"],
+  ]));
+  assert.deepEqual(exec.calls, [
+    { command: "tmux", args: ["list-clients", "-F", "#{client_tty} #{client_session}"] },
+  ]);
+});
+
+test("clientSessionByTty reads one tty from the client map", async () => {
+  const exec = fakeTmux(() => ({ stdout: "/dev/ttys001 pi-agent-hub-api\n/dev/ttys002 session with spaces\n", stderr: "" }));
+
+  assert.equal(await clientSessionByTty("/dev/ttys002", exec), "session with spaces");
+  assert.equal(await clientSessionByTty("/dev/ttys003", exec), undefined);
 });
 
 test("sessionPresence distinguishes missing sessions from unknown tmux failures", async () => {

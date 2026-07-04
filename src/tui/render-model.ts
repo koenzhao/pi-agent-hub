@@ -116,6 +116,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const showLifecycleFooter = selected && selected.kind !== "subagent" && input.width >= 120;
   const lifecycleFooter = showLifecycleFooter ? selected.section === "active" ? " · A Archive · B Backlog" : " · U Restore" : "";
   const compactLifecycleFooter = selected && selected.kind !== "subagent" ? selected.section === "active" ? " · A · B" : " · U" : "";
+  const sideFooter = input.width >= 120 ? "o Side" : "o";
   return {
     width: input.width,
     empty: input.sessions.length === 0,
@@ -132,7 +133,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     },
     ...(input.height ? { height: input.height } : {}),
     selected,
-    footer: compactFooter ? `Enter · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  v · ?` : `Enter Open · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
+    footer: compactFooter ? `Enter · o · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  v · ?` : `Enter Open · ${sideFooter} · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,

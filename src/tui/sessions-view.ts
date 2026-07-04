@@ -9,7 +9,7 @@ import { buildRenderModel, stageLaneRows } from "./render-model.js";
 import { renderSessions } from "./layout.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
-import { errorMessage, isPromise, type DialogContext, type SessionDialog, type SessionsViewActions } from "./dialog.js";
+import { errorMessage, isPromise, type DialogContext, type OpenSidePaneResult, type SessionDialog, type SessionsViewActions } from "./dialog.js";
 import { handlePromptInput, openFilterPrompt, openRenamePrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
 import { handleFormDialogInput, openForkDialog, openMoveGroupDialog, openRenameGroupDialog, openRenameSessionForm, renderFormDialog } from "./form-dialogs.js";
 import { handleConfirmInput, openDeleteDialog, openFinishDialog, renderConfirmDialog, renderRestartDialog } from "./confirm-dialogs.js";
@@ -91,6 +91,7 @@ export class SessionsView implements Component {
     else if (data === "U") this.restoreSelectedBucket();
     else if (data === "e" || data === "R") this.startRenameSessionDialog();
     else if (data === "G") this.startRenameGroupDialog();
+    else if (data === "o") this.openSelectedSidePane();
     else if (data === "p") this.startSendDialog();
     else if (data === "r") this.restartSelected();
     else if (data === "d") this.startDeleteDialog();
@@ -247,6 +248,51 @@ export class SessionsView implements Component {
 
   private startSendDialog() {
     this.openDialog(openSendPrompt);
+  }
+
+  private openSelectedSidePane() {
+    this.clearPendingRestart();
+    this.clearFlash();
+    this.message = undefined;
+    const selected = this.controller.selected();
+    if (!selected) return;
+    if (selected.status === "stopped" || selected.status === "error") {
+      this.flashMessage("session not running");
+      return;
+    }
+    const openSidePane = this.actions.openSidePane;
+    if (!openSidePane) {
+      this.message = "side pane unavailable";
+      return;
+    }
+    const apply = (result: OpenSidePaneResult) => {
+      this.flashMessage(result.kind === "closed" ? "side closed" : `side: ${selected.title}`);
+    };
+    const applyError = (error: unknown) => {
+      const message = errorMessage(error);
+      if (message.startsWith("side pane needs tmux")) this.flashMessage(message);
+      else this.message = message;
+    };
+    try {
+      const result = openSidePane(selected.id);
+      if (isPromise<OpenSidePaneResult>(result)) {
+        this.busy = true;
+        this.message = "opening side pane...";
+        void result.then((sidePaneResult) => {
+          this.busy = false;
+          apply(sidePaneResult);
+          if (this.message === "opening side pane...") this.message = undefined;
+        }).catch((error: unknown) => {
+          this.busy = false;
+          if (this.message === "opening side pane...") this.message = undefined;
+          applyError(error);
+        });
+        return;
+      }
+      apply(result);
+    } catch (error) {
+      applyError(error);
+    }
   }
 
   private startPicker(mode: "skills" | "mcp") {
@@ -553,7 +599,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     heading("pi agent hub help"),
     "",
     heading("Navigation"),
-    "  ↑↓/j/k move selection     Enter open/switch     / filter",
+    "  ↑↓/j/k move selection     Enter open/switch     o side pane     / filter",
     "  K/J reorder in group      q quit                Esc cancel/clear",
     "  v toggle groups/stages view",
     "",

@@ -12,6 +12,7 @@ import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiv
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
 import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, switchClientWithReturn } from "../core/tmux.js";
+import { closeSidePaneShowing, openInSidePane } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
@@ -131,6 +132,15 @@ export async function runTui(): Promise<void> {
     if (!process.env.TMUX) return;
     void configureDashboardStatusBar({ name: DASHBOARD_SESSION, cwd, theme: nextTheme }).catch(() => {});
   };
+  const applyManagedSessionTheme = async (session: ManagedSession) => {
+    pinDashboardThemeSession(session);
+    const sessionTheme = await loadManagedSessionTheme(session);
+    view.setTheme(sessionTheme);
+    syncDashboardChrome(sessionTheme);
+    tui.invalidate();
+    tui.requestRender();
+    await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: sessionTheme });
+  };
   syncDashboardChrome(theme);
   void syncManagedSessionStatusBars().catch(() => {});
   const terminal = new ProcessTerminal();
@@ -211,20 +221,24 @@ export async function runTui(): Promise<void> {
     },
     async switchInsideTmux(tmuxSession) {
       const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
-      if (session) {
-        pinDashboardThemeSession(session);
-        const sessionTheme = await loadManagedSessionTheme(session);
-        view.setTheme(sessionTheme);
-        syncDashboardChrome(sessionTheme);
-        tui.invalidate();
-        tui.requestRender();
-        await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: sessionTheme });
-      }
+      const ownPane = process.env.TMUX_PANE;
+      if (ownPane) await closeSidePaneShowing({ target: tmuxSession, ownPane });
+      if (session) await applyManagedSessionTheme(session);
       return switchClientWithReturn({
         targetSession: tmuxSession,
         renameKey: "M-r",
         returnSession: { name: DASHBOARD_SESSION, cwd, command: "pi-agent-hub tui", env: dashboardEnv() },
       });
+    },
+    async openSidePane(sessionId) {
+      const session = controller.snapshot().registry.sessions.find((item) => item.id === sessionId);
+      if (!session) throw new Error("session not found");
+      const ownPane = process.env.TMUX_PANE;
+      if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
+      if (session.status === "waiting") await mutateRegistry(() => controller.acknowledgeSession(session.id));
+      const result = await openInSidePane({ target: session.tmuxSession, ownPane });
+      if (result.kind !== "closed") await applyManagedSessionTheme(session);
+      return result;
     },
     restart(sessionId) {
       return mutateRegistry(() => restartManagedSession(sessionId));

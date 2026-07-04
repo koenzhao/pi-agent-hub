@@ -112,9 +112,13 @@ export class SessionsController {
   async acknowledgeSelected(now = Date.now()): Promise<void> {
     const selected = this.selected();
     if (!selected) return;
+    await this.acknowledgeSession(selected.id, now);
+  }
+
+  async acknowledgeSession(id: string, now = Date.now()): Promise<void> {
     this.registry = {
       ...this.registry,
-      sessions: this.registry.sessions.map((session) => session.id === selected.id ? markAcknowledged(session, now) : session),
+      sessions: this.registry.sessions.map((session) => session.id === id ? markAcknowledged(session, now) : session),
     };
     await saveRegistry(this.registry);
   }

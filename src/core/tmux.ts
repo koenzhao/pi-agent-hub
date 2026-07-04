@@ -81,6 +81,54 @@ export function attachSessionCommand(name: string): { command: "tmux"; args: ["a
   return { command: "tmux", args: ["attach-session", "-t", name] };
 }
 
+export interface WindowPane {
+  id: string;
+  tty: string;
+  active: boolean;
+}
+
+export async function listWindowPanes(pane: string, exec: TmuxExec = realTmuxExec): Promise<WindowPane[]> {
+  const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", "#{pane_id} #{pane_tty} #{pane_active}"]);
+  return result.stdout.split(/\r?\n/).flatMap((line) => {
+    if (!line.trim()) return [];
+    const [id, tty, active] = line.split(" ");
+    if (!id || !tty) return [];
+    return [{ id, tty, active: active === "1" }];
+  });
+}
+
+export async function splitWindowAttach(options: { pane: string; target: string; sidebarWidth: number }, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["split-window", "-h", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
+  await exec.exec("tmux", ["resize-pane", "-t", options.pane, "-x", String(options.sidebarWidth)]);
+}
+
+export async function switchClientTo(options: { clientTty: string; target: string }, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["switch-client", "-c", options.clientTty, "-t", options.target]);
+}
+
+export async function killPane(paneId: string, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["kill-pane", "-t", paneId]);
+}
+
+export async function selectPane(paneId: string, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["select-pane", "-t", paneId]);
+}
+
+export async function clientSessionsByTty(exec: TmuxExec = realTmuxExec): Promise<Map<string, string>> {
+  const result = await exec.exec("tmux", ["list-clients", "-F", "#{client_tty} #{client_session}"]);
+  const sessions = new Map<string, string>();
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const separator = line.indexOf(" ");
+    if (separator === -1) continue;
+    sessions.set(line.slice(0, separator), line.slice(separator + 1));
+  }
+  return sessions;
+}
+
+export async function clientSessionByTty(tty: string, exec: TmuxExec = realTmuxExec): Promise<string | undefined> {
+  return (await clientSessionsByTty(exec)).get(tty);
+}
+
 export interface CapturePaneOptions {
   preserveStyles?: boolean;
 }

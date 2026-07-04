@@ -180,3 +180,13 @@
   created_at: '2026-07-03'
   plan_file: agent-work/history/20260703_app-seams-001_app_seams.md
   completed_at: '2026-07-03'
+- epic: split-view
+  description: 'Sidebar workspace: dashboard TUI as a narrow left tree pane with the
+    selected session opened interactively in a content pane beside it; one dashboard
+    key (o) opens/retargets/toggles the content pane, native tmux keys handle focus/hide.'
+  priority: 2
+  id: split-view-001
+  status: done
+  created_at: '2026-07-03'
+  plan_file: agent-work/history/20260704_split-view-001_sidebar_workspace.md
+  completed_at: '2026-07-04'

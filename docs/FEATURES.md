@@ -39,6 +39,7 @@ Ctrl+Q returns to the dashboard
 | --- | --- |
 | `n` | Create a new Pi session |
 | `Enter` | Open or switch to the selected session |
+| `o` | Open, retarget, or close the selected session in the side pane |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
@@ -92,6 +93,20 @@ Running `pi-hub` uses one stable tmux session named `pi-agent-hub`:
 The dashboard runs the current CLI file's `tui` command inside tmux so it does not recursively create dashboards or depend on a stale `pi-hub` on PATH. It also applies its own tmux status bar instead of inheriting global tmux theme chrome.
 
 When the dashboard is running inside tmux, `Enter` switches the current tmux client to the selected managed session and briefly shows the equivalent `tmux switch-client -t <session>` command. Opening a `waiting` session marks it read before attaching, so it can show `idle` after you return; `a` remains the manual mark-read shortcut.
+
+### Sidebar workspace
+
+Press `o` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and the selected session is attached interactively in the right pane.
+
+`o` is a single toggle/retarget key:
+
+- no side pane: split the current tmux window and attach the selected managed session;
+- side pane showing another managed session: switch that nested client to the selected session in place;
+- side pane already showing the selected session: close the side pane.
+
+Native tmux keys handle the layout after that: `prefix+←/→` moves focus, `prefix+z` zooms the content pane to hide/show the sidebar, and `prefix+x` closes the content pane. `Enter` and `Ctrl+Q` keep their full-screen switch/return behavior unchanged; if `Enter` opens the same session currently shown in the side pane, Hub closes that pane first to avoid tmux size flapping.
+
+The side pane is stateless and self-healing. Hub inspects the current window live and only owns panes whose tty maps to a nested client attached to a `pi-agent-hub-*` managed session. User-created shell/editor panes are never killed or retargeted. If the shown session exits, tmux normally closes the nested pane automatically.
 
 If the dashboard tmux session is missing, the temporary return binding recreates it before switching back.
 

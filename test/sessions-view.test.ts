@@ -92,6 +92,7 @@ test("help overlay opens and closes", () => {
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
   assert.match(help, /zero counts are hidden/);
+  assert.match(help, /o side pane/);
   assert.match(help, /v toggle groups\/stages view/);
   assert.match(help, /Stages view lanes active sessions by workflow step/);
   view.handleInput("\u001b");
@@ -288,6 +289,105 @@ test("stages view snaps selection to a visible lane row", () => {
 
   view.handleInput("v");
   assert.equal(controller.snapshot().selectedId, "a");
+});
+
+test("o opens the selected live session in a side pane", async () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: async (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+
+  view.handleInput("o");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(opened, ["api"]);
+  assert.match(stripAnsi(view.render(100).join("\n")), /side: api/);
+});
+
+test("o flashes side pane result variants", async () => {
+  const results = [{ kind: "retargeted" as const }, { kind: "closed" as const }];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: () => results.shift() ?? { kind: "opened" },
+  });
+
+  view.handleInput("o");
+  assert.match(stripAnsi(view.render(100).join("\n")), /side: api/);
+  view.handleInput("o");
+  assert.match(stripAnsi(view.render(100).join("\n")), /side closed/);
+});
+
+test("o blocks stopped and error sessions", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [
+    { ...session("stopped", "stopped"), status: "stopped" },
+    { ...session("error", "error"), status: "error" },
+  ] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+
+  view.handleInput("o");
+  controller.move(1);
+  view.handleInput("o");
+
+  assert.deepEqual(opened, []);
+  assert.match(stripAnsi(view.render(100).join("\n")), /session not running/);
+});
+
+test("o allows live subagent rows", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [
+    session("parent", "parent"),
+    { ...session("child", "child"), kind: "subagent" as const, parentId: "parent", agentName: "scout" },
+  ] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+
+  controller.move(1);
+  view.handleInput("o");
+
+  assert.deepEqual(opened, ["child"]);
+});
+
+test("o flashes tmux guidance from the action", async () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: async () => { throw new Error("side pane needs tmux — run pi-hub"); },
+  });
+
+  view.handleInput("o");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(stripAnsi(view.render(100).join("\n")), /side pane needs tmux — run pi-hub/);
+});
+
+test("o is swallowed while a dialog is open", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+
+  view.handleInput("?");
+  view.handleInput("o");
+
+  assert.deepEqual(opened, []);
+  assert.match(stripAnsi(view.render(100).join("\n")), /pi agent hub help/);
 });
 
 test("enter triggers attach action outside tmux", () => {
