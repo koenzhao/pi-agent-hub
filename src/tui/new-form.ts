@@ -1,24 +1,7 @@
 import { randomInt } from "node:crypto";
 import { basename } from "node:path";
-import { charLength } from "./text-input.js";
-import {
-  appendChar as appendFieldChar,
-  backspace as backspaceField,
-  backspaceFieldWord,
-  createForm,
-  deleteFieldWord,
-  deleteForward as deleteFieldForward,
-  moveFieldCursor,
-  moveFieldCursorEnd,
-  moveFieldCursorHome,
-  moveFieldCursorWordLeft,
-  moveFieldCursorWordRight,
-  moveFocus as moveFormFocus,
-  setFocus as setFormFocus,
-  setValue,
-  type FormField,
-  type FormState,
-} from "./form.js";
+import { charLength, editKey } from "./text-input.js";
+import { createForm, editField, moveFocus as moveFormFocus, setFocus as setFormFocus, setValue, type FormField, type FormState } from "./form.js";
 
 export type RepoFieldKey = `repo:${number}`;
 export type FieldKey = RepoFieldKey | "branch" | "group" | "title";
@@ -53,44 +36,12 @@ export function setFocus(state: NewFormState, key: FieldKey): NewFormState {
   return { ...state, focus: setFormFocus(state, key).focus };
 }
 
-export function appendChar(state: NewFormState, char: string): NewFormState {
-  return afterFocusedEdit(state, appendFieldChar(state, char) as NewFormState);
-}
-
-export function backspace(state: NewFormState): NewFormState {
-  return afterFocusedEdit(state, backspaceField(state) as NewFormState);
-}
-
-export function deleteForward(state: NewFormState): NewFormState {
-  return afterFocusedEdit(state, deleteFieldForward(state) as NewFormState);
-}
-
-export function moveCursor(state: NewFormState, delta: number): NewFormState {
-  return moveFieldCursor(state, delta) as NewFormState;
-}
-
-export function moveCursorHome(state: NewFormState): NewFormState {
-  return moveFieldCursorHome(state) as NewFormState;
-}
-
-export function moveCursorEnd(state: NewFormState): NewFormState {
-  return moveFieldCursorEnd(state) as NewFormState;
-}
-
-export function moveCursorWordLeft(state: NewFormState): NewFormState {
-  return moveFieldCursorWordLeft(state) as NewFormState;
-}
-
-export function moveCursorWordRight(state: NewFormState): NewFormState {
-  return moveFieldCursorWordRight(state) as NewFormState;
-}
-
-export function backspaceWord(state: NewFormState): NewFormState {
-  return afterFocusedEdit(state, backspaceFieldWord(state) as NewFormState);
-}
-
-export function deleteWord(state: NewFormState): NewFormState {
-  return afterFocusedEdit(state, deleteFieldWord(state) as NewFormState);
+export function editNewForm(state: NewFormState, data: string): NewFormState | undefined {
+  const key = editKey(data);
+  if (!key) return undefined;
+  const edited = editField(state, data) as NewFormState | undefined;
+  if (!edited) return undefined;
+  return key.kind === "edit" ? afterFocusedEdit(state, edited) : edited;
 }
 
 export function createNewForm(ctx: NewFormContext): NewFormState {

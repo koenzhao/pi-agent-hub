@@ -1,0 +1,137 @@
+import { Key, matchesKey } from "@earendil-works/pi-tui";
+import type { DialogContext } from "./dialog.js";
+import { editTextInput } from "./text-input.js";
+import { renderForm } from "./layout.js";
+import { createRepoPicker, moveRepoPickerSelection, renderRepoPicker, selectedRepoCwd, type RepoPickerState } from "./repo-picker.js";
+import {
+  addRepo,
+  createNewForm,
+  cycleCwdSuggestion,
+  editNewForm,
+  isRepoKey,
+  moveFocus,
+  removeFocusedRepo,
+  setRepoValue,
+  submission,
+  toggleWorktree,
+  validateNewForm,
+  type NewFormState,
+  type RepoFieldKey,
+} from "./new-form.js";
+
+export interface NewSessionDialog {
+  kind: "new";
+  form: NewFormState;
+}
+
+export interface RepoPickerDialog {
+  kind: "repoPicker";
+  form: NewFormState;
+  picker: RepoPickerState;
+  target: RepoFieldKey;
+}
+
+export function openNewSessionDialog(ctx: DialogContext): NewSessionDialog {
+  const formCtx = ctx.actions.newFormContext?.() ?? { cwd: process.cwd() };
+  return { kind: "new", form: createNewForm(formCtx) };
+}
+
+export function handleNewSessionInput(dialog: NewSessionDialog | RepoPickerDialog, data: string, ctx: DialogContext): NewSessionDialog | RepoPickerDialog | undefined {
+  return dialog.kind === "new" ? handleNewFormInput(dialog, data, ctx) : handleRepoPickerInput(dialog, data);
+}
+
+export function renderNewSessionDialog(dialog: NewSessionDialog | RepoPickerDialog, width: number, ctx: DialogContext): string[] {
+  if (dialog.kind === "repoPicker") return renderRepoPicker(dialog.picker, width, ctx.theme);
+  return renderForm({
+    title: "New session",
+    fields: newFormFields(dialog.form),
+    focus: dialog.form.focus,
+    footer: newFormFooter(dialog.form),
+    narrowFooter: "tab · alt-a · enter · esc",
+  }, width, ctx.theme);
+}
+
+function handleNewFormInput(dialog: NewSessionDialog, data: string, ctx: DialogContext): NewSessionDialog | RepoPickerDialog | undefined {
+  const form = dialog.form;
+  if (matchesKey(data, Key.escape)) {
+    ctx.setMessage(undefined);
+    return undefined;
+  }
+  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+    const result = validateNewForm(form);
+    if (!result.ok) return { ...dialog, form: result.state };
+    ctx.runAction(() => ctx.actions.createSession?.(submission(result.state)), "creating session...");
+    return undefined;
+  }
+  if (matchesKey(data, Key.ctrl("t"))) {
+    ctx.setMessage(undefined);
+    return { ...dialog, form: toggleWorktree(form) };
+  }
+  if (matchesKey(data, Key.alt("a"))) return { ...dialog, form: addRepo(form) };
+  if (matchesKey(data, Key.alt("x"))) return { ...dialog, form: removeFocusedRepo(form) };
+  if (matchesKey(data, Key.ctrl("o"))) return startRepoPicker(dialog);
+  if (matchesKey(data, Key.tab) || matchesKey(data, Key.down)) return { ...dialog, form: moveFocus(form, 1) };
+  if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.up)) return { ...dialog, form: moveFocus(form, -1) };
+  if (matchesKey(data, Key.ctrl("n"))) return { ...dialog, form: cycleCwdSuggestion(form, 1) };
+  if (matchesKey(data, Key.ctrl("p"))) return { ...dialog, form: cycleCwdSuggestion(form, -1) };
+  const edited = editNewForm(form, data);
+  return edited ? { ...dialog, form: edited } : dialog;
+}
+
+function startRepoPicker(dialog: NewSessionDialog): NewSessionDialog | RepoPickerDialog {
+  if (!isRepoKey(dialog.form.focus)) return dialog;
+  const choices = dialog.form.fields[dialog.form.focus].suggestions ?? [];
+  if (!choices.length) return dialog;
+  return { kind: "repoPicker", form: dialog.form, picker: createRepoPicker(choices), target: dialog.form.focus };
+}
+
+function handleRepoPickerInput(dialog: RepoPickerDialog, data: string): NewSessionDialog | RepoPickerDialog {
+  if (matchesKey(data, Key.escape)) return { kind: "new", form: dialog.form };
+  if (matchesKey(data, Key.down)) return { ...dialog, picker: moveRepoPickerSelection(dialog.picker, 1) };
+  if (matchesKey(data, Key.up)) return { ...dialog, picker: moveRepoPickerSelection(dialog.picker, -1) };
+  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") return applyRepoPickerSelection(dialog);
+  const edited = editTextInput(data, dialog.picker.filter);
+  return edited ? { ...dialog, picker: { ...dialog.picker, filter: edited, selected: 0 } } : dialog;
+}
+
+function applyRepoPickerSelection(dialog: RepoPickerDialog): NewSessionDialog | RepoPickerDialog {
+  const cwd = selectedRepoCwd(dialog.picker);
+  if (!cwd) return dialog;
+  return { kind: "new", form: setRepoValue(dialog.form, dialog.target, cwd) };
+}
+
+function newFormFields(state: NewFormState) {
+  const fields = [];
+  for (const key of state.order) {
+    if (key === "branch") fields.push(worktreeStatusField(state));
+    if (key === "group" && !state.worktreeEnabled) fields.push(worktreeStatusField(state));
+    fields.push(state.fields[key]);
+  }
+  return fields;
+}
+
+function worktreeStatusField(state: NewFormState) {
+  return {
+    key: "worktree",
+    label: "worktree",
+    value: state.worktreeEnabled ? worktreeStatusValue(state) : "off",
+    readonly: true,
+  };
+}
+
+function worktreeStatusValue(state: NewFormState): string {
+  const repos = state.order.filter((key) => key.startsWith("repo:") && state.fields[key]?.value.trim()).length;
+  return repos > 1 ? `on · ${repos} repos` : "on";
+}
+
+function newFormFooter(state: NewFormState): string {
+  const focus = state.fields[state.focus];
+  const parts = ["tab/↑↓ move"];
+  if (state.focus.startsWith("repo:")) {
+    if ((focus.suggestions?.length ?? 0) > 0) parts.push("ctrl-o choose repo");
+    parts.push("alt-a add repo");
+    if (state.focus !== "repo:0") parts.push("alt-x remove");
+  }
+  parts.push("ctrl-t worktree", "enter create", "esc cancel");
+  return parts.join(" · ");
+}

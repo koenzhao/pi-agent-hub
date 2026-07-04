@@ -1,4 +1,4 @@
-import { backspaceText, backspaceWord, charLength, createTextInput, deleteText, deleteWord, insertText, moveCursor, moveCursorEnd, moveCursorHome, moveCursorWordLeft, moveCursorWordRight } from "./text-input.js";
+import { charLength, createTextInput, editKey } from "./text-input.js";
 
 export interface FormField<K extends string = string> {
   key: K;
@@ -41,44 +41,10 @@ export function setFocus<K extends string, F extends FormField<K>>(state: FormSt
   return { ...state, focus: key };
 }
 
-export function appendChar<K extends string, F extends FormField<K>>(state: FormState<K, F>, char: string): FormState<K, F> {
-  return applyTextInput(state, insertText(fieldInput(state.fields[state.focus]), char));
-}
-
-export function backspace<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, backspaceText(fieldInput(state.fields[state.focus])));
-}
-
-export function deleteForward<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, deleteText(fieldInput(state.fields[state.focus])));
-}
-
-export function moveFieldCursor<K extends string, F extends FormField<K>>(state: FormState<K, F>, delta: number): FormState<K, F> {
-  return applyTextInput(state, moveCursor(fieldInput(state.fields[state.focus]), delta), true);
-}
-
-export function moveFieldCursorHome<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, moveCursorHome(fieldInput(state.fields[state.focus])), true);
-}
-
-export function moveFieldCursorEnd<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, moveCursorEnd(fieldInput(state.fields[state.focus])), true);
-}
-
-export function moveFieldCursorWordLeft<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, moveCursorWordLeft(fieldInput(state.fields[state.focus])), true);
-}
-
-export function moveFieldCursorWordRight<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, moveCursorWordRight(fieldInput(state.fields[state.focus])), true);
-}
-
-export function backspaceFieldWord<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, backspaceWord(fieldInput(state.fields[state.focus])));
-}
-
-export function deleteFieldWord<K extends string, F extends FormField<K>>(state: FormState<K, F>): FormState<K, F> {
-  return applyTextInput(state, deleteWord(fieldInput(state.fields[state.focus])));
+export function editField<K extends string, F extends FormField<K>>(state: FormState<K, F>, data: string): FormState<K, F> | undefined {
+  const key = editKey(data);
+  if (!key) return undefined;
+  return applyTextInput(state, key.apply(fieldInput(state.fields[state.focus])), key.kind === "move");
 }
 
 export function validateRequired<K extends string, F extends FormField<K>>(state: FormState<K, F>, keys: K[] = state.order): RequiredValidationResult<K, F> {

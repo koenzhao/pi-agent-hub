@@ -1,6 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { backspaceText, backspaceWord, createTextInput, deleteText, deleteWord, insertText, moveCursor, moveCursorEnd, moveCursorHome, moveCursorWordLeft, moveCursorWordRight } from "../src/tui/text-input.js";
+import { backspaceText, backspaceWord, createTextInput, deleteText, deleteWord, editKey, editTextInput, insertText, moveCursor, moveCursorEnd, moveCursorHome, moveCursorWordLeft, moveCursorWordRight } from "../src/tui/text-input.js";
+
+const LEFT = "\u001b[D";
+const RIGHT = "\u001b[C";
+const HOME = "\u001b[H";
+const END = "\u001b[F";
+const CTRL_A = "\u0001";
+const CTRL_E = "\u0005";
+const CTRL_LEFT = "\u001b[1;5D";
+const ALT_LEFT = "\u001b[1;3D";
+const CTRL_RIGHT = "\u001b[1;5C";
+const ALT_RIGHT = "\u001b[1;3C";
+const BACKSPACE = "\u007f";
+const DELETE = "\u001b[3~";
+const CTRL_BACKSPACE = "\u001b[127;5u";
+const ALT_BACKSPACE = "\u001b[127;3u";
+const CTRL_W = "\u0017";
+const CTRL_DELETE = "\u001b[3;5~";
+const ALT_DELETE = "\u001b[3;3~";
+const ALT_D = "\u001bd";
 
 test("text input inserts and deletes at cursor", () => {
   const start = createTextInput("api", 1);
@@ -24,4 +43,40 @@ test("text input moves and deletes by word", () => {
   assert.deepEqual(moveCursorWordRight(createTextInput("alpha beta gamma", 6)), { value: "alpha beta gamma", cursor: 11 });
   assert.deepEqual(backspaceWord(createTextInput("alpha beta gamma", 11)), { value: "alpha gamma", cursor: 6 });
   assert.deepEqual(deleteWord(createTextInput("alpha beta gamma", 6)), { value: "alpha gamma", cursor: 6 });
+});
+
+test("editKey classifies navigation separately from edits", () => {
+  assert.equal(editKey(LEFT)?.kind, "move");
+  assert.equal(editKey(RIGHT)?.kind, "move");
+  assert.equal(editKey(HOME)?.kind, "move");
+  assert.equal(editKey(CTRL_A)?.kind, "move");
+  assert.equal(editKey(END)?.kind, "move");
+  assert.equal(editKey(CTRL_E)?.kind, "move");
+  assert.equal(editKey(CTRL_LEFT)?.kind, "move");
+  assert.equal(editKey(ALT_LEFT)?.kind, "move");
+  assert.equal(editKey(CTRL_RIGHT)?.kind, "move");
+  assert.equal(editKey(ALT_RIGHT)?.kind, "move");
+
+  assert.equal(editKey(BACKSPACE)?.kind, "edit");
+  assert.equal(editKey(DELETE)?.kind, "edit");
+  assert.equal(editKey(CTRL_BACKSPACE)?.kind, "edit");
+  assert.equal(editKey(ALT_BACKSPACE)?.kind, "edit");
+  assert.equal(editKey(CTRL_W)?.kind, "edit");
+  assert.equal(editKey(CTRL_DELETE)?.kind, "edit");
+  assert.equal(editKey(ALT_DELETE)?.kind, "edit");
+  assert.equal(editKey(ALT_D)?.kind, "edit");
+  assert.equal(editKey("x")?.kind, "edit");
+
+  assert.equal(editKey("\t"), undefined);
+  assert.equal(editKey("\u0002"), undefined);
+});
+
+test("editTextInput applies classified editing keys", () => {
+  let input = createTextInput("alpha beta", 5);
+  input = editTextInput("-", input)!;
+  assert.deepEqual(input, { value: "alpha- beta", cursor: 6 });
+  assert.deepEqual(editTextInput(CTRL_LEFT, input), { value: "alpha- beta", cursor: 0 });
+  assert.deepEqual(editTextInput(ALT_RIGHT, createTextInput("alpha beta", 0)), { value: "alpha beta", cursor: 6 });
+  assert.deepEqual(editTextInput(CTRL_W, createTextInput("alpha beta", 10)), { value: "alpha ", cursor: 6 });
+  assert.deepEqual(editTextInput(ALT_D, createTextInput("alpha beta", 0)), { value: "beta", cursor: 0 });
 });

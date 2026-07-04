@@ -1,0 +1,166 @@
+import { Key, matchesKey } from "@earendil-works/pi-tui";
+import { createTextInput, editTextInput, type TextInputState } from "./text-input.js";
+import { styleToken, type SessionsTheme } from "./theme.js";
+import type { DialogContext } from "./dialog.js";
+
+export interface PromptDialog {
+  kind: "prompt";
+  purpose: "filter" | "rename" | "send";
+  draft: TextInputState;
+  error?: string;
+  targetId?: string;
+}
+
+export function openFilterPrompt(ctx: DialogContext): PromptDialog | undefined {
+  if (ctx.controller.snapshot().registry.sessions.length === 0) return undefined;
+  const draft = createTextInput(ctx.controller.snapshot().filter ?? "");
+  ctx.controller.setFilter(draft.value);
+  return { kind: "prompt", purpose: "filter", draft };
+}
+
+export function openRenamePrompt(ctx: DialogContext): PromptDialog | undefined {
+  const selected = ctx.controller.selected();
+  if (!selected) return undefined;
+  if (selected.kind === "subagent") {
+    ctx.setMessage("subagent rows cannot be renamed");
+    return undefined;
+  }
+  return { kind: "prompt", purpose: "rename", draft: createTextInput(selected.title) };
+}
+
+export function openSendPrompt(ctx: DialogContext): PromptDialog | undefined {
+  const selected = ctx.controller.selected();
+  if (!selected) return undefined;
+  if (selected.kind === "subagent") {
+    ctx.setMessage("subagent rows cannot receive input");
+    return undefined;
+  }
+  if (selected.status === "stopped" || selected.status === "error") {
+    ctx.setMessage("session is not live; press r to restart");
+    return undefined;
+  }
+  if (!ctx.actions.sendMessage) {
+    ctx.setMessage("send unavailable");
+    return undefined;
+  }
+  return { kind: "prompt", purpose: "send", targetId: selected.id, draft: createTextInput() };
+}
+
+export function handlePromptInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
+  switch (dialog.purpose) {
+    case "filter": return handleFilterInput(dialog, data, ctx);
+    case "rename": return handleRenameInput(dialog, data, ctx);
+    case "send": return handleSendInput(dialog, data, ctx);
+  }
+}
+
+export function promptFilterValue(dialog: PromptDialog | undefined): string | undefined {
+  return dialog?.purpose === "filter" ? dialog.draft.value : undefined;
+}
+
+export function promptFooter(dialog: PromptDialog, ctx: DialogContext): string {
+  const now = ctx.now();
+  switch (dialog.purpose) {
+    case "filter": return filterFooter(dialog.draft, now, ctx.theme);
+    case "rename": return renameFooter(dialog.draft, renameTargetTitle(ctx), dialog.error, now, ctx.theme);
+    case "send": return sendFooter(dialog.draft, sendTargetTitle(dialog, ctx), dialog.error, now, ctx.theme);
+  }
+}
+
+function handleFilterInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
+  if (matchesKey(data, Key.escape)) {
+    ctx.controller.setFilter(undefined);
+    return undefined;
+  }
+  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+    ctx.controller.setFilter(dialog.draft.value);
+    return undefined;
+  }
+  const edited = editTextInput(data, dialog.draft);
+  if (!edited) return dialog;
+  ctx.controller.setFilter(edited.value);
+  return { ...dialog, draft: edited };
+}
+
+function handleRenameInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
+  if (matchesKey(data, Key.escape)) {
+    ctx.setMessage(undefined);
+    return undefined;
+  }
+  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+    const selected = ctx.controller.selected();
+    if (!selected) return undefined;
+    const title = dialog.draft.value.trim();
+    if (!title) return { ...dialog, error: "title is required" };
+    ctx.runAction(
+      () => ctx.actions.renameSession ? ctx.actions.renameSession(selected.id, title) : ctx.controller.renameSession(selected.id, title),
+      "renaming session...",
+    );
+    return undefined;
+  }
+  const edited = editTextInput(data, dialog.draft);
+  if (!edited) return dialog;
+  ctx.setMessage(undefined);
+  return { ...dialog, draft: edited, error: undefined };
+}
+
+function handleSendInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
+  if (matchesKey(data, Key.escape)) {
+    ctx.setMessage(undefined);
+    return undefined;
+  }
+  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+    const target = ctx.controller.snapshot().registry.sessions.find((session) => session.id === dialog.targetId);
+    if (!target) return undefined;
+    const message = dialog.draft.value.trim();
+    if (!message) return { ...dialog, error: "message is required" };
+    ctx.runAction(
+      () => ctx.actions.sendMessage?.(target.tmuxSession, message),
+      "sending message...",
+      () => { ctx.flashMessage(`sent → ${target.title}`); },
+    );
+    return undefined;
+  }
+  const edited = editTextInput(data, dialog.draft);
+  if (!edited) return dialog;
+  ctx.setMessage(undefined);
+  return { ...dialog, draft: edited, error: undefined };
+}
+
+function renameTargetTitle(ctx: DialogContext): string {
+  return ctx.controller.selected()?.title ?? "session";
+}
+
+function sendTargetTitle(dialog: PromptDialog, ctx: DialogContext): string {
+  return ctx.controller.snapshot().registry.sessions.find((session) => session.id === dialog.targetId)?.title ?? "session";
+}
+
+function filterFooter(input: TextInputState, now: number, theme?: SessionsTheme): string {
+  const text = `filter: ${renderInlineInput(input, footerCursor(now))}  • ←→ edit • esc clear • enter done`;
+  return theme ? styleToken(theme, "dim", text) : text;
+}
+
+function renameFooter(input: TextInputState, target: string, error: string | undefined, now: number, theme?: SessionsTheme): string {
+  const text = error
+    ? `rename ${target}: ${renderInlineInput(input, footerCursor(now))}  • ${error}`
+    : `rename ${target}: ${renderInlineInput(input, footerCursor(now))}  • ←→ edit • esc cancel • enter rename`;
+  return theme ? styleToken(theme, error ? "error" : "dim", text) : text;
+}
+
+function sendFooter(input: TextInputState, target: string, error: string | undefined, now: number, theme?: SessionsTheme): string {
+  const text = error
+    ? `send to ${target}: ${renderInlineInput(input, footerCursor(now))}  • ${error}`
+    : `send to ${target}: ${renderInlineInput(input, footerCursor(now))}  • ←→ edit • esc cancel • enter send`;
+  return theme ? styleToken(theme, error ? "error" : "dim", text) : text;
+}
+
+function footerCursor(now: number): string {
+  const marker = Math.floor(now / 1_000) % 2 === 0 ? "█" : "▌";
+  return `\u001b[5m${marker}\u001b[25m`;
+}
+
+function renderInlineInput(input: TextInputState, marker = "█"): string {
+  const chars = [...input.value];
+  const cursor = Math.max(0, Math.min(input.cursor, chars.length));
+  return `${chars.slice(0, cursor).join("")}${marker}${chars.slice(cursor).join("")}`;
+}

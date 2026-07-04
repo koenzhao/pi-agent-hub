@@ -93,3 +93,54 @@
   epic: session-prelude
   discovered_from: dashboard-scanability-001
   plan_file: docs/history/20260514_session-prelude-001_session_prelude.md
+- epic: tui-dialogs
+  status: done
+  title: Collapse sessions-view dialog machine into dialog modules
+  description: 'Maintainer can navigate and modify dashboard dialogs through small
+    per-family tui modules: sessions-view.ts 15-way mode union and ~20 nullable dialog
+    fields become one discriminated dialog union routed to extracted flat tui/ modules,
+    with one shared edit-key classifier replacing the three duplicated edit* reducers.
+    Functional parity; existing sessions-view test suite stays green.'
+  steps:
+  - Introduce single dialog discriminated union replacing mode string + per-mode nullable
+    fields
+  - Extract dialog families into flat tui/ modules (prompts, form dialogs, confirms,
+    pickers, new-session)
+  - One edit-key classifier in text-input.ts; delete editTextInput/editFormState/editNewFormState
+    triplication in sessions-view.ts
+  - 'Final phase: prune per-op edit exports from form.ts/new-form.ts down to single
+    editField/editNewForm entry points'
+  priority: 2
+  depends_on: []
+  discovered_from: null
+  plan_file: agent-work/history/20260703_tui-dialogs-001_dialog_modules.md
+  references: []
+  created_at: '2026-07-03'
+  id: tui-dialogs-001
+  completed_at: '2026-07-03'
+- epic: tui-dialogs
+  status: pending
+  title: Regroup SessionsViewActions per dialog family
+  description: 'Maintainer gets compile-time linkage between each dialog and the capabilities
+    it needs: the flat 37-method all-optional SessionsViewActions bag in src/tui/sessions-view.ts
+    becomes per-dialog-family groups (e.g. actions.attach, actions.restart, actions.delete/worktree,
+    actions.skills, actions.mcp, actions.send, actions.shortcuts, actions.env for
+    now/terminalRows/copy), so a dialog module declares the group it consumes instead
+    of reaching into the whole bag.'
+  steps:
+  - Group the SessionsViewActions interface by dialog family; keep each group optional
+    but its members non-optional where the dialog requires them
+  - Update the actions object construction in src/app/run-tui.ts (~lines 184-337)
+    to the grouped shape
+  - Update actions fixtures across test/sessions-view.test.ts and any other tests
+    building SessionsViewActions
+  - Depends on tui-dialogs-001 landing first so groups map 1:1 onto the extracted
+    dialog modules
+  priority: 3
+  depends_on:
+  - tui-dialogs-001
+  discovered_from: tui-dialogs-001
+  plan_file: null
+  references: []
+  created_at: '2026-07-03'
+  id: tui-dialogs-002

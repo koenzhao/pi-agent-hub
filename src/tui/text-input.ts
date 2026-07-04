@@ -1,3 +1,5 @@
+import { Key, matchesKey } from "@earendil-works/pi-tui";
+
 export interface TextInputState {
   value: string;
   cursor: number;
@@ -85,6 +87,30 @@ export function deleteWord(state: TextInputState): TextInputState {
   return { value: chars.join(""), cursor: input.cursor };
 }
 
+export interface EditKey {
+  kind: "move" | "edit";
+  apply(state: TextInputState): TextInputState;
+}
+
+export function editKey(data: string): EditKey | undefined {
+  if (matchesKey(data, Key.left)) return { kind: "move", apply: (state) => moveCursor(state, -1) };
+  if (matchesKey(data, Key.right)) return { kind: "move", apply: (state) => moveCursor(state, 1) };
+  if (matchesKey(data, Key.home) || matchesKey(data, Key.ctrl("a"))) return { kind: "move", apply: moveCursorHome };
+  if (matchesKey(data, Key.end) || matchesKey(data, Key.ctrl("e"))) return { kind: "move", apply: moveCursorEnd };
+  if (wordLeft(data)) return { kind: "move", apply: moveCursorWordLeft };
+  if (wordRight(data)) return { kind: "move", apply: moveCursorWordRight };
+  if (matchesKey(data, Key.backspace)) return { kind: "edit", apply: backspaceText };
+  if (matchesKey(data, Key.delete)) return { kind: "edit", apply: deleteText };
+  if (wordBackspace(data)) return { kind: "edit", apply: backspaceWord };
+  if (wordDelete(data)) return { kind: "edit", apply: deleteWord };
+  if (isPrintable(data)) return { kind: "edit", apply: (state) => insertText(state, data) };
+  return undefined;
+}
+
+export function editTextInput(data: string, state: TextInputState): TextInputState | undefined {
+  return editKey(data)?.apply(state);
+}
+
 export function charLength(value: string): number {
   return charsOf(value).length;
 }
@@ -95,4 +121,24 @@ function charsOf(value: string): string[] {
 
 function isWordSpace(char: string): boolean {
   return /\s/.test(char);
+}
+
+function wordLeft(data: string): boolean {
+  return matchesKey(data, Key.ctrl("left")) || matchesKey(data, Key.alt("left"));
+}
+
+function wordRight(data: string): boolean {
+  return matchesKey(data, Key.ctrl("right")) || matchesKey(data, Key.alt("right"));
+}
+
+function wordBackspace(data: string): boolean {
+  return matchesKey(data, Key.ctrl("backspace")) || matchesKey(data, Key.alt("backspace")) || matchesKey(data, Key.ctrl("w"));
+}
+
+function wordDelete(data: string): boolean {
+  return matchesKey(data, Key.ctrl("delete")) || matchesKey(data, Key.alt("delete")) || matchesKey(data, Key.alt("d"));
+}
+
+function isPrintable(data: string): boolean {
+  return [...data].length === 1 && data >= " " && data !== "\u007f";
 }
