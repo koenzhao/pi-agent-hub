@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { agentDir } from "../core/paths.js";
 import type { ActiveThemeSnapshot } from "../core/types.js";
 
-export type ThemeToken = "accent" | "success" | "warning" | "error" | "muted" | "dim" | "text" | "border" | "statusLineBg";
+export type ThemeToken = "accent" | "success" | "warning" | "error" | "muted" | "dim" | "text" | "border" | "statusLineBg" | "selectedBg";
 
 export type SessionsTheme = Record<ThemeToken, string | number>;
 
@@ -21,6 +21,7 @@ export const darkTheme: SessionsTheme = {
   text: "",
   border: 240,
   statusLineBg: "#1a1b26",
+  selectedBg: "#292e42",
 };
 
 export const lightTheme: SessionsTheme = {
@@ -33,6 +34,7 @@ export const lightTheme: SessionsTheme = {
   text: "",
   border: "#547da7",
   statusLineBg: "#dce0e8",
+  selectedBg: "#c8d0dc",
 };
 
 interface PiSettings {
@@ -94,6 +96,13 @@ export function styleToken(theme: SessionsTheme, token: ThemeToken, text: string
   return `${ansi(value)}${text}${RESET}`;
 }
 
+export function styleBgToken(theme: SessionsTheme, token: ThemeToken, text: string): string {
+  const value = theme[token];
+  if (value === "" || text === "") return text;
+  const bg = ansi(value, 48);
+  return `${bg}${text.split(RESET).join(`${RESET}${bg}`)}${RESET}`;
+}
+
 export function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
@@ -146,6 +155,7 @@ export function themeFromPiTheme(theme: PiThemeFile): SessionsTheme {
     text: resolveToken("text"),
     border: resolveToken("border"),
     statusLineBg: resolveOptionalToken("statusLineBg"),
+    selectedBg: resolveToken("selectedBg"),
   };
 }
 
@@ -330,15 +340,15 @@ function hasGlob(input: string): boolean {
   return /[*?[\]{}]/.test(input);
 }
 
-function ansi(value: string | number): string {
-  if (typeof value === "number") return `\u001b[38;5;${value}m`;
+function ansi(value: string | number, layer: 38 | 48 = 38): string {
+  if (typeof value === "number") return `\u001b[${layer};5;${value}m`;
   const match = /^#?([0-9a-f]{6})$/i.exec(value);
   if (!match) return "";
   const hex = match[1] ?? "";
   const r = Number.parseInt(hex.slice(0, 2), 16);
   const g = Number.parseInt(hex.slice(2, 4), 16);
   const b = Number.parseInt(hex.slice(4, 6), 16);
-  return `\u001b[38;2;${r};${g};${b}m`;
+  return `\u001b[${layer};2;${r};${g};${b}m`;
 }
 
 function isNotFound(error: unknown): boolean {

@@ -92,6 +92,8 @@ test("help overlay opens and closes", () => {
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
   assert.match(help, /zero counts are hidden/);
+  assert.match(help, /v toggle groups\/stages view/);
+  assert.match(help, /Stages view lanes active sessions by workflow step/);
   view.handleInput("\u001b");
   assert.doesNotMatch(view.render(80).join("\n"), /pi agent hub help/);
 });
@@ -214,6 +216,78 @@ test("reorder is disabled while filter is active", () => {
 
   assert.deepEqual(deltas, []);
   assert.match(view.render(100).join("\n"), /clear filter to reorder/);
+});
+
+const VIEW_WORKFLOW = {
+  steps: [
+    { id: "next-feature", short: "NX" },
+    { id: "prime", short: "PR" },
+    { id: "plan-md", short: "PL" },
+    { id: "execute", short: "EX" },
+    { id: "review", short: "RV" },
+    { id: "reflect", short: "RF" },
+    { id: "commit", short: "CM" },
+  ],
+  updatedAt: 1,
+};
+
+test("v toggles stage-lane view and navigation follows lane order", () => {
+  const controller = new SessionsController({ version: 1, sessions: [
+    { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 3 } },
+    { ...session("b", "docs"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
+  ] });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("v");
+  assert.match(stripAnsi(view.render(120).join("\n")), /view stages/);
+  assert.equal(controller.snapshot().selectedId, "a");
+
+  view.handleInput("j");
+  assert.equal(controller.snapshot().selectedId, "b", "j wraps to prime lane row");
+  view.handleInput("j");
+  assert.equal(controller.snapshot().selectedId, "a", "lane order is prime then execute");
+  view.handleInput("k");
+  assert.equal(controller.snapshot().selectedId, "b");
+
+  view.handleInput("v");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view stages/);
+});
+
+test("reorder is disabled in stages view", () => {
+  const deltas: number[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    reorderSelected: (delta) => { deltas.push(delta); },
+  });
+
+  view.handleInput("v");
+  view.handleInput("J");
+
+  assert.deepEqual(deltas, []);
+  assert.match(view.render(120).join("\n"), /switch to groups view to reorder/);
+});
+
+test("v inside filter mode edits the filter instead of toggling views", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("/");
+  view.handleInput("v");
+
+  assert.equal(controller.snapshot().filter, "v");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view stages/);
+});
+
+test("stages view snaps selection to a visible lane row", () => {
+  const controller = new SessionsController({ version: 1, sessions: [
+    { ...session("bk", "backlogged"), bucket: "backlog", bucketChangedAt: 1 },
+    { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 3 } },
+  ] });
+  const view = new SessionsView(controller, () => {});
+  controller.selectSession("bk");
+
+  view.handleInput("v");
+  assert.equal(controller.snapshot().selectedId, "a");
 });
 
 test("enter triggers attach action outside tmux", () => {

@@ -19,6 +19,100 @@ function session(id: string, group: string, status: SessionStatus, title = id): 
   };
 }
 
+const WORKFLOW = {
+  steps: [
+    { id: "next-feature", short: "NX" },
+    { id: "prime", short: "PR" },
+    { id: "plan-md", short: "PL" },
+    { id: "execute", short: "EX" },
+    { id: "review", short: "RV" },
+    { id: "reflect", short: "RF" },
+    { id: "commit", short: "CM" },
+  ],
+  activeIndex: 3,
+  ticketId: "auth-003",
+  updatedAt: 1,
+};
+
+test("workflow rail renders compact in the list row and full in details", () => {
+  const model = buildRenderModel({ sessions: [{ ...session("a", "default", "running"), workflow: WORKFLOW }], selectedId: "a", width: 110 });
+  assert.equal(model.selected?.workflow?.activeIndex, 3);
+
+  const lines = renderSessions(model).map(stripAnsi);
+  const row = lines.find((line) => line.includes("▶"));
+  assert.match(row ?? "", /● a\s+EX 4\/7/);
+  assert.match(lines.join("\n"), /NX─PR─PL─▐EX▌─RV─RF─CM · auth-003/);
+  for (const line of renderSessions(model)) assert.ok(visibleWidth(line) <= 110, line);
+});
+
+test("expanded details include the full workflow rail", () => {
+  const model = buildRenderModel({ sessions: [{ ...session("a", "default", "running"), workflow: { ...WORKFLOW, ticketId: undefined } }], selectedId: "a", width: 110, detailsExpanded: true });
+  const text = renderSessions(model).map(stripAnsi).join("\n");
+  assert.match(text, /NX─PR─PL─▐EX▌─RV─RF─CM/);
+  assert.doesNotMatch(text, /· auth-003/);
+});
+
+test("sessions without workflow render no rail", () => {
+  const model = buildRenderModel({ sessions: [session("a", "default", "running")], selectedId: "a", width: 110 });
+  const text = renderSessions(model).map(stripAnsi).join("\n");
+  assert.doesNotMatch(text, /4\/7/);
+  assert.doesNotMatch(text, /NX─PR/);
+});
+
+test("archive expiry badge takes priority over the compact rail", () => {
+  const archived = { ...session("a", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
+  const model = buildRenderModel({ sessions: [archived, session("b", "default", "running")], selectedId: "a", width: 110, now: 100 });
+  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  assert.match(row ?? "", /\[exp 3d\]/);
+  assert.doesNotMatch(row ?? "", /EX 4\/7/);
+});
+
+test("workflow rail stays width-safe at narrow and wide sizes", () => {
+  const sessions = [{ ...session("a", "default", "running", "long-title-".repeat(6)), workflow: WORKFLOW }];
+  for (const width of [70, 100, 160]) {
+    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "a", width }))) {
+      assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
+    }
+  }
+});
+
+test("stages view groups sessions into workflow lanes", () => {
+  const parent = { ...session("p", "agents", "running"), workflow: WORKFLOW };
+  const sub = { ...session("sub", "agents", "running"), kind: "subagent" as const, parentId: "p" };
+  const prime = { ...session("x", "experiments", "running"), workflow: { ...WORKFLOW, activeIndex: 1, ticketId: undefined } };
+  const none = session("z", "experiments", "idle");
+  const backlog = { ...session("bk", "experiments", "idle"), bucket: "backlog" as const, bucketChangedAt: 1 };
+  const model = buildRenderModel({ sessions: [parent, sub, prime, none, backlog], viewMode: "stages", width: 120 });
+
+  assert.deepEqual(model.sections.map((item) => item.key), ["prime", "execute", "none"]);
+  assert.deepEqual(model.sections[1]?.groups.flatMap((group) => group.sessions.map((row) => row.id)), ["p", "sub"]);
+  assert.equal(model.hiddenNonActive, 1);
+  assert.equal(model.selected?.id, "x");
+
+  const rendered = renderSessions(model).map(stripAnsi).join("\n");
+  assert.match(rendered, /PRIME/);
+  assert.match(rendered, /EXECUTE/);
+  assert.match(rendered, /NO WORKFLOW/);
+  assert.match(rendered, /\+1 backlog\/archived · v groups view/);
+  assert.match(rendered, /view stages/);
+});
+
+test("stages view rows show the group name instead of the rail", () => {
+  const model = buildRenderModel({ sessions: [{ ...session("p", "agents", "running"), workflow: WORKFLOW }], viewMode: "stages", width: 120 });
+  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  assert.match(row ?? "", /● p\s+agents/);
+  assert.doesNotMatch(row ?? "", /EX 4\/7/);
+});
+
+test("groups view is unchanged when viewMode is omitted", () => {
+  const backlog = { ...session("bk", "experiments", "idle"), bucket: "backlog" as const, bucketChangedAt: 1 };
+  const model = buildRenderModel({ sessions: [session("a", "default", "idle"), backlog], width: 120 });
+  const rendered = renderSessions(model).map(stripAnsi).join("\n");
+  assert.match(rendered, /BACKLOG/);
+  assert.doesNotMatch(rendered, /view stages/);
+  assert.doesNotMatch(rendered, /backlog\/archived · v groups view/);
+});
+
 test("empty state rendering includes first-run prompts", () => {
   const lines = renderSessions(buildRenderModel({ sessions: [], width: 64 }));
   assert.match(lines.join("\n"), /No managed Pi sessions yet/);
@@ -86,7 +180,7 @@ test("narrow layout hides preview and uses compact footer", () => {
 
 test("wide footer groups keys by intent", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 120 });
-  assert.equal(model.footer, "Enter Open · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  ? Help");
+  assert.equal(model.footer, "Enter Open · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  v View · ? Help");
 });
 
 test("wide footer shows worktree finish only for worktree sessions", () => {
@@ -94,7 +188,7 @@ test("wide footer shows worktree finish only for worktree sessions", () => {
     sessions: [{ ...session("a", "default", "idle"), worktreeOwnedByHub: true, worktreePath: "/tmp/wt" }],
     width: 120,
   });
-  assert.equal(model.footer, "Enter Open · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  ? Help");
+  assert.equal(model.footer, "Enter Open · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  v View · ? Help");
 });
 
 test("long titles/cwd truncate without exceeding width", () => {
@@ -382,7 +476,7 @@ test("subagent rows render directly under their parent", () => {
   assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["parent", "child", "sibling"]);
   assert.equal(model.groups[0]?.sessions[1]?.depth, 1);
   const lines = renderSessions(model).join("\n");
-  assert.match(lines, /↳ .*scout/);
+  assert.match(lines, /└ .*scout/);
   assert.doesNotMatch(lines, /read auth\.ts/);
 });
 
@@ -405,7 +499,7 @@ test("nested subagent rows render under their subagent parent", () => {
   assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["parent", "child", "grandchild"]);
   assert.equal(model.groups[0]?.sessions[1]?.depth, 1);
   assert.equal(model.groups[0]?.sessions[2]?.depth, 2);
-  assert.match(renderSessions(model).join("\n"), /↳ .*worker[\s\S]*↳ .*code-critic/);
+  assert.match(renderSessions(model).join("\n"), /└ .*worker[\s\S]*└ .*code-critic/);
 });
 
 test("filtering by nested child includes ancestor context", () => {

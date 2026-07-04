@@ -1,6 +1,7 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { WorkflowSnapshot } from "../core/types.js";
 import type { RenderModel, RenderSession, StatusCounts } from "./render-model.js";
-import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleToken, type SessionsTheme } from "./theme.js";
+import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, type SessionsTheme } from "./theme.js";
 
 export function renderSessions(model: RenderModel, theme?: SessionsTheme): string[] {
   const styles = theme ? createStyles(theme) : plainStyles();
@@ -8,22 +9,36 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): strin
   if (model.empty) return box(width, emptyLines(width, styles), styles);
 
   const bodyWidth = width - 2;
-  if (model.noMatches) return box(width, [renderTopSummary(model, bodyWidth, styles), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), model.footer], styles);
+  if (model.noMatches) return box(width, [renderTopSummary(model, bodyWidth, styles), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)], styles);
 
   const split = model.showPreview ? Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38))) : bodyWidth;
   const targetRows = bodyRowsFromHeight(model.height);
   const left = renderSessionList(model, split, styles);
   const right = model.showPreview ? renderDetails(model.selected, bodyWidth - split - 1, model.preview, model.detailsExpanded, targetRows, styles) : [];
-  const rows = Math.max(left.length, right.length, targetRows ?? 8);
+  const rows = Math.max(left.lines.length, right.length, targetRows ?? 8);
   const body: string[] = [renderTopSummary(model, bodyWidth, styles)];
   for (let i = 0; i < rows; i += 1) {
-    const l = pad(left[i] ?? "", split);
+    const padded = pad(left.lines[i] ?? "", split);
+    const l = i === left.selectedIndex ? styles.selected(padded) : padded;
     if (!model.showPreview) body.push(l);
     else body.push(`${l}${styles.border("│")}${pad(right[i] ?? "", bodyWidth - split - 1)}`);
   }
   body.push(styles.border("─".repeat(bodyWidth)));
-  body.push(truncate(model.footer, bodyWidth));
+  body.push(truncate(styleFooter(model.footer, styles), bodyWidth));
   return box(width, body, styles);
+}
+
+// Footer strings stay plain in the render model for testability; keys get
+// accent, labels dim, separators border here.
+function styleFooter(footer: string, styles: LayoutStyles): string {
+  return footer.split("│").map((segment) =>
+    segment.split(" · ").map((part) => {
+      const match = /^(\s*)(\S+)((?: .*)?)$/.exec(part);
+      if (!match) return part;
+      const [, lead = "", key = "", label = ""] = match;
+      return `${lead}${styles.accent(key)}${label ? styles.dim(label) : ""}`;
+    }).join(styles.border(" · ")),
+  ).join(styles.border("│"));
 }
 
 function bodyRowsFromHeight(height: number | undefined): number | undefined {
@@ -38,6 +53,7 @@ interface LayoutStyles {
   error(text: string): string;
   muted(text: string): string;
   warning(text: string): string;
+  selected(text: string): string;
   status(status: RenderSession["displayStatus"], text: string): string;
 }
 
@@ -49,12 +65,13 @@ function createStyles(theme: SessionsTheme): LayoutStyles {
     error: (text) => styleToken(theme, "error", text),
     muted: (text) => styleToken(theme, "muted", text),
     warning: (text) => styleToken(theme, "warning", text),
+    selected: (text) => styleBgToken(theme, "selectedBg", text),
     status: (status, text) => styleToken(theme, status === "error" ? "error" : status === "waiting" ? "warning" : status === "running" ? "success" : "muted", text),
   };
 }
 
 function plainStyles(): LayoutStyles {
-  return createStyles({ ...darkTheme, accent: "", border: "", dim: "", error: "", muted: "", success: "", warning: "" });
+  return createStyles({ ...darkTheme, accent: "", border: "", dim: "", error: "", muted: "", success: "", warning: "", selectedBg: "" });
 }
 
 function emptyLines(width: number, styles: LayoutStyles): string[] {
@@ -63,9 +80,9 @@ function emptyLines(width: number, styles: LayoutStyles): string[] {
     "",
     styles.accent("No managed Pi sessions yet."),
     "",
-    `${styles.accent("▶")} n  create a session here`,
-    `${styles.dim(" ")} ?  show help`,
-    `${styles.dim(" ")} q  quit`,
+    `${styles.accent("▶")} ${styles.accent("n")}  create a session here`,
+    `  ${styles.accent("?")}  ${styles.dim("show help")}`,
+    `  ${styles.accent("q")}  ${styles.dim("quit")}`,
     "",
   ].map((line) => truncate(line, inner));
 }
@@ -96,31 +113,40 @@ function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyle
   const parts = [styles.accent(countLabel)];
   const counts = formatStatusCounts(model.summary.statusCounts, styles);
   if (counts) parts.push(counts);
+  if (model.viewMode === "stages") parts.push(styles.dim("view stages"));
   if (model.filter !== undefined) parts.push(styles.dim(`filter: ${model.filter}`));
   return truncate(parts.join(" · "), width);
 }
 
-function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): string[] {
+function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): { lines: string[]; selectedIndex: number } {
+  const stages = model.viewMode === "stages";
   const lines: string[] = [];
-  const sections = model.showSections ? model.sections : [];
-  let firstSection = true;
+  let selectedIndex = -1;
+  const pushRow = (session: RenderSession) => {
+    if (session.selected) selectedIndex = lines.length;
+    lines.push(renderSessionRow(session, width, styles, stages));
+  };
   if (!model.showSections) {
     for (const group of model.groups) {
       lines.push(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
-      for (const session of group.sessions) lines.push(renderSessionRow(session, width, styles));
+      for (const session of group.sessions) pushRow(session);
     }
-    return lines;
+    return { lines, selectedIndex };
   }
-  for (const section of sections) {
+  let firstSection = true;
+  for (const section of model.sections) {
     if (!firstSection) lines.push("");
     lines.push(sectionHeader(section.title, formatStatusCounts(section.statusCounts, styles), width, styles));
     firstSection = false;
     for (const group of section.groups) {
-      lines.push(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
-      for (const session of group.sessions) lines.push(renderSessionRow(session, width, styles));
+      if (group.name) lines.push(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
+      for (const session of group.sessions) pushRow(session);
     }
   }
-  return lines;
+  if (stages && model.hiddenNonActive > 0) {
+    lines.push("", styles.dim(truncate(`+${model.hiddenNonActive} backlog/archived · v groups view`, width)));
+  }
+  return { lines, selectedIndex };
 }
 
 function renderDetails(session: RenderSession | undefined, width: number, preview: string, expanded: boolean, targetRows: number | undefined, styles: LayoutStyles): string[] {
@@ -142,6 +168,24 @@ function titleStatusRow(session: RenderSession, width: number, styles: LayoutSty
   return `${title}${" ".repeat(gap)}${status}`;
 }
 
+function railCompact(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
+  const step = workflow.steps[workflow.activeIndex];
+  if (!step) return "";
+  return `${styles.accent(step.short)} ${styles.dim(`${workflow.activeIndex + 1}/${workflow.steps.length}`)}`;
+}
+
+function railFull(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
+  const rail = workflow.steps
+    .map((step, index) => index === workflow.activeIndex ? styles.accent(`▐${step.short}▌`) : styles.dim(step.short))
+    .join(styles.border("─"));
+  return workflow.ticketId ? `${rail} ${styles.border("·")} ${styles.muted(workflow.ticketId)}` : rail;
+}
+
+function railLine(workflow: WorkflowSnapshot, width: number, styles: LayoutStyles): string {
+  const full = railFull(workflow, styles);
+  return displayWidth(full) <= width ? full : railCompact(workflow, styles);
+}
+
 function compactDetails(session: RenderSession, width: number, styles: LayoutStyles): string[] {
   const lines = [titleStatusRow(session, width, styles)];
   if (session.kind === "subagent") {
@@ -152,6 +196,7 @@ function compactDetails(session: RenderSession, width: number, styles: LayoutSty
     if (session.repoCount > 1) parts.push(`${session.repoCount} repos`);
     lines.push(truncate(parts.join(" · "), width));
   }
+  if (session.workflow) lines.push(railLine(session.workflow, width, styles));
   const lifecycle = lifecycleLine(session);
   if (lifecycle) lines.push(styles.dim(lifecycle));
   lines.push(...metadataBlock(session, width, false, styles));
@@ -180,6 +225,7 @@ function expandedDetails(session: RenderSession, width: number, styles: LayoutSt
     session.section !== "active" ? `section   ${session.section}` : undefined,
     session.archiveExpiresIn ? `expires   ${session.archiveExpiresIn}` : undefined,
   ].filter((line): line is string => Boolean(line));
+  if (session.workflow) lines.splice(1, 0, railLine(session.workflow, width, styles));
   for (const cwd of session.additionalCwds) lines.push(`extra     ${truncatePath(cwd, Math.max(0, width - 10))}`);
   if (session.worktreeBranch) lines.push(`worktree  ${session.worktreeBranch} → ${session.worktreeBaseBranch ?? "unknown"}${session.worktreeCount && session.worktreeCount > 1 ? ` (${session.worktreeCount})` : ""}`);
   if (session.worktreePath) lines.push(`wt path   ${truncatePath(session.worktreePath, Math.max(0, width - 10))}`);
@@ -200,7 +246,7 @@ function metadataBlock(session: RenderSession, width: number, expanded: boolean,
   if (metadata.goal) lines.push(...metadataField("goal", metadata.goal, width, styles));
   if (metadata.status) lines.push(...metadataField("prog", metadata.status, width, styles));
   if (metadata.nextStep) lines.push(...metadataField("next", metadata.nextStep, width, styles));
-  if (expanded && metadata.stage) lines.push(...metadataField("stage", metadata.stage, width, styles));
+  if (expanded && metadata.stage) lines.push(`${styles.muted(pad("stage", 5))} ${styles.muted(truncate(`[${metadata.stage}]`, Math.max(4, width - 6)))}`);
   return lines;
 }
 
@@ -255,7 +301,7 @@ function truncatePath(path: string, width: number): string {
   return truncateValue(path, width, "start");
 }
 
-function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles): string {
+function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, stages = false): string {
   const prefix = session.selected ? styles.accent("▶") : session.status === "stopped" ? styles.dim("·") : " ";
   const symbol = styles.status(session.displayStatus, session.symbol);
   const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : session.title;
@@ -263,8 +309,13 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
   const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" [wt]") : "";
   const archiveBadge = session.archiveExpiresIn ? styles.dim(` [exp ${session.archiveExpiresIn}]`) : "";
-  const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}↳ `) : "";
-  return truncate(`${prefix} ${indent}${symbol} ${title}${repoBadge}${worktreeBadge}${archiveBadge}`, width);
+  const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
+  const text = `${prefix} ${indent}${symbol} ${title}${repoBadge}${worktreeBadge}${archiveBadge}`;
+  const right = stages
+    ? (session.kind === "subagent" ? "" : styles.dim(session.group))
+    : session.workflow && !session.archiveExpiresIn ? railCompact(session.workflow, styles) : "";
+  if (right && width - displayWidth(right) - 1 >= 12) return twoColumn(text, right, width);
+  return truncate(text, width);
 }
 
 export interface FormField {
@@ -314,9 +365,9 @@ export function renderForm(spec: FormSpec, width: number, theme?: SessionsTheme)
   const footer = inner < 32 ? (spec.narrowFooter ?? "enter · esc") : spec.footer;
   body.push(truncate(styles.dim(footer), inner));
   return [
-    `${styles.border("┌")}${styles.border("─".repeat(inner))}${styles.border("┐")}`,
+    `${styles.border("╭")}${styles.border("─".repeat(inner))}${styles.border("╮")}`,
     ...body.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`),
-    `${styles.border("└")}${styles.border("─".repeat(inner))}${styles.border("┘")}`,
+    `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`,
   ];
 }
 
@@ -349,17 +400,17 @@ export function renderDialog(title: string, rows: string[], width: number, theme
   const inner = Math.max(20, Math.min(Math.max(20, width - 2), 86));
   const body = [styles.accent(title), styles.border("─".repeat(Math.min(inner, Math.max(0, displayWidth(title) + 8)))), ...rows];
   return [
-    `${styles.border("┌")}${styles.border("─".repeat(inner))}${styles.border("┐")}`,
+    `${styles.border("╭")}${styles.border("─".repeat(inner))}${styles.border("╮")}`,
     ...body.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`),
-    `${styles.border("└")}${styles.border("─".repeat(inner))}${styles.border("┘")}`,
+    `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`,
   ];
 }
 
 function box(width: number, body: string[], styles: LayoutStyles): string[] {
   const inner = width - 2;
   const title = "pi agent hub";
-  const top = `${styles.border("┌")} ${styles.accent(title)} ${styles.border("─".repeat(Math.max(0, inner - displayWidth(title) - 2)))}${styles.border("┐")}`;
-  const bottom = `${styles.border("└")}${styles.border("─".repeat(inner))}${styles.border("┘")}`;
+  const top = `${styles.border("╭")} ${styles.accent(title)} ${styles.border("─".repeat(Math.max(0, inner - displayWidth(title) - 2)))}${styles.border("╮")}`;
+  const bottom = `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`;
   return [top, ...body.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`), bottom].map((line) => truncate(line, width));
 }
 

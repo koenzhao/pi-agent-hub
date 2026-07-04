@@ -87,6 +87,24 @@ test("apply computed status keeps fresh active theme and drops stale theme", () 
   assert.equal(stale.activeTheme, undefined);
 });
 
+test("apply computed status adopts fresh workflow and retains it across stale or shutdown heartbeats", () => {
+  const workflow = { steps: [{ id: "prime", short: "PR" }, { id: "execute", short: "EX" }], activeIndex: 1, ticketId: "auth-001", updatedAt: now };
+  const fresh = applyComputedStatus(session(), { status: "waiting" }, now, heartbeat({ workflow }));
+  assert.deepEqual(fresh.workflow, workflow);
+
+  const cleared = applyComputedStatus(session({ workflow }), { status: "waiting" }, now, heartbeat());
+  assert.equal(cleared.workflow, undefined);
+
+  const stale = applyComputedStatus(session({ workflow }), { status: "waiting", note: "stale heartbeat" }, now, heartbeat({ updatedAt: now - HEARTBEAT_STALE_MS - 1 }));
+  assert.deepEqual(stale.workflow, workflow);
+
+  const shutdown = applyComputedStatus(session({ workflow }), { status: "stopped" }, now, heartbeat({ state: "shutdown" }));
+  assert.deepEqual(shutdown.workflow, workflow);
+
+  const missing = applyComputedStatus(session({ workflow }), { status: "waiting", note: "missing heartbeat" }, now);
+  assert.deepEqual(missing.workflow, workflow);
+});
+
 test("mark acknowledged turns waiting into idle", () => {
   assert.equal(markAcknowledged(session({ status: "waiting" }), now).status, "idle");
 });

@@ -66,9 +66,9 @@ export function renderRepoPicker(state: RepoPickerState, width: number, theme?: 
   }
   lines.push("", styles.muted("type search · ↑↓ move · enter select · esc cancel"));
   return [
-    `${styles.border("┌")}${styles.border("─".repeat(inner))}${styles.border("┐")}`,
+    `${styles.border("╭")}${styles.border("─".repeat(inner))}${styles.border("╮")}`,
     ...lines.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`),
-    `${styles.border("└")}${styles.border("─".repeat(inner))}${styles.border("┘")}`,
+    `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`,
   ];
 }
 

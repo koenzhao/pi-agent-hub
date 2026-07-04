@@ -5,7 +5,7 @@ import { KIND_ENV, PARENT_ID_ENV, SESSION_ID_ENV, STATE_ENV } from "../core/name
 import { sessionsStateDir } from "../core/paths.js";
 import { HEARTBEAT_INTERVAL_MS } from "../core/status.js";
 import { registerMcpTools } from "../mcp/register-tools.js";
-import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat } from "../core/types.js";
+import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, WorkflowSnapshot } from "../core/types.js";
 
 type PiTheme = {
   name?: string;
@@ -22,13 +22,30 @@ type PiContext = {
   sessionManager?: {
     getSessionFile?: () => string | undefined;
     getSessionId?: () => string | undefined;
+    getBranch?: () => unknown[] | undefined;
   };
 };
 
 const EXTENSION_KEY = Symbol.for("pi-agent-hub.extension.loaded");
 type PiAgentHubGlobal = typeof globalThis & { [EXTENSION_KEY]?: true };
 
-const THEME_TOKENS: Exclude<ActiveThemeToken, "statusLineBg">[] = ["accent", "success", "warning", "error", "muted", "dim", "text", "border"];
+// statusLineBg and selectedBg are background tokens Pi's getFgAnsi cannot
+// capture; disk theme resolution supplies them instead.
+const THEME_TOKENS: Exclude<ActiveThemeToken, "statusLineBg" | "selectedBg">[] = ["accent", "success", "warning", "error", "muted", "dim", "text", "border"];
+
+// Soft contract with rules/extensions/workflow-indicator.ts: mirror of its
+// WORKFLOW constant and custom-entry type. If that extension renames steps or
+// the entry type, the rail silently disappears instead of crashing.
+const WORKFLOW_INDICATOR_ENTRY = "workflow-indicator";
+const WORKFLOW_STEPS = [
+  { id: "next-feature", short: "NX" },
+  { id: "prime", short: "PR" },
+  { id: "plan-md", short: "PL" },
+  { id: "execute", short: "EX" },
+  { id: "review", short: "RV" },
+  { id: "reflect", short: "RF" },
+  { id: "commit", short: "CM" },
+];
 const STARTUP_HEARTBEAT_DELAYS_MS = [250, 1_000, 3_000];
 
 export default function piAgentHubExtension(pi: ExtensionAPI) {
@@ -66,6 +83,7 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
       taskPreview: process.env.PI_SUBAGENT_TASK_PREVIEW,
       resultPath: process.env.PI_SUBAGENT_RESULT_PATH,
       activeTheme: activeTheme(ctx),
+      workflow: workflowSnapshot(ctx),
     } satisfies Heartbeat, null, 2)}\n`, "utf8");
   }
 
@@ -89,6 +107,21 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
       delete globalState[EXTENSION_KEY];
     }
   });
+}
+
+function workflowSnapshot(ctx: PiContext): WorkflowSnapshot | undefined {
+  try {
+    const entries = ctx.sessionManager?.getBranch?.();
+    if (!entries) return undefined;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i] as { type?: string; customType?: string; data?: { activeStep?: string; ticketId?: string } } | undefined;
+      if (entry?.type !== "custom" || entry.customType !== WORKFLOW_INDICATOR_ENTRY) continue;
+      const activeIndex = WORKFLOW_STEPS.findIndex((step) => step.id === entry.data?.activeStep);
+      if (activeIndex < 0) return undefined;
+      return { steps: WORKFLOW_STEPS, activeIndex, ticketId: entry.data?.ticketId, updatedAt: Date.now() };
+    }
+  } catch {}
+  return undefined;
 }
 
 function activeTheme(ctx: PiContext): ActiveThemeSnapshot | undefined {

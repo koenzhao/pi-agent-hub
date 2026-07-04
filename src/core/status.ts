@@ -59,6 +59,7 @@ export function applyComputedStatus(session: ManagedSession, computed: ComputedS
     taskPreview: heartbeat?.taskPreview ?? session.taskPreview,
     resultPath: heartbeat?.resultPath ?? session.resultPath,
     activeTheme: freshHeartbeat(heartbeat, now) ? heartbeat.activeTheme : undefined,
+    workflow: freshHeartbeat(heartbeat, now) ? heartbeat.workflow : session.workflow,
     updatedAt: now,
   };
 }

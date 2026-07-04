@@ -49,6 +49,16 @@ Display rules:
 - If `confidence` is present and below `0.5`, Hub hides the metadata block.
 - `source` and `updatedAt` are shown as provenance/freshness in the metadata header when present.
 
+### Workflow heartbeat bridge
+
+Hub's extension can also surface workflow-stage state from the optional `workflow-indicator` extension (from the `rules` package). On every heartbeat tick it reads the Pi session branch via `sessionManager.getBranch()` and takes the latest custom entry of this shape:
+
+```json
+{ "type": "custom", "customType": "workflow-indicator", "data": { "activeStep": "execute", "ticketId": "auth-003" } }
+```
+
+The step vocabulary (`next-feature`, `prime`, `plan-md`, `execute`, `review`, `reflect`, `commit`) is mirrored as `WORKFLOW_STEPS` in `src/extension/index.ts` — that constant is the single sync point of this soft contract. If the entry type or step ids drift, or the Pi version has no `getBranch`, the workflow rail silently disappears; nothing else is affected. The snapshot travels as `workflow` in the heartbeat file and drives the per-session rail and the `v` stage-lane view. Because heartbeats fire on agent start/end and every 15 seconds, a step change can lag in the dashboard by up to ~15 seconds.
+
 ## Global config
 
 Optional global config lives at `config.json` under the global state directory:

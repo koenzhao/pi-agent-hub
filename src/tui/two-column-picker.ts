@@ -72,9 +72,9 @@ export function renderTwoColumnPicker(state: PickerState, width: number, theme?:
   }
   lines.push("", styles.muted(pickerFooter(state)));
   return [
-    `${styles.border("┌")}${styles.border("─".repeat(inner))}${styles.border("┐")}`,
+    `${styles.border("╭")}${styles.border("─".repeat(inner))}${styles.border("╮")}`,
     ...lines.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`),
-    `${styles.border("└")}${styles.border("─".repeat(inner))}${styles.border("┘")}`,
+    `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`,
   ];
 }
 

@@ -2,7 +2,7 @@ import { archivedExpiresAt, sessionSection, type SessionSection } from "../core/
 import { groupOrder, orderedSessions } from "../core/session-order.js";
 import { orderedSessionRows, sessionDepth } from "../core/session-tree.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
-import type { RuntimeSession, SessionStatus, SessionMetadata } from "../core/types.js";
+import type { RuntimeSession, SessionStatus, SessionMetadata, WorkflowSnapshot } from "../core/types.js";
 
 export interface RenderSession {
   id: string;
@@ -31,6 +31,7 @@ export interface RenderSession {
   resultSummary?: string;
   sessionMetadata?: SessionMetadata;
   metadataUpdatedAge?: string;
+  workflow?: WorkflowSnapshot;
   worktreePath?: string;
   worktreeBranch?: string;
   worktreeBaseBranch?: string;
@@ -53,7 +54,7 @@ export interface RenderGroup {
 }
 
 export interface RenderSection {
-  key: SessionSection;
+  key: string;
   title: string;
   statusCounts: StatusCounts;
   sessionsTotal: number;
@@ -82,6 +83,8 @@ export interface RenderModel {
   filter?: string;
   preview: string;
   detailsExpanded: boolean;
+  viewMode: "groups" | "stages";
+  hiddenNonActive: number;
 }
 
 export interface BuildRenderModelInput {
@@ -94,15 +97,18 @@ export interface BuildRenderModelInput {
   preview?: string;
   detailsExpanded?: boolean;
   selectedSkillCount?: number;
+  viewMode?: "groups" | "stages";
   now?: number;
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
-  const visible = orderedSessionRows(input.sessions, input.filter);
+  const stages = input.viewMode === "stages";
+  const allRows = orderedSessionRows(input.sessions, input.filter);
+  const visible = stages ? stageLaneRows(allRows.filter((session) => sessionSection(session) === "active")).flatMap((lane) => lane.rows) : allRows;
   const selectedId = pickSelectedId(visible, input.selectedId);
   const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId, input.sessions, session.id === selectedId ? input.selectedSkillCount : undefined, input.now));
   const groups = groupsForSessions(mapped);
-  const sections = sectionsForSessions(mapped);
+  const sections = stages ? lanesForSessions(mapped) : sectionsForSessions(mapped);
 
   const compactFooter = input.width < 80;
   const selected = mapped.find((session) => session.selected);
@@ -113,12 +119,12 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   return {
     width: input.width,
     empty: input.sessions.length === 0,
-    noMatches: input.sessions.length > 0 && visible.length === 0,
+    noMatches: input.sessions.length > 0 && allRows.length === 0,
     showPreview: input.width >= 80,
     compactFooter,
     groups,
     sections,
-    showSections: sections.some((section) => section.key !== "active" && section.sessionsTotal > 0),
+    showSections: stages ? mapped.length > 0 : sections.some((section) => section.key !== "active" && section.sessionsTotal > 0),
     summary: {
       total: input.sessions.length,
       visibleTotal: visible.length,
@@ -126,11 +132,54 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     },
     ...(input.height ? { height: input.height } : {}),
     selected,
-    footer: compactFooter ? `Enter · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  ?` : `Enter Open · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete${worktreeFooter}${lifecycleFooter}  │  ? Help`,
+    footer: compactFooter ? `Enter · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  v · ?` : `Enter Open · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,
+    viewMode: stages ? "stages" : "groups",
+    hiddenNonActive: allRows.length - visible.length,
   };
+}
+
+export interface StageLaneRow {
+  id: string;
+  kind?: "main" | "subagent";
+  parentId?: string;
+  workflow?: WorkflowSnapshot;
+}
+
+export function stageLaneRows<T extends StageLaneRow>(rows: T[]): { key: string; rows: T[] }[] {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const laneOf = (row: T): string => {
+    let owner: StageLaneRow | undefined = row;
+    while (owner && owner.kind === "subagent") owner = owner.parentId ? byId.get(owner.parentId) : undefined;
+    const workflow = owner?.workflow;
+    return workflow?.steps[workflow.activeIndex]?.id ?? "none";
+  };
+  const order: string[] = [];
+  for (const row of rows) {
+    for (const step of row.workflow?.steps ?? []) if (!order.includes(step.id)) order.push(step.id);
+  }
+  order.push("none");
+  const byLane = new Map<string, T[]>();
+  for (const row of rows) {
+    const lane = laneOf(row);
+    byLane.set(lane, [...(byLane.get(lane) ?? []), row]);
+  }
+  return order.flatMap((key) => {
+    const laneRows = byLane.get(key);
+    return laneRows?.length ? [{ key, rows: laneRows }] : [];
+  });
+}
+
+function lanesForSessions(sessions: RenderSession[]): RenderSection[] {
+  return stageLaneRows(sessions).map(({ key, rows }) => ({
+    key,
+    title: key === "none" ? "NO WORKFLOW" : key.toUpperCase(),
+    statusCounts: countRenderSessions(rows),
+    sessionsTotal: rows.length,
+    groups: [{ name: "", statusCounts: countRenderSessions(rows), sessions: rows }],
+  } satisfies RenderSection));
 }
 
 export function retainSelectionAfterRefresh(
@@ -219,6 +268,7 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     resultSummary: session.resultSummary,
     sessionMetadata: session.sessionMetadata,
     metadataUpdatedAge: metadataUpdatedAge(session.sessionMetadata, now),
+    workflow: session.workflow,
     worktreePath: worktree?.path ?? session.worktreePath,
     worktreeBranch: worktree?.branch ?? session.worktreeBranch,
     worktreeBaseBranch: worktree?.baseBranch ?? session.worktreeBaseBranch,

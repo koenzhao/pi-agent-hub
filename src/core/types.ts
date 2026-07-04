@@ -1,12 +1,19 @@
 export type SessionStatus = "starting" | "running" | "waiting" | "idle" | "error" | "stopped";
 export type SessionBucket = "backlog" | "archived";
 
-export type ActiveThemeToken = "accent" | "success" | "warning" | "error" | "muted" | "dim" | "text" | "border" | "statusLineBg";
+export type ActiveThemeToken = "accent" | "success" | "warning" | "error" | "muted" | "dim" | "text" | "border" | "statusLineBg" | "selectedBg";
 
 export interface ActiveThemeSnapshot {
   name?: string;
   sourcePath?: string;
   tokens?: Partial<Record<ActiveThemeToken, string | number>>;
+}
+
+export interface WorkflowSnapshot {
+  steps: { id: string; short: string }[];
+  activeIndex: number;
+  ticketId?: string;
+  updatedAt: number;
 }
 
 export interface SessionMetadata {
@@ -53,6 +60,7 @@ export interface ManagedSession {
   resultPath?: string;
   resultSummary?: string;
   activeTheme?: ActiveThemeSnapshot;
+  workflow?: WorkflowSnapshot;
   worktreePath?: string;
   worktreeRepoRoot?: string;
   worktreeBranch?: string;
@@ -85,6 +93,7 @@ export interface Heartbeat {
   taskPreview?: string;
   resultPath?: string;
   activeTheme?: ActiveThemeSnapshot;
+  workflow?: WorkflowSnapshot;
 }
 
 export interface TmuxState {

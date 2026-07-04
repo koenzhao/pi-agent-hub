@@ -1,12 +1,13 @@
 import { Key, matchesKey, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { attachPlan } from "../app/actions.js";
 import type { SessionsController, SyncPiNameResult } from "../app/controller.js";
+import { sessionSection } from "../core/session-bucket.js";
 import { orderedSessionRows, sessionCascadeIds } from "../core/session-tree.js";
 import { isWorktreeSession, primaryWorktree } from "../core/worktree.js";
 import type { DashboardShortcut } from "../core/dashboard-shortcuts.js";
 import type { ManagedSession } from "../core/types.js";
 import { matchesDashboardShortcut } from "./dashboard-shortcuts.js";
-import { buildRenderModel } from "./render-model.js";
+import { buildRenderModel, stageLaneRows } from "./render-model.js";
 import { renderSessions, renderDialog, renderForm } from "./layout.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import { movePickerSelection, renderTwoColumnPicker, switchPickerColumn, togglePickerItem, type PickerState, type PickerItem } from "./two-column-picker.js";
@@ -120,6 +121,7 @@ export class SessionsView implements Component {
   private message: string | undefined;
   private flash: { text: string; expiresAt: number } | undefined;
   private detailsExpanded = false;
+  private viewMode: "groups" | "stages" = "groups";
   private pendingRestart: { sessionId: string } | undefined;
   private pickerSaveId = 0;
   private deleteTargetId: string | undefined;
@@ -235,11 +237,11 @@ export class SessionsView implements Component {
     else if (data === "N" || matchesKey(data, Key.alt("n"))) this.syncPiNameSelected();
     else if (matchesKey(data, Key.down) || data === "j") {
       this.clearPendingRestart();
-      this.controller.move(1);
+      this.moveSelection(1);
     }
     else if (matchesKey(data, Key.up) || data === "k") {
       this.clearPendingRestart();
-      this.controller.move(-1);
+      this.moveSelection(-1);
     }
     else if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") this.attachSelected();
     else if (matchesKey(data, Key.slash)) this.startFilter();
@@ -262,6 +264,7 @@ export class SessionsView implements Component {
       this.clearFlash();
       this.detailsExpanded = !this.detailsExpanded;
     }
+    else if (data === "v") this.toggleViewMode();
     else if (data === "a") {
       this.clearPendingRestart();
       this.clearFlash();
@@ -277,7 +280,7 @@ export class SessionsView implements Component {
 
   render(width: number): string[] {
     this.clearExpiredFlash();
-    if (this.mode === "help") return renderHelp(width);
+    if (this.mode === "help") return renderHelp(width, this.theme);
     if ((this.mode === "skills" || this.mode === "mcp") && this.picker) return renderTwoColumnPicker(this.picker, width, this.theme);
     if (this.mode === "repoPicker" && this.repoPicker) return renderRepoPicker(this.repoPicker, width, this.theme);
     if (this.mode === "new" && this.newForm) return this.renderNewForm(width);
@@ -301,6 +304,7 @@ export class SessionsView implements Component {
       detailsExpanded: this.detailsExpanded,
       height: this.actions.terminalRows?.() ?? process.stdout.rows,
       selectedSkillCount: selected ? this.actions.skillCount?.(selected.cwd) : undefined,
+      viewMode: this.viewMode,
       now,
     }), this.theme);
     const footer = this.mode === "filter"
@@ -586,10 +590,44 @@ export class SessionsView implements Component {
     }
   }
 
+  private moveSelection(delta: number) {
+    if (this.viewMode !== "stages") {
+      this.controller.move(delta);
+      return;
+    }
+    const rows = this.stageRows();
+    if (!rows.length) return;
+    const index = Math.max(0, rows.findIndex((row) => row.id === this.controller.snapshot().selectedId));
+    const next = rows[(index + delta + rows.length) % rows.length];
+    if (next) this.controller.selectSession(next.id);
+  }
+
+  private stageRows() {
+    const snapshot = this.controller.snapshot();
+    const active = orderedSessionRows(snapshot.sessions, snapshot.filter).filter((session) => sessionSection(session) === "active");
+    return stageLaneRows(active).flatMap((lane) => lane.rows);
+  }
+
+  private toggleViewMode() {
+    this.clearPendingRestart();
+    this.clearFlash();
+    this.message = undefined;
+    this.viewMode = this.viewMode === "groups" ? "stages" : "groups";
+    if (this.viewMode !== "stages") return;
+    const rows = this.stageRows();
+    if (rows.length && !rows.some((row) => row.id === this.controller.snapshot().selectedId)) {
+      this.controller.selectSession(rows[0]?.id ?? "");
+    }
+  }
+
   private reorderSelected(delta: -1 | 1) {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
+    if (this.viewMode === "stages") {
+      this.message = "switch to groups view to reorder";
+      return;
+    }
     if (this.controller.snapshot().filter !== undefined) {
       this.message = "clear filter to reorder";
       return;
@@ -1583,46 +1621,51 @@ function syncPiNameMessage(result: SyncPiNameResult): string {
   }
 }
 
-function renderHelp(width: number): string[] {
+function renderHelp(width: number, theme?: SessionsTheme): string[] {
+  const heading = (text: string) => theme ? styleToken(theme, "accent", text) : text;
   const lines = [
-    "pi agent hub help",
+    heading("pi agent hub help"),
     "",
-    "Navigation",
+    heading("Navigation"),
     "  ↑↓/j/k move selection     Enter open/switch     / filter",
     "  K/J reorder in group      q quit                Esc cancel/clear",
+    "  v toggle groups/stages view",
     "",
-    "Sessions",
+    heading("Sessions"),
     "  n new     p send     r restart choices     N sync Pi name     f fork     w finish worktree",
     "  R rename     g move group (Ctrl+N/P cycles groups)     G rename group     d delete     a mark read",
     "  A archive     B backlog     U restore to Active",
     "  Restart choices: r selected     n new conversation     a all     Esc cancel",
     "  Delete choices: d delete/forget     D discard worktree     s close subagents     w finish worktree",
     "",
-    "New-session form",
+    heading("New-session form"),
     "  Tab/↑↓ move     Ctrl+O choose repo     Alt+A add repo     Alt+X remove extra     Ctrl+T worktree",
     "",
-    "Project state",
+    heading("Project state"),
     "  s skills picker     m MCP picker     ←→/Tab switch picker columns",
     "",
-    "Return from managed sessions",
+    heading("Return from managed sessions"),
     "  Ctrl+Q return to dashboard     Alt+R rename current session",
     "",
-    "Sections",
+    heading("Sections and views"),
     "  Active · Backlog · Archived keep project/group headers inside each section",
     "  Archived rows auto-remove after 72h once their tmux session is gone",
+    "  Stages view lanes active sessions by workflow step (via the workflow-indicator extension);",
+    "  backlog/archived rows are summarized and K/J reorder is groups-view only",
     "",
-    "Status legend",
+    heading("Status legend"),
     "  ● running/starting     ◐ waiting     ○ idle     × error     - stopped",
     "  zero counts are hidden in group and top summary",
     "",
-    "Metadata",
+    heading("Metadata"),
     "  i toggle compact/full selected-session info",
   ];
   const inner = Math.max(40, width) - 2;
+  const border = (text: string) => theme ? styleToken(theme, "border", text) : text;
   return [
-    `┌${"─".repeat(inner)}┐`,
-    ...lines.map((line) => `│${padVisibleLine(line, inner)}│`),
-    `└${"─".repeat(inner)}┘`,
+    border(`╭${"─".repeat(inner)}╮`),
+    ...lines.map((line) => `${border("│")}${padVisibleLine(line, inner)}${border("│")}`),
+    border(`╰${"─".repeat(inner)}╯`),
   ];
 }
 

@@ -140,6 +140,74 @@ test("piAgentHubExtension records the active Pi theme in heartbeat", async () =>
   }
 });
 
+test("piAgentHubExtension bridges workflow-indicator entries into heartbeat", async () => {
+  const branches: Record<string, unknown[]> = {
+    "latest wins": [
+      { type: "custom", customType: "workflow-indicator", data: { activeStep: "prime", ticketId: "auth-001" } },
+      { type: "message" },
+      { type: "custom", customType: "workflow-indicator", data: { activeStep: "execute", ticketId: "auth-002" } },
+    ],
+    cleared: [
+      { type: "custom", customType: "workflow-indicator", data: { activeStep: "execute" } },
+      { type: "custom", customType: "workflow-indicator", data: {} },
+    ],
+    malformed: [{ type: "custom", customType: "workflow-indicator", data: { activeStep: "unknown-step" } }],
+    "no entries": [{ type: "message" }],
+  };
+  const expected: Record<string, { activeIndex: number; ticketId?: string } | undefined> = {
+    "latest wins": { activeIndex: 3, ticketId: "auth-002" },
+    cleared: undefined,
+    malformed: undefined,
+    "no entries": undefined,
+  };
+
+  for (const [name, entries] of Object.entries(branches)) {
+    const heartbeat = await heartbeatWithSessionManager({ getBranch: () => entries });
+    if (expected[name] === undefined) {
+      assert.equal(heartbeat.workflow, undefined, name);
+    } else {
+      assert.equal(heartbeat.workflow?.activeIndex, expected[name]?.activeIndex, name);
+      assert.equal(heartbeat.workflow?.ticketId, expected[name]?.ticketId, name);
+      assert.equal(heartbeat.workflow?.steps.length, 7, name);
+      assert.equal(heartbeat.workflow?.steps[3]?.short, "EX", name);
+    }
+  }
+});
+
+test("piAgentHubExtension omits workflow when getBranch is unavailable or throws", async () => {
+  assert.equal((await heartbeatWithSessionManager({})).workflow, undefined);
+  assert.equal((await heartbeatWithSessionManager({ getBranch: () => { throw new Error("boom"); } })).workflow, undefined);
+});
+
+async function heartbeatWithSessionManager(sessionManager: Record<string, unknown>): Promise<Heartbeat> {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  process.env[SESSION_ID_ENV] = "session-wf";
+  process.env[STATE_ENV] = root;
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) {
+      handlers.set(name, handler);
+    },
+    registerTool() {},
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await handlers.get("session_start")?.({}, { cwd: root, hasUI: false, sessionManager });
+    return JSON.parse(await readFile(heartbeatPath("session-wf", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+  } finally {
+    await handlers.get("session_shutdown")?.({}, { cwd: root, sessionManager });
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+}
+
 async function waitForHeartbeat(root: string, sessionId: string, predicate: (heartbeat: Heartbeat) => boolean): Promise<Heartbeat> {
   const started = Date.now();
   let last: Heartbeat | undefined;

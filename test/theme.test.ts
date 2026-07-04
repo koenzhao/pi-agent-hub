@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildRenderModel } from "../src/tui/render-model.js";
 import { renderSessions, renderForm } from "../src/tui/layout.js";
-import { darkTheme, lightTheme, loadActiveTheme, loadSessionsTheme, stripAnsi, stripAnsiExceptItalics, styleToken, themeFromPiTheme } from "../src/tui/theme.js";
+import { darkTheme, lightTheme, loadActiveTheme, loadSessionsTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, themeFromPiTheme } from "../src/tui/theme.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function session(): ManagedSession {
@@ -205,6 +205,60 @@ test("styleToken uses ANSI without changing visible text", () => {
   const styled = styleToken({ ...darkTheme, accent: "#010203" }, "accent", "api");
   assert.match(styled, /\u001b\[38;2;1;2;3mapi\u001b\[0m/);
   assert.equal(stripAnsi(styled), "api");
+});
+
+test("selectedBg has built-in defaults and resolves from Pi themes", () => {
+  assert.equal(darkTheme.selectedBg, "#292e42");
+  assert.equal(lightTheme.selectedBg, "#c8d0dc");
+  const theme = themeFromPiTheme({ vars: { sel: "#112233" }, colors: { accent: "#00aaff", selectedBg: "sel" } });
+  assert.equal(theme.selectedBg, "#112233");
+  assert.equal(themeFromPiTheme({ colors: { accent: "#00aaff" } }).selectedBg, darkTheme.selectedBg);
+});
+
+test("styleBgToken emits background SGR and survives inner resets", () => {
+  const truecolor = styleBgToken({ ...darkTheme, selectedBg: "#010203" }, "selectedBg", "api");
+  assert.match(truecolor, /\[48;2;1;2;3mapi\[0m/);
+  assert.equal(stripAnsi(truecolor), "api");
+
+  const indexed = styleBgToken({ ...darkTheme, selectedBg: 244 }, "selectedBg", "api");
+  assert.match(indexed, /\[48;5;244mapi/);
+
+  assert.equal(styleBgToken({ ...darkTheme, selectedBg: "" }, "selectedBg", "api"), "api");
+  assert.equal(styleBgToken(darkTheme, "selectedBg", ""), "");
+
+  const nested = styleBgToken({ ...darkTheme, selectedBg: "#010203" }, "selectedBg", "a[0mb");
+  assert.equal(stripAnsi(nested), "ab");
+  assert.match(nested, /\[0m\[48;2;1;2;3mb/);
+});
+
+test("renderSessions paints the selected row background across the list column", () => {
+  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80, selectedId: "s1" }), { ...darkTheme, selectedBg: "#010203" });
+  const selectedLine = lines.find((line) => stripAnsi(line).includes("▶"));
+  assert.ok(selectedLine, "selected row not found");
+  assert.match(selectedLine, /\[48;2;1;2;3m/);
+
+  const plain = renderSessions(buildRenderModel({ sessions: [session()], width: 80, selectedId: "s1" }));
+  const plainSelected = plain.find((line) => line.includes("▶"));
+  assert.ok(plainSelected, "plain selected row not found");
+  assert.doesNotMatch(plainSelected, /\[/);
+});
+
+test("footer keys are styled without changing visible text", () => {
+  const model = buildRenderModel({ sessions: [session()], width: 130 });
+  const themed = renderSessions(model, darkTheme);
+  const plain = renderSessions(model);
+  const themedFooter = themed.at(-2) ?? "";
+  assert.match(themedFooter, /\u001b\[38;2;122;162;247mEnter\u001b\[0m/);
+  assert.equal(stripAnsi(themedFooter), stripAnsi(plain.at(-2) ?? ""));
+});
+
+test("dashboard chrome uses rounded corners", () => {
+  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80 }), darkTheme);
+  assert.match(stripAnsi(lines[0] ?? ""), /^╭/);
+  assert.match(stripAnsi(lines.at(-1) ?? ""), /╯$/);
+  const form = renderForm({ title: "t", fields: [{ key: "a", label: "a", value: "" }], focus: "a", footer: "f" }, 40, darkTheme);
+  assert.match(stripAnsi(form[0] ?? ""), /^╭/);
+  assert.match(stripAnsi(form.at(-1) ?? ""), /╯$/);
 });
 
 test("stripAnsiExceptItalics preserves only italic styling", () => {
