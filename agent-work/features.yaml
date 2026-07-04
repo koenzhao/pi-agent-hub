@@ -156,3 +156,16 @@
   created_at: '2026-07-03'
   plan_file: agent-work/history/20260703_json-store-001_json_store.md
   completed_at: '2026-07-03'
+- epic: dead-code
+  status: done
+  title: Delete shallow wrappers and dead MCP/pi-process exports
+  description: Remove dead public exports (McpTool, PiToolDefinition, buildPiCommand),
+    move cliTuiCommand into core/tmux.ts, and delete src/core/cli-command.ts so no
+    shallow single-caller wrapper modules remain.
+  priority: 2
+  created_at: '2026-07-03'
+  discovered_from: 'architecture review 2026-07-03 (candidate 6: delete the shallow
+    wrappers)'
+  id: dead-code-001
+  plan_file: agent-work/history/20260703_dead-code-001_shallow_wrappers.md
+  completed_at: '2026-07-03'

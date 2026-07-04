@@ -29,6 +29,10 @@ export const realTmuxExec: TmuxExec = {
   },
 };
 
+export function cliTuiCommand(input: { nodePath: string; cliPath: string }): string {
+  return `${shellQuote(input.nodePath)} ${shellQuote(input.cliPath)} tui`;
+}
+
 export async function hasTmux(exec: TmuxExec = realTmuxExec): Promise<boolean> {
   try {
     await exec.exec("tmux", ["-V"]);

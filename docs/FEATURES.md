@@ -89,7 +89,7 @@ Running `pi-hub` uses one stable tmux session named `pi-agent-hub`:
 - outside tmux: create or attach `pi-agent-hub`;
 - inside tmux: create it detached if needed, then switch the current client to it.
 
-The dashboard runs `pi-hub tui` inside tmux so it does not recursively create dashboards. It also applies its own tmux status bar instead of inheriting global tmux theme chrome.
+The dashboard runs the current CLI file's `tui` command inside tmux so it does not recursively create dashboards or depend on a stale `pi-hub` on PATH. It also applies its own tmux status bar instead of inheriting global tmux theme chrome.
 
 When the dashboard is running inside tmux, `Enter` switches the current tmux client to the selected managed session and briefly shows the equivalent `tmux switch-client -t <session>` command. Opening a `waiting` session marks it read before attaching, so it can show `idle` after you return; `a` remains the manual mark-read shortcut.
 

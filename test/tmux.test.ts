@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { capturePane, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, restoreSwitchReturnBinding, sendTextToSession, sessionPresence, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { capturePane, cliTuiCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, restoreSwitchReturnBinding, sendTextToSession, sessionPresence, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -23,6 +23,13 @@ function fakeTmux(handler: (call: Call) => CommandResult | Promise<CommandResult
     },
   };
 }
+
+test("dashboard tui command uses current node and CLI file", () => {
+  const command = cliTuiCommand({ nodePath: "/opt/node bin/node", cliPath: "/pkg/pi-agent-hub/dist/cli's.js" });
+
+  assert.equal(command, "'/opt/node bin/node' '/pkg/pi-agent-hub/dist/cli'\\''s.js' tui");
+  assert.doesNotMatch(command, /^pi-hub tui$/);
+});
 
 test("sessionPresence distinguishes missing sessions from unknown tmux failures", async () => {
   assert.equal(await sessionPresence("api", fakeTmux(() => ({ stdout: "", stderr: "" }))), "present");

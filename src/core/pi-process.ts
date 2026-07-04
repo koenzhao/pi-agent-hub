@@ -13,7 +13,3 @@ export function buildPiArgs(options: PiArgsOptions): string[] {
   if (options.initialPrompt) args.push(options.initialPrompt);
   return args;
 }
-
-export function buildPiCommand(options: PiArgsOptions): { command: string; args: string[] } {
-  return { command: "pi", args: buildPiArgs(options) };
-}

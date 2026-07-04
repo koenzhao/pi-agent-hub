@@ -10,6 +10,8 @@ Use this section while developing. Move entries into a versioned section before 
 
 ### Changed
 
+- Removed unused public exports `McpTool`, `PiToolDefinition`, and `buildPiCommand`; moved `cliTuiCommand` into `core/tmux` and deleted the shallow `core/cli-command` module.
+
 ### Fixed
 
 ## 1.2.0 - 2026-05-26

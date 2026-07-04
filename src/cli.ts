@@ -2,14 +2,13 @@
 import { constants } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { cliTuiCommand } from "./core/cli-command.js";
+import { cliTuiCommand, hasTmux, inspectSwitchReturnBinding } from "./core/tmux.js";
 import { configPath, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, loadSessionsConfig, setSessionPrelude, unsetSessionPrelude } from "./core/config.js";
 import { extensionPath } from "./core/extension-path.js";
 import { formatCliInstallDoctor, formatCliInstallWarning, inspectCliInstall, shouldWarnForCommand } from "./core/install-diagnostics.js";
 import { CLI_COMMAND } from "./core/names.js";
 import { registryPath, sessionsStateDir } from "./core/paths.js";
 import { loadRegistry } from "./core/registry.js";
-import { hasTmux, inspectSwitchReturnBinding } from "./core/tmux.js";
 import { dashboardEnv, openDashboard } from "./app/dashboard.js";
 import { runTui } from "./app/run-tui.js";
 import { deleteManagedSession } from "./app/delete-session.js";

@@ -1,16 +1,3 @@
-export interface McpTool {
-  name: string;
-  description?: string;
-  inputSchema?: unknown;
-}
-
-export interface PiToolDefinition {
-  name: string;
-  label: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}
-
 export interface McpToolResult {
   content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
   isError?: boolean;
