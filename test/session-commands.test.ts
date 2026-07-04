@@ -6,7 +6,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { loadRegistry, saveRegistry } from "../src/core/registry.js";
-import { addManagedSession, forkManagedSession, managedPiCommand } from "../src/app/session-commands.js";
+import { heartbeatPath } from "../src/core/paths.js";
+import {
+  addManagedSession,
+  forkManagedSession,
+  managedPiCommand,
+  restartManagedSessionFresh,
+  startManagedSession,
+  stopManagedSession,
+} from "../src/app/session-commands.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 const execFileAsync = promisify(execFile);
@@ -146,6 +154,73 @@ function session(overrides: Partial<ManagedSession> = {}): ManagedSession {
     ...overrides,
   };
 }
+
+test("restartManagedSessionFresh clears saved Pi state and starts a new tmux session", async () => {
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-restart-fresh-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  const alive = join(root, "alive");
+  await mkdir(bin);
+  await writeFile(alive, "yes", "utf8");
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nif [ "$1" = "has-session" ]; then [ -f ${JSON.stringify(alive)} ] && exit 0 || exit 1; fi\nif [ "$1" = "kill-session" ]; then rm -f ${JSON.stringify(alive)}; exit 0; fi\nif [ "$1" = "new-session" ]; then touch ${JSON.stringify(alive)}; exit 0; fi\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  process.env.PI_AGENT_HUB_DIR = root;
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    await saveRegistry({
+      version: 1,
+      sessions: [session({
+        status: "waiting",
+        sessionFile: join(root, "saved.jsonl"),
+        piSessionId: "pi-session",
+        acknowledgedAt: 123,
+        error: "previous error",
+        activeTheme: { name: "custom", tokens: { accent: "#ff00ff" } },
+      })],
+    });
+    await mkdir(join(root, "heartbeats"));
+    await writeFile(heartbeatPath("source-session"), "{}", "utf8");
+
+    await restartManagedSessionFresh("source-session");
+
+    const registry = await loadRegistry();
+    const restarted = registry.sessions[0]!;
+    assert.equal(restarted.status, "starting");
+    assert.equal(restarted.sessionFile, undefined);
+    assert.equal(restarted.piSessionId, undefined);
+    assert.equal(restarted.acknowledgedAt, undefined);
+    assert.equal(restarted.error, undefined);
+    assert.equal(restarted.activeTheme, undefined);
+    await assert.rejects(() => readFile(heartbeatPath("source-session"), "utf8"), /ENOENT/);
+    const commands = await readFile(log, "utf8");
+    assert.match(commands, /kill-session -t pi-agent-hub-source/);
+    assert.match(commands, /new-session .*PI_AGENT_HUB_SESSION_ID='source-session'/);
+    assert.match(commands, /set-option -t pi-agent-hub-source status on/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});
+
+test("lifecycle commands reject subagent registry rows", async () => {
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const dir = await mkdtemp(join(tmpdir(), "pi-agent-hub-subagent-lifecycle-"));
+  process.env.PI_AGENT_HUB_DIR = dir;
+  try {
+    await saveRegistry({ version: 1, sessions: [session({ kind: "subagent", parentId: "parent", agentName: "worker" })] });
+
+    await assert.rejects(() => startManagedSession("source-session"), /Cannot start subagent row: source/);
+    await assert.rejects(() => stopManagedSession("source-session"), /Cannot stop subagent row: source/);
+    await assert.rejects(() => forkManagedSession("source-session"), /Cannot fork subagent row: source/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+  }
+});
 
 test("forkManagedSession does not register a fork when source history is not saved", async () => {
   const oldDir = process.env.PI_AGENT_HUB_DIR;
