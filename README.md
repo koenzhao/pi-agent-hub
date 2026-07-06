@@ -20,7 +20,7 @@ Most agent managers try to become the runtime. `pi-agent-hub` stays small: Pi ru
 | Return shortcuts | `Ctrl+Q` jumps from a managed session back to the dashboard; `Alt+R` opens rename from inside a session. |
 | Project-scoped skills/MCP | Pick skills and MCP servers for the selected session's primary repo. |
 | Multi-repo workspaces | Extra repos are symlinked into a runtime workspace; source repos are not moved or owned. |
-| Hub-owned worktrees | Create isolated one-repo branch sessions from the new-session form; finish, forget, or discard them explicitly from the dashboard. |
+| Hub-owned worktrees | Create isolated branch sessions for one or more repos; finish, forget, or discard them explicitly from the dashboard. |
 | Small surface area | No cloud service, no custom agent runtime, no hidden repo scanning. |
 
 ## Quick start
@@ -33,7 +33,7 @@ pi-hub doctor
 pi-hub
 ```
 
-Inside the dashboard:
+Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the full map):
 
 | Key | Action |
 | --- | --- |
@@ -43,6 +43,8 @@ Inside the dashboard:
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
+| `i` | Toggle compact/full selected-session info |
+| `v` | Toggle groups view ↔ stages view |
 | `q` | Quit the dashboard |
 | `r` | Open restart choices (`r` selected, `n` new conversation, `a` all) |
 | `R` | Rename the selected session |

@@ -14,7 +14,7 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 - Recent repo history: `repo-history.json`
 - Dashboard tmux session: `pi-agent-hub`
 - Managed Pi tmux sessions: `pi-agent-hub-<first-12-session-id-chars>`
-- Project skills: `<project>/.pi/skills`
+- Materialized project skills: `<project>/.pi/skills`
 - Project skill state: `<project>/.pi/sessions/skills.json`
 - Project MCP state: `<project>/.pi/sessions/mcp.json`
 - MCP catalog: `<global-state>/mcp.json` by default, configurable in `config.json`
@@ -76,7 +76,7 @@ Optional global config lives at `config.json` under the global state directory:
     "catalogPath": "~/.pi/agent/pi-agent-hub/mcp.json"
   },
   "session": {
-    "prelude": "security show-keychain-info ~/Library/Keychains/login.keychain-db >/dev/null 2>&1 || security unlock-keychain ~/Library/Keychains/login.keychain-db"
+    "prelude": "eval \"$(ssh-agent -s)\" >/dev/null"
   },
   "dashboard": {
     "themeSessionId": "last-entered-session-id",
@@ -126,14 +126,16 @@ Supported key spelling includes plain single characters, `C-x`/`ctrl+x`, and `M-
 
 ## Session prelude
 
-`session.prelude` is an optional shell snippet that runs before `pi` starts in every new, restarted, or forked managed session. It is useful for machine-local setup such as unlocking the macOS login keychain, starting an SSH agent, or loading `direnv`; do not store raw secrets in it.
+`session.prelude` is an optional shell snippet that runs before `pi` starts in every new, restarted, or forked managed session. It is useful for machine-local setup such as starting an SSH agent, unlocking an OS credential store, or loading `direnv`; do not store raw secrets in it.
 
 Configure it without editing JSON manually:
 
 ```bash
-pi-hub config set session-prelude 'security show-keychain-info ~/Library/Keychains/login.keychain-db >/dev/null 2>&1 || security unlock-keychain ~/Library/Keychains/login.keychain-db'
+pi-hub config set session-prelude 'eval "$(ssh-agent -s)" >/dev/null'
 pi-hub config unset session-prelude
 ```
+
+On macOS, a machine-local keychain prelude can be configured the same way when needed.
 
 The dashboard itself and direct `pi-hub tui` runs do not run `session.prelude`.
 

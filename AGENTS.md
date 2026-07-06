@@ -17,7 +17,7 @@
 - Groups are implicit session labels: `g` moves the selected session, `G` renames its current group globally, and no empty-group lifecycle should be added unless the model changes.
 - Active/Backlog/Archived are optional per-session buckets: `A`/`B`/`U` only reorganize rows and must not stop tmux/Pi; subagent rows follow their parent.
 - Row order is user-controlled via `src/core/session-order.ts`; do not reintroduce status/title sorting or a separate stopped section. `K`/`J` reorder within the current group and lifecycle section.
-- Preserve common shortcuts: `r` opens restart choices (`r` selected, `n` new conversation, `a` all), `R` renames, `N` syncs from Pi `/name`, `e` is a hidden rename alias, and `Alt+N` is a sync-name compatibility alias.
+- Do not repurpose established shortcuts: `r` restart choices, `R` rename, `N` sync from Pi `/name`, plus hidden compatibility aliases `e` for rename and `Alt+N` for sync.
 
 ## TUI Rules
 

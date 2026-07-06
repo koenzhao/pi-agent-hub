@@ -149,26 +149,9 @@ When worktree mode is enabled, the `branch` field creates the same new local bra
 
 ## Groups and session actions
 
-Groups are simple labels on sessions.
-
-| Key | Action |
-| --- | --- |
-| `g` | Move the selected session to a group; use `Ctrl+N` / `Ctrl+P` in the dialog to cycle visible existing groups |
-| `G` | Rename the selected session's group everywhere |
-| `K` / `J` | Move the selected session up/down within its group |
-| `Shift+Up` / `Shift+Down` | Same as `K` / `J` |
-| `p` | Send a one-line message to the selected live session without opening it |
-| `r` | Open restart choices: `r` restarts selected, `n` starts a new conversation, `a` restarts all |
-| `R` | Rename the selected session in the dashboard footer |
-| `A` | Archive the selected session |
-| `B` | Move the selected session to Backlog |
-| `U` | Restore a Backlog or Archived session to Active |
-| `w` | Finish the selected hub-owned worktree session |
-| `N` | Sync the selected hub title from Pi's `/name` |
+Groups are simple labels on sessions. Moving a session to a new label creates that group, and renaming a group updates every session currently using that label. Row order is user-controlled within the current group and lifecycle section; reordering is disabled while a filter is active.
 
 Backlog and Archive are dashboard organization states only: they do not stop tmux or Pi. Subagent rows follow their parent session and cannot be moved directly. Archived rows are automatically removed from the dashboard after 72 hours, but only after the archived session and any subagent rows are confirmed missing from tmux; this cleanup removes Hub registry/heartbeat/metadata/workspace state and does not delete Pi conversation files.
-
-Reordering is disabled while a filter is active.
 
 Custom normal-mode dashboard shortcuts can be configured in `config.json`; see [Dashboard shortcuts](CONFIG.md#dashboard-shortcuts). They send one-line text to the selected live session without opening it and are intended for Pi-native commands such as `/session-summary name`, provided by the optional [`pi-session-summary`](https://github.com/masta-g3/pi-session-summary) extension.
 
