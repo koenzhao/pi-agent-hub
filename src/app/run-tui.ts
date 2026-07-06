@@ -11,7 +11,7 @@ import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mc
 import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
-import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, switchClientWithReturn } from "../core/tmux.js";
+import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, setDashboardStatusBarVisible, switchClientWithReturn } from "../core/tmux.js";
 import { closeSidePaneShowing, closeSidePanes, listSidePaneSessions, openInSidePane } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
@@ -128,9 +128,15 @@ export async function runTui(): Promise<void> {
     void setDashboardThemeSessionId(session.id).catch(() => {});
   };
   const theme = await loadDashboardTheme(cwd, controller.snapshot().registry.sessions, dashboardThemeSessionId);
+  let dashboardStatusVisible = true;
+  const applyDashboardStatusVisibility = async (visible: boolean, force = false) => {
+    if (!process.env.TMUX || (!force && dashboardStatusVisible === visible)) return;
+    await setDashboardStatusBarVisible({ name: DASHBOARD_SESSION, visible });
+    dashboardStatusVisible = visible;
+  };
   const syncDashboardChrome = (nextTheme: SessionsTheme) => {
     if (!process.env.TMUX) return;
-    void configureDashboardStatusBar({ name: DASHBOARD_SESSION, cwd, theme: nextTheme }).catch(() => {});
+    void configureDashboardStatusBar({ name: DASHBOARD_SESSION, cwd, theme: nextTheme, visible: dashboardStatusVisible }).catch(() => {});
   };
   const applyManagedSessionTheme = async (session: ManagedSession) => {
     pinDashboardThemeSession(session);
@@ -177,6 +183,9 @@ export async function runTui(): Promise<void> {
       for (const tmuxSession of await listSidePaneSessions({ ownPane })) next.add(tmuxSession);
     }
     const changed = !sameStringSets(sidePaneTmuxSessions, next);
+    const hadSidePanes = sidePaneTmuxSessions.size > 0;
+    const hasSidePanes = next.size > 0;
+    if (hadSidePanes !== hasSidePanes) await applyDashboardStatusVisibility(!hasSidePanes);
     sidePaneTmuxSessions = next;
     return changed;
   };
@@ -194,8 +203,14 @@ export async function runTui(): Promise<void> {
     void restoreSwitchReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {});
     const ownPane = process.env.TMUX_PANE;
     const finish = () => { tui.stop(); };
-    if (ownPane) void closeSidePanes({ ownPane }).catch(() => {}).finally(finish);
-    else finish();
+    if (ownPane) {
+      void closeSidePanes({ ownPane })
+        .catch(() => {})
+        .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
+        .finally(finish);
+    } else {
+      void applyDashboardStatusVisibility(true, true).catch(() => {}).finally(finish);
+    }
   };
   const mutateRegistry = createRegistryMutator({
     async pause() {
@@ -239,7 +254,7 @@ export async function runTui(): Promise<void> {
     async switchInsideTmux(tmuxSession) {
       const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
       const ownPane = process.env.TMUX_PANE;
-      if (ownPane) await closeSidePaneShowing({ target: tmuxSession, ownPane });
+      if (ownPane && await closeSidePaneShowing({ target: tmuxSession, ownPane })) await refreshSidePanePresence();
       if (session) await applyManagedSessionTheme(session);
       return switchClientWithReturn({
         targetSession: tmuxSession,
@@ -254,7 +269,7 @@ export async function runTui(): Promise<void> {
       if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
       if (session.status === "waiting") await mutateRegistry(() => controller.acknowledgeSession(session.id));
       const result = await openInSidePane({ target: session.tmuxSession, ownPane });
-      const changed = await refreshSidePanePresence().catch(() => false);
+      const changed = await refreshSidePanePresence();
       if (changed) tui.requestRender();
       if (result.kind !== "closed") await applyManagedSessionTheme(session);
       return result;

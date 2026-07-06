@@ -178,15 +178,23 @@ export async function configureManagedSessionStatusBar(options: {
   ]);
 }
 
+export async function setDashboardStatusBarVisible(options: {
+  name: string;
+  visible: boolean;
+}, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["set-option", "-t", options.name, "status", options.visible ? "on" : "off"]);
+}
+
 export async function configureDashboardStatusBar(options: {
   name: string;
   cwd: string;
   theme?: ChromeThemeTokens;
+  visible?: boolean;
 }, exec: TmuxExec = realTmuxExec): Promise<void> {
   const chrome = tmuxChromeFromTheme(options.theme);
   const statusRight = `#[fg=${chrome.hintColor}]dashboard#[default] │ 📁 ${tmuxFormatText(projectDisplayName(options.cwd))} `;
   await exec.exec("tmux", [
-    "set-option", "-t", options.name, "status", "on",
+    "set-option", "-t", options.name, "status", options.visible === false ? "off" : "on",
     ";", "set-option", "-t", options.name, "status-style", chrome.statusStyle,
     ";", "set-option", "-t", options.name, "status-left", "",
     ";", "set-option", "-t", options.name, "status-right", statusRight,

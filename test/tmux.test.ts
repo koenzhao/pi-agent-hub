@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, shellQuote, splitPaneBelowAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardStatusBarVisible, shellQuote, splitPaneBelowAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -197,6 +197,29 @@ test("configureDashboardStatusBar applies theme-derived chrome", async () => {
   assert.match(exec.calls[0]?.args.join("\n"), /status-style\nbg=#333333,fg=#111111/);
   assert.match(exec.calls[0]?.args.join("\n"), /#\[fg=colour244\]dashboard#\[default\]/);
   assert.match(exec.calls[0]?.args.join("\n"), /window-status-current-style\nfg=#111111,bg=#333333/);
+});
+
+test("configureDashboardStatusBar can keep dashboard chrome configured while status is hidden", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await configureDashboardStatusBar({ name: "pi-agent-hub-dashboard", cwd: "/repo/example-service", visible: false }, exec);
+
+  const args = exec.calls[0]?.args ?? [];
+  assert.deepEqual(args.slice(0, 5), ["set-option", "-t", "pi-agent-hub-dashboard", "status", "off"]);
+  assert.ok(args.includes("status-right"));
+  assert.ok(args.includes("window-status-current-format"));
+});
+
+test("setDashboardStatusBarVisible toggles only the dashboard status option", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await setDashboardStatusBarVisible({ name: "pi-agent-hub-dashboard", visible: false }, exec);
+  await setDashboardStatusBarVisible({ name: "pi-agent-hub-dashboard", visible: true }, exec);
+
+  assert.deepEqual(exec.calls, [
+    { command: "tmux", args: ["set-option", "-t", "pi-agent-hub-dashboard", "status", "off"] },
+    { command: "tmux", args: ["set-option", "-t", "pi-agent-hub-dashboard", "status", "on"] },
+  ]);
 });
 
 test("currentTmuxSession reads and trims the current tmux session", async () => {
