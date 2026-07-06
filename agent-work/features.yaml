@@ -235,3 +235,15 @@
   created_at: '2026-07-04'
   id: split-view-004
   completed_at: '2026-07-06'
+- epic: split-view
+  status: done
+  title: Sidebar mouse support
+  description: User can click a sidebar session row to select it (and trigger the
+    side-pane action on the selected row) and scroll the wheel to move selection,
+    while the sidebar workspace is attached; Hub enables tmux mouse mode scoped to
+    the dashboard session.
+  priority: 2
+  created_at: '2026-07-06'
+  id: split-view-005
+  plan_file: agent-work/history/20260706_split-view-005_sidebar_mouse.md
+  completed_at: '2026-07-06'

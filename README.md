@@ -105,19 +105,13 @@ pi-hub config unset session-prelude
 
 ## Troubleshooting
 
-For SSH/tmux use, mouse behavior comes from the remote tmux server. If right-click pastes or the scroll wheel cycles prompt history instead of interacting with the dashboard/session, enable tmux mouse support:
+For SSH/tmux use, mouse behavior comes from the remote tmux server. Hub enables tmux mouse mode only on the dashboard session while `pi-hub` is running, then unsets that session override on quit so your global tmux preference applies again. It does not force global tmux mouse settings.
 
-```tmux
-set -g mouse on
-```
-
-For better modified-key handling, also enable extended keys if your tmux version supports it:
+For better modified-key handling, enable extended keys globally if your tmux version supports it:
 
 ```tmux
 set -g extended-keys on
 ```
-
-`pi-agent-hub` does not force these global tmux settings.
 
 ## Documentation
 

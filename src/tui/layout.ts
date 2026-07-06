@@ -3,13 +3,25 @@ import type { WorkflowSnapshot } from "../core/types.js";
 import type { RenderModel, RenderSession, StatusCounts } from "./render-model.js";
 import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, type SessionsTheme } from "./theme.js";
 
-export function renderSessions(model: RenderModel, theme?: SessionsTheme): string[] {
+export interface SessionsLayout {
+  lines: string[];
+  rowSessions: (string | undefined)[];
+  listWidth: number;
+}
+
+export function renderSessions(model: RenderModel, theme?: SessionsTheme): SessionsLayout {
   const styles = theme ? createStyles(theme) : plainStyles();
   const width = Math.max(40, model.width);
-  if (model.empty) return box(width, emptyLines(width, styles), styles);
+  if (model.empty) {
+    const lines = box(width, emptyLines(width, styles), styles);
+    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0 };
+  }
 
   const bodyWidth = width - 2;
-  if (model.noMatches) return box(width, [renderTopSummary(model, bodyWidth, styles), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)], styles);
+  if (model.noMatches) {
+    const lines = box(width, [renderTopSummary(model, bodyWidth, styles), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)], styles);
+    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0 };
+  }
 
   const split = model.showPreview ? Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38))) : bodyWidth;
   const targetRows = bodyRowsFromHeight(model.height);
@@ -25,7 +37,10 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): strin
   }
   body.push(styles.border("─".repeat(bodyWidth)));
   body.push(truncate(styleFooter(model.footer, styles), bodyWidth));
-  return box(width, body, styles);
+  const lines = box(width, body, styles);
+  const rowSessions = lines.map(() => undefined as string | undefined);
+  for (let i = 0; i < rows; i += 1) rowSessions[2 + i] = left.sessions[i];
+  return { lines, rowSessions, listWidth: split };
 }
 
 // Footer strings stay plain in the render model for testability; keys get
@@ -118,35 +133,41 @@ function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyle
   return truncate(parts.join(" · "), width);
 }
 
-function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): { lines: string[]; selectedIndex: number } {
+function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): { lines: string[]; sessions: (string | undefined)[]; selectedIndex: number } {
   const stages = model.viewMode === "stages";
   const lines: string[] = [];
+  const sessions: (string | undefined)[] = [];
   let selectedIndex = -1;
+  const pushLine = (line: string, sessionId?: string) => {
+    lines.push(line);
+    sessions.push(sessionId);
+  };
   const pushRow = (session: RenderSession) => {
     if (session.selected) selectedIndex = lines.length;
-    lines.push(renderSessionRow(session, width, styles, stages));
+    pushLine(renderSessionRow(session, width, styles, stages), session.id);
   };
   if (!model.showSections) {
     for (const group of model.groups) {
-      lines.push(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
+      pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
       for (const session of group.sessions) pushRow(session);
     }
-    return { lines, selectedIndex };
+    return { lines, sessions, selectedIndex };
   }
   let firstSection = true;
   for (const section of model.sections) {
-    if (!firstSection) lines.push("");
-    lines.push(sectionHeader(section.title, formatStatusCounts(section.statusCounts, styles), width, styles));
+    if (!firstSection) pushLine("");
+    pushLine(sectionHeader(section.title, formatStatusCounts(section.statusCounts, styles), width, styles));
     firstSection = false;
     for (const group of section.groups) {
-      if (group.name) lines.push(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
+      if (group.name) pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
       for (const session of group.sessions) pushRow(session);
     }
   }
   if (stages && model.hiddenNonActive > 0) {
-    lines.push("", styles.dim(truncate(`+${model.hiddenNonActive} backlog/archived · v groups view`, width)));
+    pushLine("");
+    pushLine(styles.dim(truncate(`+${model.hiddenNonActive} backlog/archived · v groups view`, width)));
   }
-  return { lines, selectedIndex };
+  return { lines, sessions, selectedIndex };
 }
 
 function renderDetails(session: RenderSession | undefined, width: number, preview: string, expanded: boolean, targetRows: number | undefined, styles: LayoutStyles): string[] {

@@ -7,6 +7,7 @@ import type { ManagedSession } from "../core/types.js";
 import { matchesDashboardShortcut } from "./dashboard-shortcuts.js";
 import { buildRenderModel, stageLaneRows } from "./render-model.js";
 import { renderSessions } from "./layout.js";
+import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
 import { errorMessage, isPromise, type DialogContext, type OpenSidePaneResult, type SessionDialog, type SessionsViewActions } from "./dialog.js";
@@ -29,6 +30,8 @@ export class SessionsView implements Component {
   private viewMode: "groups" | "stages" = "groups";
   private pendingRestart: { sessionId: string } | undefined;
   private busy = false;
+  private rowSessions: (string | undefined)[] = [];
+  private listWidth = 0;
 
   constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {}
 
@@ -41,6 +44,12 @@ export class SessionsView implements Component {
   }
 
   handleInput(data: string): void {
+    if (isMouseSequence(data)) {
+      const event = parseMouseEvent(data);
+      if (event && !this.dialog && !this.busy) this.handleMouse(event);
+      return;
+    }
+
     if (this.dialog) {
       if (this.dialog.kind === "help") {
         if (data === "q") this.stop();
@@ -133,7 +142,7 @@ export class SessionsView implements Component {
     const snapshot = this.controller.snapshot();
     const selected = this.controller.selected();
     const now = this.actions.now?.() ?? Date.now();
-    const lines = renderSessions(buildRenderModel({
+    const layout = renderSessions(buildRenderModel({
       sessions: snapshot.sessions,
       selectedId: snapshot.selectedId,
       width,
@@ -147,8 +156,10 @@ export class SessionsView implements Component {
       now,
       sidePaneSessionIds: normalizeSidePaneSessionIds(this.actions.sidePaneSessionIds?.()),
     }), this.theme);
+    this.rowSessions = layout.rowSessions;
+    this.listWidth = layout.listWidth;
     const footer = this.dialog?.kind === "prompt" ? promptFooter(this.dialog, this.dialogContext()) : undefined;
-    const withFooter = footer ? replaceFooter(lines, footer, this.theme) : lines;
+    const withFooter = footer ? replaceFooter(layout.lines, footer, this.theme) : layout.lines;
     if (this.message) return replaceFooter(withFooter, this.message, this.theme);
     return this.flash ? replaceFooter(withFooter, this.flash.text, this.theme) : withFooter;
   }
@@ -299,6 +310,22 @@ export class SessionsView implements Component {
     } catch (error) {
       applyError(error);
     }
+  }
+
+  private handleMouse(event: MouseEvent) {
+    if (this.pendingRestart) {
+      if (event.kind === "press") this.clearPendingRestart();
+      return;
+    }
+    if (event.kind === "wheel") {
+      this.moveSelection(event.delta);
+      return;
+    }
+    const inList = event.x >= 2 && event.x <= 1 + this.listWidth;
+    const id = inList ? this.rowSessions[event.y - 1] : undefined;
+    if (!id) return;
+    if (id === this.controller.snapshot().selectedId) this.openSelectedSidePane();
+    else this.controller.selectSession(id);
   }
 
   private startPicker(mode: "skills" | "mcp") {
@@ -608,6 +635,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  ↑↓/j/k move selection     Enter open/switch     o side pane     / filter",
     "  K/J reorder in group      q quit                Esc cancel/clear",
     "  v toggle groups/stages view",
+    "  mouse click select · click again side pane · wheel move",
     "",
     heading("Sessions"),
     "  n new     p send     r restart choices     N sync Pi name     f fork     w finish worktree",

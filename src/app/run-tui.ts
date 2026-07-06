@@ -3,6 +3,7 @@ import { ProcessTerminal, TUI } from "@earendil-works/pi-tui";
 import { SessionsController } from "./controller.js";
 import { startRefreshLoop, type RefreshLoopHandle } from "./refresh-loop.js";
 import { SessionsView } from "../tui/sessions-view.js";
+import { MOUSE_DISABLE, MOUSE_ENABLE } from "../tui/mouse.js";
 import type { NewFormContext } from "../tui/new-form.js";
 import { loadManagedSessionTheme, loadSessionsTheme, type SessionsTheme } from "../tui/theme.js";
 import { loadProjectSkillsState, setProjectSkills } from "../skills/attach.js";
@@ -11,7 +12,7 @@ import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mc
 import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
-import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, setDashboardStatusBarVisible, switchClientWithReturn } from "../core/tmux.js";
+import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setDashboardStatusBarVisible, switchClientWithReturn } from "../core/tmux.js";
 import { closeSidePaneShowing, closeSidePanes, listSidePaneSessions, openInSidePane } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
@@ -202,14 +203,21 @@ export async function runTui(): Promise<void> {
     void stopLoop?.stop();
     void restoreSwitchReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {});
     const ownPane = process.env.TMUX_PANE;
-    const finish = () => { tui.stop(); };
+    const finish = () => {
+      terminal.write(MOUSE_DISABLE);
+      tui.stop();
+    };
     if (ownPane) {
       void closeSidePanes({ ownPane })
         .catch(() => {})
         .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
+        .then(() => process.env.TMUX ? setDashboardMouse({ name: DASHBOARD_SESSION, enabled: false }).catch(() => {}) : undefined)
         .finally(finish);
     } else {
-      void applyDashboardStatusVisibility(true, true).catch(() => {}).finally(finish);
+      void applyDashboardStatusVisibility(true, true)
+        .catch(() => {})
+        .then(() => process.env.TMUX ? setDashboardMouse({ name: DASHBOARD_SESSION, enabled: false }).catch(() => {}) : undefined)
+        .finally(finish);
     }
   };
   const mutateRegistry = createRegistryMutator({
@@ -437,6 +445,8 @@ export async function runTui(): Promise<void> {
   tui.addChild(view);
   tui.setFocus(view);
   tui.start();
+  terminal.write(MOUSE_ENABLE);
+  if (process.env.TMUX) void setDashboardMouse({ name: DASHBOARD_SESSION, enabled: true }).catch(() => {});
   stopLoop = startRefreshLoop(controller, tui);
 }
 

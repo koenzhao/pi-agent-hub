@@ -185,6 +185,14 @@ export async function setDashboardStatusBarVisible(options: {
   await exec.exec("tmux", ["set-option", "-t", options.name, "status", options.visible ? "on" : "off"]);
 }
 
+export async function setDashboardMouse(options: {
+  name: string;
+  enabled: boolean;
+}, exec: TmuxExec = realTmuxExec): Promise<void> {
+  if (options.enabled) await exec.exec("tmux", ["set-option", "-t", options.name, "mouse", "on"]);
+  else await exec.exec("tmux", ["set-option", "-u", "-t", options.name, "mouse"]);
+}
+
 export async function configureDashboardStatusBar(options: {
   name: string;
   cwd: string;

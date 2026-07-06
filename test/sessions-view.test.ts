@@ -426,6 +426,111 @@ test("o is swallowed while a dialog is open", () => {
   assert.match(stripAnsi(view.render(100).join("\n")), /pi agent hub help/);
 });
 
+function mousePressAtLine(lineIndex: number, x = 3): string {
+  return `\u001b[<0;${x};${lineIndex + 1}M`;
+}
+
+function rowIndexFor(rendered: string[], title: string): number {
+  const index = rendered.findIndex((line) => {
+    const text = stripAnsi(line);
+    return text.includes(title) && /^│[▶ ] [●◐○×-]/.test(text);
+  });
+  assert.notEqual(index, -1, `missing rendered row for ${title}`);
+  return index;
+}
+
+test("mouse click on a non-selected row selects it", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {});
+  const rendered = view.render(100);
+
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "docs")));
+
+  assert.equal(controller.snapshot().selectedId, "docs");
+});
+
+test("mouse click on the selected row opens the side pane action", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+  const rendered = view.render(100);
+
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "api")));
+
+  assert.deepEqual(opened, ["api"]);
+});
+
+test("mouse clicks ignore group headers and details pane", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+  const rendered = view.render(100);
+  const before = controller.snapshot().selectedId;
+
+  const headerIndex = rendered.findIndex((line) => stripAnsi(line).includes("default"));
+  assert.notEqual(headerIndex, -1, "missing group header");
+  view.handleInput(mousePressAtLine(headerIndex));
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "docs"), 99));
+
+  assert.equal(controller.snapshot().selectedId, before);
+  assert.deepEqual(opened, []);
+});
+
+test("mouse wheel moves selection", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {});
+  view.render(100);
+
+  view.handleInput("\u001b[<65;5;5M");
+  assert.equal(controller.snapshot().selectedId, "docs");
+  view.handleInput("\u001b[<64;5;5M");
+  assert.equal(controller.snapshot().selectedId, "api");
+});
+
+test("mouse sequences are consumed while rename prompt is open", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {});
+  view.render(100);
+  view.handleInput("R");
+  view.handleInput("\u001b[<0;3;4M");
+  view.handleInput("\u001b[<0;3;4m");
+
+  assert.equal(controller.snapshot().selectedId, "api");
+  assert.match(stripAnsi(view.render(100).join("\n")), /rename api: api[█▌]/);
+});
+
+test("mouse press only dismisses restart choices and wheel is ignored", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+  const rendered = view.render(100);
+
+  view.handleInput("r");
+  view.handleInput("\u001b[<65;5;5M");
+  assert.equal(controller.snapshot().selectedId, "api");
+  assert.match(stripAnsi(view.render(100).join("\n")), /target\s+api/);
+
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "docs")));
+  assert.equal(controller.snapshot().selectedId, "api");
+  assert.deepEqual(opened, []);
+  assert.doesNotMatch(stripAnsi(view.render(100).join("\n")), /Restart api/);
+});
+
 test("enter triggers attach action outside tmux", () => {
   const oldTmux = process.env.TMUX;
   delete process.env.TMUX;

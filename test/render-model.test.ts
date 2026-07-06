@@ -38,23 +38,23 @@ test("workflow rail renders compact in the list row and full in details", () => 
   const model = buildRenderModel({ sessions: [{ ...session("a", "default", "running"), workflow: WORKFLOW }], selectedId: "a", width: 110 });
   assert.equal(model.selected?.workflow?.activeIndex, 3);
 
-  const lines = renderSessions(model).map(stripAnsi);
+  const lines = renderSessions(model).lines.map(stripAnsi);
   const row = lines.find((line) => line.includes("▶"));
   assert.match(row ?? "", /● a\s+EX 4\/7/);
   assert.match(lines.join("\n"), /NX─PR─PL─▐EX▌─RV─RF─CM · auth-003/);
-  for (const line of renderSessions(model)) assert.ok(visibleWidth(line) <= 110, line);
+  for (const line of renderSessions(model).lines) assert.ok(visibleWidth(line) <= 110, line);
 });
 
 test("expanded details include the full workflow rail", () => {
   const model = buildRenderModel({ sessions: [{ ...session("a", "default", "running"), workflow: { ...WORKFLOW, ticketId: undefined } }], selectedId: "a", width: 110, detailsExpanded: true });
-  const text = renderSessions(model).map(stripAnsi).join("\n");
+  const text = renderSessions(model).lines.map(stripAnsi).join("\n");
   assert.match(text, /NX─PR─PL─▐EX▌─RV─RF─CM/);
   assert.doesNotMatch(text, /· auth-003/);
 });
 
 test("sessions without workflow render no rail", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "running")], selectedId: "a", width: 110 });
-  const text = renderSessions(model).map(stripAnsi).join("\n");
+  const text = renderSessions(model).lines.map(stripAnsi).join("\n");
   assert.doesNotMatch(text, /4\/7/);
   assert.doesNotMatch(text, /NX─PR/);
 });
@@ -62,7 +62,7 @@ test("sessions without workflow render no rail", () => {
 test("archive expiry badge takes priority over the compact rail", () => {
   const archived = { ...session("a", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
   const model = buildRenderModel({ sessions: [archived, session("b", "default", "running")], selectedId: "a", width: 110, now: 100 });
-  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
   assert.match(row ?? "", /\[exp 3d\]/);
   assert.doesNotMatch(row ?? "", /EX 4\/7/);
 });
@@ -70,7 +70,7 @@ test("archive expiry badge takes priority over the compact rail", () => {
 test("workflow rail stays width-safe at narrow and wide sizes", () => {
   const sessions = [{ ...session("a", "default", "running", "long-title-".repeat(6)), workflow: WORKFLOW }];
   for (const width of [70, 100, 160]) {
-    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "a", width }))) {
+    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "a", width })).lines) {
       assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
     }
   }
@@ -89,7 +89,7 @@ test("stages view groups sessions into workflow lanes", () => {
   assert.equal(model.hiddenNonActive, 1);
   assert.equal(model.selected?.id, "x");
 
-  const rendered = renderSessions(model).map(stripAnsi).join("\n");
+  const rendered = renderSessions(model).lines.map(stripAnsi).join("\n");
   assert.match(rendered, /PRIME/);
   assert.match(rendered, /EXECUTE/);
   assert.match(rendered, /NO WORKFLOW/);
@@ -99,7 +99,7 @@ test("stages view groups sessions into workflow lanes", () => {
 
 test("stages view rows show the group name instead of the rail", () => {
   const model = buildRenderModel({ sessions: [{ ...session("p", "agents", "running"), workflow: WORKFLOW }], viewMode: "stages", width: 120 });
-  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
   assert.match(row ?? "", /● p\s+agents/);
   assert.doesNotMatch(row ?? "", /EX 4\/7/);
 });
@@ -121,7 +121,7 @@ test("side pane glyphs render on the left for visible side-pane sessions", () =>
     width: 100,
     sidePaneSessionIds: ["api", "docs"],
   });
-  const rendered = renderSessions(model).map(stripAnsi);
+  const rendered = renderSessions(model).lines.map(stripAnsi);
   assert.match(rendered.find((line) => /● ◫ api/.test(line)) ?? "", /● ◫ api/);
   assert.match(rendered.find((line) => /○ ◫ docs/.test(line)) ?? "", /○ ◫ docs/);
 });
@@ -133,7 +133,7 @@ test("side pane glyphs do not crowd compact workflow rails", () => {
     width: 110,
     sidePaneSessionIds: ["api"],
   });
-  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
   assert.match(row ?? "", /● ◫ api\s+EX 4\/7/);
   assert.doesNotMatch(row ?? "", /EX 4\/7 ◫/);
 });
@@ -146,7 +146,7 @@ test("side pane glyphs remain left-visible at narrow widths", () => {
     width: 40,
     sidePaneSessionIds: ["api"],
   });
-  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
   assert.match(row ?? "", /● ◫ long-t/);
   assert.match(row ?? "", /EXECUTE-LONG-LABEL 4\/7/);
 });
@@ -159,7 +159,7 @@ test("stages view keeps side pane glyphs separate from group adornments", () => 
     viewMode: "stages",
     sidePaneSessionIds: ["api"],
   });
-  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
   assert.match(row ?? "", /● ◫ long-title/);
 });
 
@@ -169,23 +169,56 @@ test("side pane glyphs stay width-safe with workflow rails", () => {
     session("docs", "default", "idle", "docs-title-".repeat(6)),
   ];
   for (const width of [42, 70, 120]) {
-    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "api", width, sidePaneSessionIds: ["api", "docs"] }))) {
+    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "api", width, sidePaneSessionIds: ["api", "docs"] })).lines) {
       assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
     }
   }
 });
 
+test("layout hit map marks only rendered session rows", () => {
+  const sessions = [
+    session("active", "default", "idle", "active-api"),
+    { ...session("backlog", "default", "running", "backlog-docs"), bucket: "backlog" as const, bucketChangedAt: 1 },
+    { ...session("archived", "work", "stopped", "archived-worker"), bucket: "archived" as const, bucketChangedAt: 1 },
+  ];
+  const layout = renderSessions(buildRenderModel({ sessions, selectedId: "backlog", width: 70, now: 100 }));
+
+  assert.equal(layout.lines.length, layout.rowSessions.length);
+  for (const [index, id] of layout.rowSessions.entries()) {
+    const text = stripAnsi(layout.lines[index] ?? "");
+    if (!id) {
+      assert.doesNotMatch(text, /active-api|backlog-docs|archived-worker/);
+      continue;
+    }
+    const title = sessions.find((item) => item.id === id)?.title;
+    assert.ok(title, `unknown session id ${id}`);
+    assert.match(text, new RegExp(title));
+  }
+  assert.equal(layout.rowSessions[0], undefined);
+  assert.equal(layout.rowSessions.at(-1), undefined);
+});
+
+test("layout hit map handles empty and wide preview layouts", () => {
+  const empty = renderSessions(buildRenderModel({ sessions: [], width: 80 }));
+  assert.ok(empty.rowSessions.every((id) => id === undefined));
+  assert.equal(empty.listWidth, 0);
+
+  const wide = renderSessions(buildRenderModel({ sessions: [session("a", "default", "idle")], width: 110 }));
+  assert.equal(wide.lines.length, wide.rowSessions.length);
+  assert.ok(wide.listWidth < 108);
+});
+
 test("groups view is unchanged when viewMode is omitted", () => {
   const backlog = { ...session("bk", "experiments", "idle"), bucket: "backlog" as const, bucketChangedAt: 1 };
   const model = buildRenderModel({ sessions: [session("a", "default", "idle"), backlog], width: 120 });
-  const rendered = renderSessions(model).map(stripAnsi).join("\n");
+  const rendered = renderSessions(model).lines.map(stripAnsi).join("\n");
   assert.match(rendered, /BACKLOG/);
   assert.doesNotMatch(rendered, /view stages/);
   assert.doesNotMatch(rendered, /backlog\/archived · v groups view/);
 });
 
 test("empty state rendering includes first-run prompts", () => {
-  const lines = renderSessions(buildRenderModel({ sessions: [], width: 64 }));
+  const lines = renderSessions(buildRenderModel({ sessions: [], width: 64 })).lines;
   assert.match(lines.join("\n"), /No managed Pi sessions yet/);
   assert.match(lines.join("\n"), /▶ n  create a session/);
   assert.match(lines.join("\n"), /  q  quit/);
@@ -199,7 +232,7 @@ test("grouping order and status counts", () => {
   assert.deepEqual(model.groups.map((group) => group.name), ["default", "work"]);
   assert.deepEqual(model.groups[0]?.statusCounts, { running: 0, waiting: 1, idle: 0, error: 1, stopped: 0 });
   assert.deepEqual(model.groups[1]?.statusCounts, { running: 0, waiting: 0, idle: 1, error: 0, stopped: 0 });
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /◐1 ×1/);
   assert.doesNotMatch(rendered, /1 waiting · 1 error/);
 });
@@ -214,7 +247,7 @@ test("sectioned model preserves groups inside lifecycle sections", () => {
   assert.equal(model.selected?.archiveExpiresIn, "3d");
   assert.match(model.footer, /U Restore/);
 
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /ACTIVE/);
   assert.match(rendered, /BACKLOG/);
   assert.match(rendered, /ARCHIVED/);
@@ -224,7 +257,7 @@ test("sectioned model preserves groups inside lifecycle sections", () => {
 test("all-active dashboards suppress lifecycle section headers", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 120 });
   assert.equal(model.showSections, false);
-  assert.doesNotMatch(renderSessions(model).join("\n"), /ACTIVE/);
+  assert.doesNotMatch(renderSessions(model).lines.join("\n"), /ACTIVE/);
 });
 
 test("session order is stable and ignores status and title", () => {
@@ -264,26 +297,26 @@ test("wide footer shows worktree finish only for worktree sessions", () => {
 
 test("long titles/cwd truncate without exceeding width", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle", "a".repeat(100))], width: 60 });
-  for (const line of renderSessions(model)) assert.ok(visibleWidth(line) <= 60, line);
+  for (const line of renderSessions(model).lines) assert.ok(visibleWidth(line) <= 60, line);
 });
 
 
 test("long paths truncate from the start and keep basename", () => {
   const longPath = `/tmp/${"deep/".repeat(20)}project-api`;
   const model = buildRenderModel({ sessions: [{ ...session("a", "default", "idle", "api"), cwd: longPath }], selectedId: "a", width: 80 });
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /….*project-api/);
-  for (const line of renderSessions(model)) assert.ok(visibleWidth(line) <= 80, line);
+  for (const line of renderSessions(model).lines) assert.ok(visibleWidth(line) <= 80, line);
 });
 
 test("wide preview glyphs do not exceed terminal width", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 80, preview: " - npm test ✅\n - npm run package:check ✅" });
-  for (const line of renderSessions(model)) assert.ok(visibleWidth(line) <= 80, line);
+  for (const line of renderSessions(model).lines) assert.ok(visibleWidth(line) <= 80, line);
 });
 
 test("styled preview lines keep italics only", () => {
   const preview = "\u001b[1;38;5;244mHeading\u001b[0m\n\u001b[3;38;2;1;2;3m- thought\u001b[0m\n\u001b[4munderlined\u001b[0m";
-  const rendered = renderSessions(buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, preview })).join("\n");
+  const rendered = renderSessions(buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, preview })).lines.join("\n");
 
   assert.doesNotMatch(rendered, /\u001b\[1mHeading/);
   assert.match(rendered, /\u001b\[3m- thought\u001b\[0m/);
@@ -302,31 +335,31 @@ test("top summary shows visible totals status counts and filter", () => {
   assert.equal(model.summary.total, 3);
   assert.equal(model.summary.visibleTotal, 1);
   assert.deepEqual(model.summary.statusCounts, { running: 0, waiting: 1, idle: 0, error: 0, stopped: 0 });
-  assert.match(renderSessions(model).join("\n"), /1\/3 sessions · ◐1 · filter: doc/);
+  assert.match(renderSessions(model).lines.join("\n"), /1\/3 sessions · ◐1 · filter: doc/);
 });
 
 
 test("error reason appears in selected metadata", () => {
   const broken = { ...session("a", "default", "error", "api"), error: "MCP failed" };
-  const lines = renderSessions(buildRenderModel({ sessions: [broken], selectedId: "a", width: 120 }));
+  const lines = renderSessions(buildRenderModel({ sessions: [broken], selectedId: "a", width: 120 })).lines;
   assert.match(lines.join("\n"), /error\s+MCP failed/);
 });
 
 test("selected and stopped rows have distinct treatments without moving stopped rows", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "stopped", "api"), session("b", "default", "idle", "docs")], selectedId: "b", width: 100 });
-  const lines = renderSessions(model).join("\n");
+  const lines = renderSessions(model).lines.join("\n");
   assert.match(lines, /· - api[\s\S]*▶ ○ docs/);
   assert.doesNotMatch(lines, /Stopped/);
 });
 
 test("preview renders captured tmux output with empty state", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, preview: "one\ntwo" });
-  const lines = renderSessions(model).join("\n");
+  const lines = renderSessions(model).lines.join("\n");
   assert.match(lines, /one/);
   assert.match(lines, /two/);
   assert.doesNotMatch(lines, /preview loads from tmux/);
 
-  const empty = renderSessions(buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, preview: "" })).join("\n");
+  const empty = renderSessions(buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, preview: "" })).lines.join("\n");
   assert.match(empty, /preview empty/);
 });
 
@@ -358,7 +391,7 @@ test("multi-repo sessions render repo badge and compact details", () => {
   const model = buildRenderModel({ sessions: [multi], selectedId: "a", width: 120, filter: "shared" });
 
   assert.equal(model.selected?.repoCount, 3);
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /\[3 repos\]/);
   assert.match(rendered, /\/repo\/api · 3 repos/);
   assert.doesNotMatch(rendered, /group default/);
@@ -373,7 +406,7 @@ test("single-repo compact details omit repo count and group", () => {
     selectedId: "a",
     width: 120,
   });
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /\/repo\/api/);
   assert.doesNotMatch(rendered, /1 repo/);
   assert.doesNotMatch(rendered, /group default/);
@@ -399,7 +432,7 @@ test("session metadata renders without replacing the Hub title", () => {
   });
 
   assert.equal(model.selected?.title, "Hub title");
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /Hub title/);
   assert.match(rendered, /── metadata .*via any-extension · 2m/);
   assert.match(rendered, /goal\s+Support semantic dashboard metadata\./);
@@ -418,7 +451,7 @@ test("compact details surface selected skills and MCP when present", () => {
   };
   const model = buildRenderModel({ sessions: [withTools], selectedId: "a", width: 120, selectedSkillCount: 3 });
 
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /skills 3 · mcp 2\s+s\/m edit/);
   assert.doesNotMatch(rendered, /filesystem, github/);
 });
@@ -426,7 +459,7 @@ test("compact details surface selected skills and MCP when present", () => {
 
 test("compact details hide capabilities line when no skills or MCP are attached", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, selectedSkillCount: 0 });
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.doesNotMatch(rendered, /skills 0/);
   assert.doesNotMatch(rendered, /mcp 0/);
   assert.doesNotMatch(rendered, /s\/m edit/);
@@ -435,7 +468,7 @@ test("compact details hide capabilities line when no skills or MCP are attached"
 
 test("preview divider has no read-only label", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, preview: "hi" });
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /── preview ─/);
   assert.doesNotMatch(rendered, /read-only/);
 });
@@ -443,7 +476,7 @@ test("preview divider has no read-only label", () => {
 
 test("selected title and status render inline on the same line", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "running", "c-bridge")], selectedId: "a", width: 200 });
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   const titleLine = rendered.split("\n").find((line) => line.includes("c-bridge") && !line.includes("▶"));
   assert.ok(titleLine, "expected an inline title row in the right pane");
   assert.match(titleLine!, /c-bridge\s{1,}● running/);
@@ -452,7 +485,7 @@ test("selected title and status render inline on the same line", () => {
 
 test("long selected title preserves inline status", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "waiting", "selected-title-".repeat(10))], selectedId: "a", width: 80 });
-  const lines = renderSessions(model);
+  const lines = renderSessions(model).lines;
   const titleLine = lines.find((line) => line.includes("◐ waiting") && !line.includes("▶"));
   assert.ok(titleLine, "expected selected details to keep the status badge");
   assert.match(stripAnsi(titleLine!), /…\s+◐ waiting/);
@@ -466,7 +499,7 @@ test("model.height pads body rows so the box fills the terminal", () => {
     selectedId: "a",
     width: 120,
     height: 30,
-  }));
+  })).lines;
   assert.equal(lines.length, 30);
 });
 
@@ -477,7 +510,7 @@ test("narrow group header truncates name before status counts", () => {
     { ...session("b", "long-group-name-that-overflows", "waiting"), cwd: "/r/b" },
     { ...session("c", "long-group-name-that-overflows", "error"), cwd: "/r/c" },
   ];
-  const lines = renderSessions(buildRenderModel({ sessions, width: 50 }));
+  const lines = renderSessions(buildRenderModel({ sessions, width: 50 })).lines;
   const groupLine = lines.find((line) => line.includes("◐1") || line.includes("●1"));
   assert.ok(groupLine, "expected a group header line with status counts");
   for (const line of lines) assert.ok(visibleWidth(line) <= 50, line);
@@ -488,7 +521,7 @@ test("narrow group header truncates name before status counts", () => {
 test("very long group names preserve status counts", () => {
   const group = "group-".repeat(20);
   const sessions = [session("a", group, "running"), session("b", group, "waiting"), session("c", group, "error")];
-  const lines = renderSessions(buildRenderModel({ sessions, width: 50 }));
+  const lines = renderSessions(buildRenderModel({ sessions, width: 50 })).lines;
   const groupLine = lines.map(stripAnsi).find((line) => line.includes("group-") && line.includes("●1") && line.includes("◐1") && line.includes("×1"));
   assert.ok(groupLine, "expected counts to remain visible after group name truncation");
   assert.match(groupLine!, /…\s+●1\s◐1\s×1/);
@@ -505,7 +538,7 @@ test("expanded multi-repo details show full metadata", () => {
   };
   const model = buildRenderModel({ sessions: [multi], selectedId: "a", width: 120, detailsExpanded: true });
 
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /extra\s+\/repo\/web/);
   assert.match(rendered, /extra\s+\/repo\/shared/);
   assert.match(rendered, /runtime\s+\/state\/workspaces\/a/);
@@ -514,7 +547,7 @@ test("expanded multi-repo details show full metadata", () => {
 test("filter with zero matches renders no-match state", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle", "api")], width: 100, filter: "zzz" });
   assert.equal(model.noMatches, true);
-  const rendered = renderSessions(model).join("\n");
+  const rendered = renderSessions(model).lines.join("\n");
   assert.match(rendered, /0\/1 sessions · filter: zzz/);
   assert.match(rendered, /No sessions match/);
   assert.match(rendered, /▶ Use the footer controls below/);
@@ -546,7 +579,7 @@ test("subagent rows render directly under their parent", () => {
 
   assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["parent", "child", "sibling"]);
   assert.equal(model.groups[0]?.sessions[1]?.depth, 1);
-  const lines = renderSessions(model).join("\n");
+  const lines = renderSessions(model).lines.join("\n");
   assert.match(lines, /└ .*scout/);
   assert.doesNotMatch(lines, /read auth\.ts/);
 });
@@ -570,7 +603,7 @@ test("nested subagent rows render under their subagent parent", () => {
   assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["parent", "child", "grandchild"]);
   assert.equal(model.groups[0]?.sessions[1]?.depth, 1);
   assert.equal(model.groups[0]?.sessions[2]?.depth, 2);
-  assert.match(renderSessions(model).join("\n"), /└ .*worker[\s\S]*└ .*code-critic/);
+  assert.match(renderSessions(model).lines.join("\n"), /└ .*worker[\s\S]*└ .*code-critic/);
 });
 
 test("filtering by nested child includes ancestor context", () => {

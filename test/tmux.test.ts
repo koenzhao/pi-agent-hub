@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardStatusBarVisible, shellQuote, splitPaneBelowAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setDashboardStatusBarVisible, shellQuote, splitPaneBelowAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -219,6 +219,18 @@ test("setDashboardStatusBarVisible toggles only the dashboard status option", as
   assert.deepEqual(exec.calls, [
     { command: "tmux", args: ["set-option", "-t", "pi-agent-hub-dashboard", "status", "off"] },
     { command: "tmux", args: ["set-option", "-t", "pi-agent-hub-dashboard", "status", "on"] },
+  ]);
+});
+
+test("setDashboardMouse toggles only the dashboard mouse option", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await setDashboardMouse({ name: "pi-agent-hub", enabled: true }, exec);
+  await setDashboardMouse({ name: "pi-agent-hub", enabled: false }, exec);
+
+  assert.deepEqual(exec.calls, [
+    { command: "tmux", args: ["set-option", "-t", "pi-agent-hub", "mouse", "on"] },
+    { command: "tmux", args: ["set-option", "-u", "-t", "pi-agent-hub", "mouse"] },
   ]);
 });
 

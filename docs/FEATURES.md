@@ -105,7 +105,7 @@ The side-pane action is a toggle with stateless placement:
 - one side pane: split it vertically to create a bottom pane;
 - two side panes: switch the bottom nested client to the selected session and keep the top pane pinned.
 
-Opening or retargeting a side pane keeps tmux focus on the sidebar so repeated `o` actions can be driven from the dashboard.
+Opening or retargeting a side pane keeps tmux focus on the sidebar so repeated `o` actions can be driven from the dashboard. Mouse support is additive: click a sidebar row to select it, click the already-selected row to run the same `o` side-pane action, and scroll the wheel over the sidebar to move selection. Hub enables tmux mouse mode only on the dashboard session while it is running and unsets that session override on quit.
 
 Native tmux keys handle the layout after that: `prefix+←/→/↑/↓` moves focus, `prefix+z` zooms the focused pane to hide/show neighbors, `prefix+x` closes a pane, and `prefix+{` / `prefix+}` swaps panes. `Enter` and `Ctrl+Q` keep their full-screen switch/return behavior unchanged; if `Enter` opens a session currently shown in any side pane, Hub closes that pane first to avoid tmux size flapping.
 

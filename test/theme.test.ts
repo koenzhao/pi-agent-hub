@@ -254,12 +254,12 @@ test("styleBgToken emits background SGR and survives inner resets", () => {
 });
 
 test("renderSessions paints the selected row background across the list column", () => {
-  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80, selectedId: "s1" }), { ...darkTheme, selectedBg: "#010203" });
+  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80, selectedId: "s1" }), { ...darkTheme, selectedBg: "#010203" }).lines;
   const selectedLine = lines.find((line) => stripAnsi(line).includes("▶"));
   assert.ok(selectedLine, "selected row not found");
   assert.match(selectedLine, /\[48;2;1;2;3m/);
 
-  const plain = renderSessions(buildRenderModel({ sessions: [session()], width: 80, selectedId: "s1" }));
+  const plain = renderSessions(buildRenderModel({ sessions: [session()], width: 80, selectedId: "s1" })).lines;
   const plainSelected = plain.find((line) => line.includes("▶"));
   assert.ok(plainSelected, "plain selected row not found");
   assert.doesNotMatch(plainSelected, /\[/);
@@ -267,15 +267,15 @@ test("renderSessions paints the selected row background across the list column",
 
 test("footer keys are styled without changing visible text", () => {
   const model = buildRenderModel({ sessions: [session()], width: 130 });
-  const themed = renderSessions(model, darkTheme);
-  const plain = renderSessions(model);
+  const themed = renderSessions(model, darkTheme).lines;
+  const plain = renderSessions(model).lines;
   const themedFooter = themed.at(-2) ?? "";
   assert.match(themedFooter, /\u001b\[38;2;122;162;247mEnter\u001b\[0m/);
   assert.equal(stripAnsi(themedFooter), stripAnsi(plain.at(-2) ?? ""));
 });
 
 test("dashboard chrome uses rounded corners", () => {
-  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80 }), darkTheme);
+  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80 }), darkTheme).lines;
   assert.match(stripAnsi(lines[0] ?? ""), /^╭/);
   assert.match(stripAnsi(lines.at(-1) ?? ""), /╯$/);
   const form = renderForm({ title: "t", fields: [{ key: "a", label: "a", value: "" }], focus: "a", footer: "f" }, 40, darkTheme);
@@ -291,7 +291,7 @@ test("stripAnsiExceptItalics preserves only italic styling", () => {
 });
 
 test("renderSessions applies theme tokens without changing visible width", () => {
-  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80 }), { ...darkTheme, accent: "#010203" });
+  const lines = renderSessions(buildRenderModel({ sessions: [session()], width: 80 }), { ...darkTheme, accent: "#010203" }).lines;
   assert.match(lines.join("\n"), /\u001b\[/);
   for (const line of lines) assert.ok(stripAnsi(line).length <= 80, stripAnsi(line));
 });
