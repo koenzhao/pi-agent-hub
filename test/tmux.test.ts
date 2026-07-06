@@ -60,24 +60,24 @@ test("listWindowPanes parses panes for the current window", async () => {
   assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top}"] }]);
 });
 
-test("splitWindowAttach creates an attached side pane and resizes the sidebar", async () => {
+test("splitWindowAttach creates a detached side pane and resizes the sidebar", async () => {
   const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
 
   await splitWindowAttach({ pane: "%1", target: "pi-agent-hub-api's", sidebarWidth: 42 }, exec);
 
   assert.deepEqual(exec.calls, [
-    { command: "tmux", args: ["split-window", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'\\''s'"] },
+    { command: "tmux", args: ["split-window", "-d", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'\\''s'"] },
     { command: "tmux", args: ["resize-pane", "-t", "%1", "-x", "42"] },
   ]);
 });
 
-test("splitPaneBelowAttach creates a stacked attached content pane", async () => {
+test("splitPaneBelowAttach creates a stacked detached content pane", async () => {
   const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
 
   await splitPaneBelowAttach({ pane: "%2", target: "pi-agent-hub-api's" }, exec);
 
   assert.deepEqual(exec.calls, [
-    { command: "tmux", args: ["split-window", "-v", "-t", "%2", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'\\''s'"] },
+    { command: "tmux", args: ["split-window", "-d", "-v", "-t", "%2", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'\\''s'"] },
   ]);
 });
 

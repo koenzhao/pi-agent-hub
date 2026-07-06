@@ -1,7 +1,5 @@
-import { clientSessionsByTty, killPane, listWindowPanes, realTmuxExec, selectPane, splitPaneBelowAttach, splitWindowAttach, switchClientTo, type TmuxExec, type WindowPane } from "../core/tmux.js";
+import { clientSessionsByTty, killPane, listWindowPanes, realTmuxExec, splitPaneBelowAttach, splitWindowAttach, switchClientTo, type TmuxExec, type WindowPane } from "../core/tmux.js";
 import { MANAGED_SESSION_PREFIX } from "../core/names.js";
-
-export type SidePaneSlot = "top" | "bottom";
 
 export type SidePaneResult =
   | { kind: "opened" }
@@ -16,7 +14,6 @@ interface ContentPane {
 export async function openInSidePane(options: {
   target: string;
   ownPane: string;
-  slot?: SidePaneSlot;
   sidebarWidth?: number;
 }, exec: TmuxExec = realTmuxExec): Promise<SidePaneResult> {
   const panes = await findContentPanes(options.ownPane, exec);
@@ -29,14 +26,12 @@ export async function openInSidePane(options: {
     await splitWindowAttach({ pane: options.ownPane, target: options.target, sidebarWidth: options.sidebarWidth ?? 42 }, exec);
     return { kind: "opened" };
   }
-  const slot = options.slot ?? "top";
-  if (slot === "bottom" && panes.length === 1) {
+  if (panes.length === 1) {
     await splitPaneBelowAttach({ pane: panes[0].pane.id, target: options.target }, exec);
     return { kind: "opened" };
   }
-  const content = slot === "bottom" ? panes[panes.length - 1] : panes[0];
+  const content = panes[panes.length - 1];
   await switchClientTo({ clientTty: content.pane.tty, target: options.target }, exec);
-  await selectPane(content.pane.id, exec);
   return { kind: "retargeted" };
 }
 
@@ -58,6 +53,10 @@ export async function closeSidePanes(options: { ownPane: string }, exec: TmuxExe
       // The nested attach pane may already have closed while quitting.
     }
   }
+}
+
+export async function listSidePaneSessions(options: { ownPane: string }, exec: TmuxExec = realTmuxExec): Promise<string[]> {
+  return (await findContentPanes(options.ownPane, exec)).map((pane) => pane.session);
 }
 
 async function findContentPanes(ownPane: string, exec: TmuxExec): Promise<ContentPane[]> {

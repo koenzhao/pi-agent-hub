@@ -39,7 +39,7 @@ Ctrl+Q returns to the dashboard
 | --- | --- |
 | `n` | Create a new Pi session |
 | `Enter` | Open or switch to the selected session |
-| `o` / `O` | Open, retarget, or close the selected session in the top/bottom side pane |
+| `o` | Open, retarget, or close the selected session in a side pane |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
@@ -96,16 +96,16 @@ When the dashboard is running inside tmux, `Enter` switches the current tmux cli
 
 ### Sidebar workspace
 
-Press `o` or `O` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and up to two selected sessions are attached interactively in stacked right-side panes.
+Press `o` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and up to two selected sessions are attached interactively in stacked right-side panes. Sessions currently visible beside the sidebar show a compact `◫` glyph in their row.
 
-The keys target positional slots:
+The side-pane action is a toggle with stateless placement:
 
-- `o` targets the top content pane;
-- `O` targets the bottom content pane;
-- no side pane: either key opens the first right-side pane;
-- one side pane and `O`: split it vertically to create a bottom pane;
 - selected session already visible in either pane: close that pane;
-- otherwise: switch the targeted nested client to the selected session in place.
+- no side pane: open the first right-side pane;
+- one side pane: split it vertically to create a bottom pane;
+- two side panes: switch the bottom nested client to the selected session and keep the top pane pinned.
+
+Opening or retargeting a side pane keeps tmux focus on the sidebar so repeated `o` actions can be driven from the dashboard.
 
 Native tmux keys handle the layout after that: `prefix+←/→/↑/↓` moves focus, `prefix+z` zooms the focused pane to hide/show neighbors, `prefix+x` closes a pane, and `prefix+{` / `prefix+}` swaps panes. `Enter` and `Ctrl+Q` keep their full-screen switch/return behavior unchanged; if `Enter` opens a session currently shown in any side pane, Hub closes that pane first to avoid tmux size flapping.
 

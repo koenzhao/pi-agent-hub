@@ -202,18 +202,35 @@
   plan_file: agent-work/history/20260704_split-view-002_stacked_side_panes.md
   completed_at: '2026-07-04'
 - epic: split-view
-  status: pending
-  title: Show side-pane slot indicators
-  description: User can see which dashboard sessions are currently rendered in the
-    top or bottom side pane while using the sidebar workspace.
+  status: done
+  title: Show side-pane visibility glyph
+  description: User can see which dashboard sessions are currently visible in a side
+    pane while using the sidebar workspace.
   steps:
   - Derive indicators from live tmux pane/client inspection, not registry state.
-  - Show compact top/bottom badges only for Hub-owned side panes and preserve user-created
+  - Show a compact binary glyph only for Hub-owned side panes and preserve user-created
     panes.
   priority: 3
   depends_on: []
   discovered_from: split-view-002 review discussion
-  plan_file: null
+  plan_file: agent-work/history/20260705_split-view-003_side_pane_glyph.md
   references: []
   created_at: '2026-07-04'
   id: split-view-003
+  completed_at: '2026-07-05'
+- epic: split-view
+  status: pending
+  title: Hide duplicate tmux status in side panes
+  description: User can open sidebar side panes without seeing duplicated dashboard
+    and nested session tmux status bars at the bottom.
+  steps:
+  - Hide or otherwise suppress the dashboard tmux status while Hub-owned side panes
+    are visible, and restore it when all side panes close.
+  priority: 3
+  depends_on: []
+  discovered_from: User noticed duplicated bottom tmux status bars while side panes
+    are open.
+  plan_file: null
+  references: []
+  created_at: '2026-07-04'
+  id: split-view-004

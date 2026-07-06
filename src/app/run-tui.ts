@@ -12,7 +12,7 @@ import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiv
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
 import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, switchClientWithReturn } from "../core/tmux.js";
-import { closeSidePaneShowing, closeSidePanes, openInSidePane } from "./side-pane.js";
+import { closeSidePaneShowing, closeSidePanes, listSidePaneSessions, openInSidePane } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
@@ -168,6 +168,18 @@ export async function runTui(): Promise<void> {
   let stopLoop: RefreshLoopHandle | undefined;
   let stopThemeLoop: (() => void) | undefined;
   let stopActionLoop: (() => void) | undefined;
+  let stopSidePanePresenceLoop: (() => void) | undefined;
+  let sidePaneTmuxSessions = new Set<string>();
+  const refreshSidePanePresence = async () => {
+    const ownPane = process.env.TMUX_PANE;
+    const next = new Set<string>();
+    if (ownPane) {
+      for (const tmuxSession of await listSidePaneSessions({ ownPane })) next.add(tmuxSession);
+    }
+    const changed = !sameStringSets(sidePaneTmuxSessions, next);
+    sidePaneTmuxSessions = next;
+    return changed;
+  };
   const shortcutTimers = new Set<NodeJS.Timeout>();
   let stopped = false;
   const stop = () => {
@@ -175,6 +187,7 @@ export async function runTui(): Promise<void> {
     stopped = true;
     stopThemeLoop?.();
     stopActionLoop?.();
+    stopSidePanePresenceLoop?.();
     for (const timer of shortcutTimers) clearTimeout(timer);
     shortcutTimers.clear();
     void stopLoop?.stop();
@@ -234,14 +247,23 @@ export async function runTui(): Promise<void> {
         returnSession: { name: DASHBOARD_SESSION, cwd, command: "pi-agent-hub tui", env: dashboardEnv() },
       });
     },
-    async openSidePane(sessionId, slot) {
+    async openSidePane(sessionId) {
       const session = controller.snapshot().registry.sessions.find((item) => item.id === sessionId);
       if (!session) throw new Error("session not found");
       const ownPane = process.env.TMUX_PANE;
       if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
       if (session.status === "waiting") await mutateRegistry(() => controller.acknowledgeSession(session.id));
-      const result = await openInSidePane({ target: session.tmuxSession, ownPane, slot });
+      const result = await openInSidePane({ target: session.tmuxSession, ownPane });
+      const changed = await refreshSidePanePresence().catch(() => false);
+      if (changed) tui.requestRender();
       if (result.kind !== "closed") await applyManagedSessionTheme(session);
+      return result;
+    },
+    sidePaneSessionIds() {
+      const result = new Set<string>();
+      for (const session of controller.snapshot().registry.sessions) {
+        if (sidePaneTmuxSessions.has(session.tmuxSession)) result.add(session.id);
+      }
       return result;
     },
     restart(sessionId) {
@@ -392,6 +414,11 @@ export async function runTui(): Promise<void> {
     if (action.action === "rename") view.openRenameForTmuxSession(action.tmuxSession);
     tui.requestRender();
   });
+  stopSidePanePresenceLoop = startSidePanePresenceRefreshLoop({
+    ownPane: process.env.TMUX_PANE,
+    load: refreshSidePanePresence,
+    render: () => tui.requestRender(),
+  });
   tui.addChild(view);
   tui.setFocus(view);
   tui.start();
@@ -422,6 +449,37 @@ function startDashboardActionLoop(processAction: () => Promise<void>, intervalMs
     stopped = true;
     clearInterval(timer);
   };
+}
+
+function startSidePanePresenceRefreshLoop(options: {
+  ownPane: string | undefined;
+  load(): Promise<boolean>;
+  render(): void;
+}, intervalMs = 500): () => void {
+  if (!options.ownPane) return () => {};
+  let inFlight: Promise<void> | undefined;
+  let stopped = false;
+  const run = () => {
+    if (stopped || inFlight) return;
+    inFlight = options.load()
+      .then((changed) => {
+        if (changed && !stopped) options.render();
+      })
+      .catch(() => {})
+      .finally(() => { inFlight = undefined; });
+  };
+  const timer = setInterval(run, intervalMs);
+  run();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
+function sameStringSets(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
 }
 
 function selectedProjectCwd(selected: ManagedSession | undefined, fallback: string): string {

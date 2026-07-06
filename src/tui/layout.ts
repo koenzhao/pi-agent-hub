@@ -174,6 +174,17 @@ function railCompact(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
   return `${styles.accent(step.short)} ${styles.dim(`${workflow.activeIndex + 1}/${workflow.steps.length}`)}`;
 }
 
+function sidePaneGlyph(inSidePane: boolean | undefined, styles: LayoutStyles): string {
+  return inSidePane ? `${styles.accent("◫")} ` : "";
+}
+
+function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages: boolean, width: number): string {
+  const right = stages
+    ? (session.kind === "subagent" ? "" : styles.dim(session.group))
+    : session.workflow && !session.archiveExpiresIn ? railCompact(session.workflow, styles) : "";
+  return right && width - displayWidth(right) - 1 >= 12 ? right : "";
+}
+
 function railFull(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
   const rail = workflow.steps
     .map((step, index) => index === workflow.activeIndex ? styles.accent(`▐${step.short}▌`) : styles.dim(step.short))
@@ -306,16 +317,14 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const symbol = styles.status(session.displayStatus, session.symbol);
   const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : session.title;
   const title = session.status === "stopped" ? styles.dim(titleText) : titleText;
+  const sidePaneMarker = sidePaneGlyph(session.inSidePane, styles);
   const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
   const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" [wt]") : "";
   const archiveBadge = session.archiveExpiresIn ? styles.dim(` [exp ${session.archiveExpiresIn}]`) : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
-  const text = `${prefix} ${indent}${symbol} ${title}${repoBadge}${worktreeBadge}${archiveBadge}`;
-  const right = stages
-    ? (session.kind === "subagent" ? "" : styles.dim(session.group))
-    : session.workflow && !session.archiveExpiresIn ? railCompact(session.workflow, styles) : "";
-  if (right && width - displayWidth(right) - 1 >= 12) return twoColumn(text, right, width);
-  return truncate(text, width);
+  const text = `${prefix} ${indent}${symbol} ${sidePaneMarker}${title}${repoBadge}${worktreeBadge}${archiveBadge}`;
+  const right = rowRightAdornment(session, styles, stages, width);
+  return right ? twoColumn(text, right, width) : truncate(text, width);
 }
 
 export interface FormField {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { closeSidePaneShowing, closeSidePanes, openInSidePane } from "../src/app/side-pane.js";
+import { closeSidePaneShowing, closeSidePanes, listSidePaneSessions, openInSidePane } from "../src/app/side-pane.js";
 import type { TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
@@ -32,84 +32,85 @@ function sidePaneExec(panes: string, clients: string): TmuxExec & { calls: Call[
 const listPanesCall = ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top}"];
 const listClientsCall = ["list-clients", "-F", "#{client_tty} #{client_session}"];
 
-test("top slot splits when only the dashboard pane exists", async () => {
-  const exec = sidePaneExec("%1 /dev/ttys001 1 0\n", "");
-
-  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-api", ownPane: "%1", slot: "top" }, exec), { kind: "opened" });
-
-  assert.deepEqual(exec.calls.map((call) => call.args), [
-    listPanesCall,
-    ["split-window", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'"],
-    ["resize-pane", "-t", "%1", "-x", "42"],
-  ]);
-});
-
-test("bottom slot with no content pane opens the only pane", async () => {
-  const exec = sidePaneExec("%1 /dev/ttys001 1 0\n", "");
-
-  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-api", ownPane: "%1", slot: "bottom", sidebarWidth: 50 }, exec), { kind: "opened" });
-
-  assert.deepEqual(exec.calls.map((call) => call.args), [
-    listPanesCall,
-    ["split-window", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'"],
-    ["resize-pane", "-t", "%1", "-x", "50"],
-  ]);
-});
-
-test("bottom slot with one content pane splits below it", async () => {
-  const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 0\n",
-    "/dev/ttys002 pi-agent-hub-api\n",
-  );
-
-  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-docs", ownPane: "%1", slot: "bottom" }, exec), { kind: "opened" });
-
-  assert.deepEqual(exec.calls.map((call) => call.args), [
-    listPanesCall,
-    listClientsCall,
-    ["split-window", "-v", "-t", "%2", "env -u TMUX tmux attach-session -t 'pi-agent-hub-docs'"],
-  ]);
-});
-
-test("top slot retargets the visually top managed pane", async () => {
+test("listSidePaneSessions reports managed content panes in visual order", async () => {
   const exec = sidePaneExec(
     "%1 /dev/ttys001 1 0\n%3 /dev/ttys003 0 40\n%2 /dev/ttys002 0 10\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
-  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-web", ownPane: "%1", slot: "top" }, exec), { kind: "retargeted" });
+  assert.deepEqual(await listSidePaneSessions({ ownPane: "%1" }, exec), ["pi-agent-hub-api", "pi-agent-hub-docs"]);
+});
+
+test("listSidePaneSessions ignores user panes and the dashboard pane", async () => {
+  const exec = sidePaneExec(
+    "%1 /dev/ttys001 1 0\n%4 /dev/ttys004 0 5\n%2 /dev/ttys002 0 10\n",
+    "/dev/ttys001 pi-agent-hub-dashboard\n/dev/ttys004 user-shell\n/dev/ttys002 pi-agent-hub-api\n",
+  );
+
+  assert.deepEqual(await listSidePaneSessions({ ownPane: "%1" }, exec), ["pi-agent-hub-api"]);
+});
+
+test("openInSidePane splits when only the dashboard pane exists", async () => {
+  const exec = sidePaneExec("%1 /dev/ttys001 1 0\n", "");
+
+  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-api", ownPane: "%1" }, exec), { kind: "opened" });
+
+  assert.deepEqual(exec.calls.map((call) => call.args), [
+    listPanesCall,
+    ["split-window", "-d", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'"],
+    ["resize-pane", "-t", "%1", "-x", "42"],
+  ]);
+});
+
+test("openInSidePane preserves custom sidebar width for the first content pane", async () => {
+  const exec = sidePaneExec("%1 /dev/ttys001 1 0\n", "");
+
+  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-api", ownPane: "%1", sidebarWidth: 50 }, exec), { kind: "opened" });
+
+  assert.deepEqual(exec.calls.map((call) => call.args), [
+    listPanesCall,
+    ["split-window", "-d", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'"],
+    ["resize-pane", "-t", "%1", "-x", "50"],
+  ]);
+});
+
+test("openInSidePane with one content pane splits below it", async () => {
+  const exec = sidePaneExec(
+    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 0\n",
+    "/dev/ttys002 pi-agent-hub-api\n",
+  );
+
+  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-docs", ownPane: "%1" }, exec), { kind: "opened" });
 
   assert.deepEqual(exec.calls.map((call) => call.args), [
     listPanesCall,
     listClientsCall,
-    ["switch-client", "-c", "/dev/ttys002", "-t", "pi-agent-hub-web"],
-    ["select-pane", "-t", "%2"],
+    ["split-window", "-d", "-v", "-t", "%2", "env -u TMUX tmux attach-session -t 'pi-agent-hub-docs'"],
   ]);
 });
 
-test("bottom slot retargets the visually bottom managed pane", async () => {
+test("openInSidePane with two content panes retargets the visually bottom managed pane without selecting it", async () => {
   const exec = sidePaneExec(
     "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
-  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-web", ownPane: "%1", slot: "bottom" }, exec), { kind: "retargeted" });
+  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-web", ownPane: "%1" }, exec), { kind: "retargeted" });
 
   assert.deepEqual(exec.calls.map((call) => call.args), [
     listPanesCall,
     listClientsCall,
     ["switch-client", "-c", "/dev/ttys003", "-t", "pi-agent-hub-web"],
-    ["select-pane", "-t", "%3"],
   ]);
 });
 
-test("toggle closes a visible target regardless of requested slot", async () => {
+test("toggle closes a visible target regardless of position", async () => {
   const exec = sidePaneExec(
     "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
-  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-docs", ownPane: "%1", slot: "top" }, exec), { kind: "closed" });
+  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-docs", ownPane: "%1" }, exec), { kind: "closed" });
 
   assert.deepEqual(exec.calls.map((call) => call.args), [
     listPanesCall,
@@ -118,19 +119,18 @@ test("toggle closes a visible target regardless of requested slot", async () => 
   ]);
 });
 
-test("non-owned panes are ignored when choosing slots", async () => {
+test("non-owned panes are ignored when choosing managed panes", async () => {
   const exec = sidePaneExec(
     "%1 /dev/ttys001 1 0\n%4 /dev/ttys004 0 5\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
     "/dev/ttys004 user-shell\n/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
-  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-web", ownPane: "%1", slot: "top" }, exec), { kind: "retargeted" });
+  assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-web", ownPane: "%1" }, exec), { kind: "retargeted" });
 
   assert.deepEqual(exec.calls.map((call) => call.args), [
     listPanesCall,
     listClientsCall,
-    ["switch-client", "-c", "/dev/ttys002", "-t", "pi-agent-hub-web"],
-    ["select-pane", "-t", "%2"],
+    ["switch-client", "-c", "/dev/ttys003", "-t", "pi-agent-hub-web"],
   ]);
 });
 
@@ -145,7 +145,7 @@ test("unowned panes do not prevent opening a fresh pane", async () => {
   assert.deepEqual(exec.calls.map((call) => call.args), [
     listPanesCall,
     listClientsCall,
-    ["split-window", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'"],
+    ["split-window", "-d", "-h", "-t", "%1", "env -u TMUX tmux attach-session -t 'pi-agent-hub-api'"],
     ["resize-pane", "-t", "%1", "-x", "42"],
   ]);
 });

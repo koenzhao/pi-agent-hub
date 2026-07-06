@@ -37,6 +37,7 @@ export interface RenderSession {
   worktreeBaseBranch?: string;
   worktreeOwnedByHub?: boolean;
   worktreeCount?: number;
+  inSidePane?: boolean;
 }
 
 export interface StatusCounts {
@@ -99,6 +100,7 @@ export interface BuildRenderModelInput {
   selectedSkillCount?: number;
   viewMode?: "groups" | "stages";
   now?: number;
+  sidePaneSessionIds?: ReadonlySet<string> | readonly string[];
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
@@ -106,7 +108,8 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const allRows = orderedSessionRows(input.sessions, input.filter);
   const visible = stages ? stageLaneRows(allRows.filter((session) => sessionSection(session) === "active")).flatMap((lane) => lane.rows) : allRows;
   const selectedId = pickSelectedId(visible, input.selectedId);
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId, input.sessions, session.id === selectedId ? input.selectedSkillCount : undefined, input.now));
+  const sidePaneSessionIds = new Set(input.sidePaneSessionIds ?? []);
+  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId, input.sessions, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds.has(session.id)));
   const groups = groupsForSessions(mapped);
   const sections = stages ? lanesForSessions(mapped) : sectionsForSessions(mapped);
 
@@ -116,7 +119,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const showLifecycleFooter = selected && selected.kind !== "subagent" && input.width >= 120;
   const lifecycleFooter = showLifecycleFooter ? selected.section === "active" ? " · A Archive · B Backlog" : " · U Restore" : "";
   const compactLifecycleFooter = selected && selected.kind !== "subagent" ? selected.section === "active" ? " · A · B" : " · U" : "";
-  const sideFooter = input.width >= 120 ? "o/O Side" : "o/O";
+  const sideFooter = input.width >= 120 ? "o Side" : "o";
   const deleteFooter = input.width >= 120 ? "d Delete" : "d Del";
   return {
     width: input.width,
@@ -134,7 +137,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     },
     ...(input.height ? { height: input.height } : {}),
     selected,
-    footer: compactFooter ? `Enter · o/O · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  v · ?` : `Enter Open · ${sideFooter} · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
+    footer: compactFooter ? `Enter · o · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  v · ?` : `Enter Open · ${sideFooter} · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,
@@ -239,7 +242,7 @@ function sectionsForSessions(sessions: RenderSession[]): RenderSection[] {
   });
 }
 
-function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], skillCount: number | undefined, now: number | undefined): RenderSession {
+function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], skillCount: number | undefined, now: number | undefined, inSidePane: boolean): RenderSession {
   const displayStatus = displayStatusFor(session.status);
   const worktree = primaryWorktree(session);
   const worktrees = sessionWorktrees(session);
@@ -276,6 +279,7 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     worktreeBaseBranch: worktree?.baseBranch ?? session.worktreeBaseBranch,
     worktreeOwnedByHub: session.worktreeOwnedByHub,
     worktreeCount: worktrees.length || undefined,
+    inSidePane,
   };
 }
 

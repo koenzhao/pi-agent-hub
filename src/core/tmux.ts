@@ -100,12 +100,12 @@ export async function listWindowPanes(pane: string, exec: TmuxExec = realTmuxExe
 }
 
 export async function splitWindowAttach(options: { pane: string; target: string; sidebarWidth: number }, exec: TmuxExec = realTmuxExec): Promise<void> {
-  await exec.exec("tmux", ["split-window", "-h", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
+  await exec.exec("tmux", ["split-window", "-d", "-h", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
   await exec.exec("tmux", ["resize-pane", "-t", options.pane, "-x", String(options.sidebarWidth)]);
 }
 
 export async function splitPaneBelowAttach(options: { pane: string; target: string }, exec: TmuxExec = realTmuxExec): Promise<void> {
-  await exec.exec("tmux", ["split-window", "-v", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
+  await exec.exec("tmux", ["split-window", "-d", "-v", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
 }
 
 export async function switchClientTo(options: { clientTty: string; target: string }, exec: TmuxExec = realTmuxExec): Promise<void> {

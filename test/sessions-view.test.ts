@@ -92,7 +92,7 @@ test("help overlay opens and closes", () => {
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
   assert.match(help, /zero counts are hidden/);
-  assert.match(help, /o\/O side panes/);
+  assert.match(help, /o side pane/);
   assert.match(help, /v toggle groups\/stages view/);
   assert.match(help, /Stages view lanes active sessions by workflow step/);
   view.handleInput("\u001b");
@@ -291,23 +291,57 @@ test("stages view snaps selection to a visible lane row", () => {
   assert.equal(controller.snapshot().selectedId, "a");
 });
 
-test("o and O open the selected live session in top and bottom side panes", async () => {
+test("side pane presence snapshots render visibility glyphs", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const sidePaneSessionIds = new Set(["api", "docs"]);
+  const view = new SessionsView(controller, () => {}, { sidePaneSessionIds: () => sidePaneSessionIds });
+
+  const rendered = stripAnsi(view.render(100).join("\n"));
+  assert.match(rendered, /○ ◫ api/);
+  assert.match(rendered, /○ ◫ docs/);
+});
+
+test("side pane presence snapshots update without registry mutation", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  let sidePaneSessionIds = new Set<string>();
+  const view = new SessionsView(controller, () => {}, { sidePaneSessionIds: () => sidePaneSessionIds });
+
+  assert.doesNotMatch(stripAnsi(view.render(100).join("\n")), /◫/);
+  sidePaneSessionIds = new Set(["api"]);
+  assert.match(stripAnsi(view.render(100).join("\n")), /○ ◫ api/);
+});
+
+test("o opens the selected live session in a side pane", async () => {
   const opened: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: async (sessionId, slot) => {
-      opened.push(`${sessionId}:${slot}`);
+    openSidePane: async (sessionId) => {
+      opened.push(sessionId);
       return { kind: "opened" };
     },
   });
 
   view.handleInput("o");
   await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(opened, ["api"]);
+  assert.match(stripAnsi(view.render(100).join("\n")), /side: api/);
+});
+
+test("uppercase O is not a side-pane shortcut", async () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: async (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+
   view.handleInput("O");
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(opened, ["api:top", "api:bottom"]);
-  assert.match(stripAnsi(view.render(100).join("\n")), /side: api/);
+  assert.deepEqual(opened, []);
 });
 
 test("o flashes side pane result variants", async () => {

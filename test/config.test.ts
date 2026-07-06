@@ -109,6 +109,17 @@ test("dashboard shortcut config is normalized and validated", async () => {
   assert.equal(await effectiveDashboardThemeSessionId(env), "session-1");
 });
 
+test("dashboard shortcut config allows uppercase O because only lowercase o is built in", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
+  const env = { PI_AGENT_HUB_DIR: root };
+  await writeFile(configPath(env), JSON.stringify({
+    version: 1,
+    dashboard: { shortcuts: [{ key: "O", send: "/session-summary name" }] },
+  }), "utf8");
+
+  assert.deepEqual(await effectiveDashboardShortcuts(env), [{ key: "O", send: "/session-summary name" }]);
+});
+
 test("dashboard shortcut config rejects conflicts and invalid send values", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
   const env = { PI_AGENT_HUB_DIR: root };
@@ -145,12 +156,6 @@ test("dashboard shortcut config rejects conflicts and invalid send values", asyn
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
     dashboard: { shortcuts: [{ key: "o", send: "/session-summary name" }] },
-  }), "utf8");
-  await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
-
-  await writeFile(configPath(env), JSON.stringify({
-    version: 1,
-    dashboard: { shortcuts: [{ key: "O", send: "/session-summary name" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 

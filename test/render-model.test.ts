@@ -104,6 +104,77 @@ test("stages view rows show the group name instead of the rail", () => {
   assert.doesNotMatch(row ?? "", /EX 4\/7/);
 });
 
+test("render model marks side pane visibility by session id", () => {
+  const model = buildRenderModel({
+    sessions: [session("api", "default", "running"), session("docs", "default", "running")],
+    width: 120,
+    sidePaneSessionIds: ["api"],
+  });
+
+  assert.equal(model.groups[0]?.sessions.find((item) => item.id === "api")?.inSidePane, true);
+  assert.equal(model.groups[0]?.sessions.find((item) => item.id === "docs")?.inSidePane, false);
+});
+
+test("side pane glyphs render on the left for visible side-pane sessions", () => {
+  const model = buildRenderModel({
+    sessions: [session("api", "default", "running"), session("docs", "default", "idle")],
+    width: 100,
+    sidePaneSessionIds: ["api", "docs"],
+  });
+  const rendered = renderSessions(model).map(stripAnsi);
+  assert.match(rendered.find((line) => /● ◫ api/.test(line)) ?? "", /● ◫ api/);
+  assert.match(rendered.find((line) => /○ ◫ docs/.test(line)) ?? "", /○ ◫ docs/);
+});
+
+test("side pane glyphs do not crowd compact workflow rails", () => {
+  const model = buildRenderModel({
+    sessions: [{ ...session("api", "default", "running"), workflow: WORKFLOW }],
+    selectedId: "api",
+    width: 110,
+    sidePaneSessionIds: ["api"],
+  });
+  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  assert.match(row ?? "", /● ◫ api\s+EX 4\/7/);
+  assert.doesNotMatch(row ?? "", /EX 4\/7 ◫/);
+});
+
+test("side pane glyphs remain left-visible at narrow widths", () => {
+  const workflow = { ...WORKFLOW, steps: WORKFLOW.steps.map((step) => step.id === "execute" ? { ...step, short: "EXECUTE-LONG-LABEL" } : step) };
+  const model = buildRenderModel({
+    sessions: [{ ...session("api", "default", "running", "long-title-".repeat(4)), workflow }],
+    selectedId: "api",
+    width: 40,
+    sidePaneSessionIds: ["api"],
+  });
+  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  assert.match(row ?? "", /● ◫ long-t/);
+  assert.match(row ?? "", /EXECUTE-LONG-LABEL 4\/7/);
+});
+
+test("stages view keeps side pane glyphs separate from group adornments", () => {
+  const model = buildRenderModel({
+    sessions: [session("api", "long-group-name-that-does-not-fit", "running", "long-title-".repeat(4))],
+    selectedId: "api",
+    width: 40,
+    viewMode: "stages",
+    sidePaneSessionIds: ["api"],
+  });
+  const row = renderSessions(model).map(stripAnsi).find((line) => line.includes("▶"));
+  assert.match(row ?? "", /● ◫ long-title/);
+});
+
+test("side pane glyphs stay width-safe with workflow rails", () => {
+  const sessions = [
+    { ...session("api", "default", "running", "long-title-".repeat(6)), workflow: WORKFLOW },
+    session("docs", "default", "idle", "docs-title-".repeat(6)),
+  ];
+  for (const width of [42, 70, 120]) {
+    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "api", width, sidePaneSessionIds: ["api", "docs"] }))) {
+      assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
+    }
+  }
+});
+
 test("groups view is unchanged when viewMode is omitted", () => {
   const backlog = { ...session("bk", "experiments", "idle"), bucket: "backlog" as const, bucketChangedAt: 1 };
   const model = buildRenderModel({ sessions: [session("a", "default", "idle"), backlog], width: 120 });
@@ -180,7 +251,7 @@ test("narrow layout hides preview and uses compact footer", () => {
 
 test("wide footer groups keys by intent", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 120 });
-  assert.equal(model.footer, "Enter Open · o/O Side · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  v View · ? Help");
+  assert.equal(model.footer, "Enter Open · o Side · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  v View · ? Help");
 });
 
 test("wide footer shows worktree finish only for worktree sessions", () => {
@@ -188,7 +259,7 @@ test("wide footer shows worktree finish only for worktree sessions", () => {
     sessions: [{ ...session("a", "default", "idle"), worktreeOwnedByHub: true, worktreePath: "/tmp/wt" }],
     width: 120,
   });
-  assert.equal(model.footer, "Enter Open · o/O Side · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  v View · ? Help");
+  assert.equal(model.footer, "Enter Open · o Side · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  v View · ? Help");
 });
 
 test("long titles/cwd truncate without exceeding width", () => {
