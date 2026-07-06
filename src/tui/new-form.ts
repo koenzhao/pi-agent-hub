@@ -1,5 +1,5 @@
-import { randomInt } from "node:crypto";
 import { basename } from "node:path";
+import { randomSessionTitle } from "../core/session-title.js";
 import { charLength, editKey } from "./text-input.js";
 import { createForm, editField, moveFocus as moveFormFocus, setFocus as setFormFocus, setValue, type FormField, type FormState } from "./form.js";
 
@@ -24,9 +24,6 @@ export interface NewFormContext {
   additionalCwds?: string[];
   titleGenerator?: () => string;
 }
-
-const SESSION_ADJECTIVES = ["amber", "black", "blue", "bright", "calm", "crimson", "dark", "gold", "green", "quiet", "red", "silver", "swift", "violet", "white"] as const;
-const SESSION_NOUNS = ["aleph", "atlas", "beacon", "cipher", "comet", "delta", "ember", "falcon", "lambda", "nova", "orbit", "pixel", "quartz", "vector", "zenith"] as const;
 
 export function moveFocus(state: NewFormState, delta: number): NewFormState {
   return { ...state, focus: moveFormFocus(state, delta).focus };
@@ -246,12 +243,6 @@ function uniqueWithFirst(first: string, items: string[]): string[] {
 
 function projectBasename(path: string): string {
   return basename(path.trim());
-}
-
-function randomSessionTitle(): string {
-  const adjective = SESSION_ADJECTIVES[randomInt(SESSION_ADJECTIVES.length)];
-  const noun = SESSION_NOUNS[randomInt(SESSION_NOUNS.length)];
-  return `${adjective}-${noun}`;
 }
 
 function cwdHint(suggestionCount: number): string {

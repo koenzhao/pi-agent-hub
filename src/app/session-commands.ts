@@ -10,6 +10,7 @@ import { heartbeatPath, sessionsStateDir } from "../core/paths.js";
 import { createOwnedWorktrees, isWorktreeSession, removeOwnedWorktrees } from "../core/worktree.js";
 import { recordRepoUsage } from "../core/repo-history.js";
 import { createSessionRecord, loadRegistry, updateRegistry, upsertSession } from "../core/registry.js";
+import { randomSessionTitle } from "../core/session-title.js";
 import { nextOrderInGroup } from "../core/session-order.js";
 import { isSubagentSession } from "../core/session-tree.js";
 import { configureManagedSessionStatusBar, killSession, newSession, sessionExists, shellQuote } from "../core/tmux.js";
@@ -127,7 +128,7 @@ export async function restartManagedSession(id: string): Promise<void> {
   await startManagedSession(id);
 }
 
-export async function restartManagedSessionFresh(id: string): Promise<void> {
+export async function restartManagedSessionFresh(id: string, titleGenerator = randomSessionTitle): Promise<void> {
   await stopManagedSession(id);
   await rm(heartbeatPath(id), { force: true });
   await updateRegistry((registry) => {
@@ -136,6 +137,7 @@ export async function restartManagedSessionFresh(id: string): Promise<void> {
       ...registry,
       sessions: registry.sessions.map((item) => item.id === session.id ? {
         ...item,
+        title: titleGenerator(),
         status: "starting",
         sessionFile: undefined,
         piSessionId: undefined,

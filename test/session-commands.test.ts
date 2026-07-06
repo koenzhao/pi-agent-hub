@@ -183,11 +183,12 @@ test("restartManagedSessionFresh clears saved Pi state and starts a new tmux ses
     await mkdir(join(root, "heartbeats"));
     await writeFile(heartbeatPath("source-session"), "{}", "utf8");
 
-    await restartManagedSessionFresh("source-session");
+    await restartManagedSessionFresh("source-session", () => "black-aleph");
 
     const registry = await loadRegistry();
     const restarted = registry.sessions[0]!;
     assert.equal(restarted.status, "starting");
+    assert.equal(restarted.title, "black-aleph");
     assert.equal(restarted.sessionFile, undefined);
     assert.equal(restarted.piSessionId, undefined);
     assert.equal(restarted.acknowledgedAt, undefined);
@@ -198,6 +199,7 @@ test("restartManagedSessionFresh clears saved Pi state and starts a new tmux ses
     assert.match(commands, /kill-session -t pi-agent-hub-source/);
     assert.match(commands, /new-session .*PI_AGENT_HUB_SESSION_ID='source-session'/);
     assert.match(commands, /set-option -t pi-agent-hub-source status on/);
+    assert.match(commands, /status-right .*black-aleph/);
   } finally {
     if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
     else process.env.PI_AGENT_HUB_DIR = oldDir;
