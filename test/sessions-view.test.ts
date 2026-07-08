@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { SessionsController } from "../src/app/controller.js";
 import { SessionsView } from "../src/tui/sessions-view.js";
 import { darkTheme, stripAnsi } from "../src/tui/theme.js";
@@ -114,6 +115,57 @@ test("help overlay stays within terminal width", () => {
   for (const width of [40, 80]) {
     for (const line of view.render(width)) assert.ok(stripAnsi(line).length <= width, stripAnsi(line));
   }
+});
+
+test("narrow dashboard renders width-safe notice", () => {
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: [session("api", "api")] }), () => {});
+
+  for (const width of [10, 25, 38]) {
+    const rendered = view.render(width);
+    const text = stripAnsi(rendered.join("\n"));
+    assert.match(text, /pane too/);
+    if (width === 38) assert.match(text, /pane too narrow/);
+    for (const line of rendered) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
+  }
+});
+
+test("narrow dashboard guards dialogs", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("?");
+  for (const line of view.render(25)) assert.ok(visibleWidth(line) <= 25, line);
+  assert.match(stripAnsi(view.render(25).join("\n")), /pane too/);
+
+  view.handleInput("?");
+  view.handleInput("n");
+  for (const line of view.render(38)) assert.ok(visibleWidth(line) <= 38, line);
+  assert.match(stripAnsi(view.render(38).join("\n")), /pane too narrow/);
+});
+
+test("narrow mouse press is ignored", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+
+  view.render(38);
+  view.handleInput(mousePressAtLine(3));
+
+  assert.equal(controller.snapshot().selectedId, "api");
+  assert.deepEqual(opened, []);
+});
+
+test("width 40 keeps normal dashboard layout", () => {
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: [session("api", "api")] }), () => {});
+  const rendered = stripAnsi(view.render(40).join("\n"));
+
+  assert.match(rendered, /api/);
+  assert.doesNotMatch(rendered, /pane too narrow/);
 });
 
 test("J K and shift arrows reorder selected session", () => {
@@ -529,6 +581,76 @@ test("mouse press only dismisses restart choices and wheel is ignored", () => {
   assert.equal(controller.snapshot().selectedId, "api");
   assert.deepEqual(opened, []);
   assert.doesNotMatch(stripAnsi(view.render(100).join("\n")), /Restart api/);
+});
+
+function manyViewSessions(count: number): ManagedSession[] {
+  return Array.from({ length: count }, (_, index) => session(`s${index}`, `session-${index}`));
+}
+
+test("short dashboard renders to terminal rows and clicks visible rows", () => {
+  const controller = new SessionsController({ version: 1, sessions: manyViewSessions(20) });
+  const view = new SessionsView(controller, () => {}, { terminalRows: () => 15 });
+  const rendered = view.render(100);
+
+  assert.equal(rendered.length, 15);
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "session-7")));
+
+  assert.equal(controller.snapshot().selectedId, "s7");
+});
+
+test("mouse hit map follows scrolled list window", () => {
+  const controller = new SessionsController({ version: 1, sessions: manyViewSessions(25) });
+  const view = new SessionsView(controller, () => {}, { terminalRows: () => 15 });
+  for (let i = 0; i < 15; i += 1) view.handleInput("j");
+  const rendered = view.render(100);
+  const visibleTarget = stripAnsi(rendered.find((line) => line.includes("session-12")) ?? "");
+  assert.match(visibleTarget, /session-12/);
+
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "session-12")));
+
+  assert.equal(controller.snapshot().selectedId, "s12");
+});
+
+test("mouse clicks on list scroll indicators are ignored", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: manyViewSessions(20) });
+  const view = new SessionsView(controller, () => {}, {
+    terminalRows: () => 15,
+    openSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened" };
+    },
+  });
+  const rendered = view.render(100);
+  const indicator = rendered.findIndex((line) => stripAnsi(line).includes("↓"));
+  assert.notEqual(indicator, -1, "missing scroll indicator");
+
+  view.handleInput(mousePressAtLine(indicator));
+
+  assert.equal(controller.snapshot().selectedId, "s0");
+  assert.deepEqual(opened, []);
+});
+
+test("mouse wheel keeps selected row inside the bounded render", () => {
+  const controller = new SessionsController({ version: 1, sessions: manyViewSessions(20) });
+  const view = new SessionsView(controller, () => {}, { terminalRows: () => 15 });
+
+  for (let i = 0; i < 12; i += 1) view.handleInput("\u001b[<65;5;5M");
+  const rendered = view.render(100).map(stripAnsi);
+
+  assert.equal(controller.snapshot().selectedId, "s12");
+  assert.ok(rendered.some((line) => /▶ .*session-12/.test(line)), rendered.join("\n"));
+});
+
+test("short help dialog is clipped with a resize marker", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, { terminalRows: () => 12 });
+
+  view.handleInput("?");
+  const rendered = view.render(100).map(stripAnsi);
+
+  assert.equal(rendered.length, 12);
+  assert.match(rendered.at(-1) ?? "", /… resize for full help/);
 });
 
 test("enter triggers attach action outside tmux", () => {

@@ -208,6 +208,85 @@ test("layout hit map handles empty and wide preview layouts", () => {
   assert.ok(wide.listWidth < 108);
 });
 
+function manySessions(count: number): ManagedSession[] {
+  return Array.from({ length: count }, (_, index) => session(`s${index}`, "default", "idle", `session-${index}`));
+}
+
+function renderedSessionIds(layout: ReturnType<typeof renderSessions>): string[] {
+  return layout.rowSessions.filter((id): id is string => Boolean(id));
+}
+
+test("height-bounded layout clips long lists to terminal rows", () => {
+  const layout = renderSessions(buildRenderModel({ sessions: manySessions(20), selectedId: "s10", width: 80, height: 15 }));
+
+  assert.equal(layout.lines.length, 15);
+  assert.equal(layout.rowSessions.length, 15);
+  assert.ok(layout.rowSessions.includes("s10"));
+  for (const line of layout.lines) assert.ok(visibleWidth(line) <= 80, line);
+});
+
+test("height-bounded empty and no-match states fit terminal rows", () => {
+  const empty = renderSessions(buildRenderModel({ sessions: [], width: 80, height: 15 }));
+  const noMatches = renderSessions(buildRenderModel({ sessions: manySessions(3), filter: "zzz", width: 80, height: 15 }));
+
+  assert.equal(empty.lines.length, 15);
+  assert.equal(noMatches.lines.length, 15);
+  assert.equal(empty.rowSessions.length, 15);
+  assert.equal(noMatches.rowSessions.length, 15);
+});
+
+test("height-bounded list shows bottom indicator at the top", () => {
+  const layout = renderSessions(buildRenderModel({ sessions: manySessions(20), selectedId: "s0", width: 80, height: 15 }));
+  const text = layout.lines.map(stripAnsi).join("\n");
+
+  assert.doesNotMatch(text, /↑ \d+ more/);
+  assert.match(text, /↓ 12 more/);
+  assert.deepEqual(renderedSessionIds(layout), manySessions(8).map((item) => item.id));
+});
+
+test("height-bounded list shows top indicator at the bottom", () => {
+  const layout = renderSessions(buildRenderModel({ sessions: manySessions(20), selectedId: "s19", width: 80, height: 15 }));
+  const text = layout.lines.map(stripAnsi).join("\n");
+
+  assert.match(text, /↑ 11 more/);
+  assert.doesNotMatch(text, /↓ \d+ more/);
+  assert.deepEqual(renderedSessionIds(layout), manySessions(20).slice(11).map((item) => item.id));
+});
+
+test("height-bounded list shows both indicators in the middle", () => {
+  const layout = renderSessions(buildRenderModel({ sessions: manySessions(20), selectedId: "s10", width: 80, height: 15 }));
+  const text = layout.lines.map(stripAnsi).join("\n");
+
+  assert.match(text, /↑ 3 more/);
+  assert.match(text, /↓ 9 more/);
+  assert.deepEqual(renderedSessionIds(layout), manySessions(20).slice(3, 11).map((item) => item.id));
+});
+
+test("height-bounded list handles exact and one-over capacity", () => {
+  const exact = renderSessions(buildRenderModel({ sessions: manySessions(9), selectedId: "s0", width: 80, height: 15 }));
+  assert.equal(exact.listScrollTop, 0);
+  assert.doesNotMatch(exact.lines.map(stripAnsi).join("\n"), /[↑↓] \d+ more/);
+  assert.deepEqual(renderedSessionIds(exact), manySessions(9).map((item) => item.id));
+
+  const oneOver = renderSessions(buildRenderModel({ sessions: manySessions(10), selectedId: "s0", width: 80, height: 15 }));
+  const oneOverText = oneOver.lines.map(stripAnsi).join("\n");
+  assert.doesNotMatch(oneOverText, /↑ \d+ more/);
+  assert.match(oneOverText, /↓ 2 more/);
+  assert.equal(renderedSessionIds(oneOver).length, 8);
+});
+
+test("height-bounded list preserves scroll top until selection reaches an edge", () => {
+  const sessions = manySessions(30);
+  const first = renderSessions(buildRenderModel({ sessions, selectedId: "s10", width: 80, height: 15 }));
+  assert.equal(first.listScrollTop, 4);
+
+  const inside = renderSessions(buildRenderModel({ sessions, selectedId: "s9", width: 80, height: 15, listScrollTop: first.listScrollTop }));
+  assert.equal(inside.listScrollTop, first.listScrollTop);
+
+  const edge = renderSessions(buildRenderModel({ sessions, selectedId: "s11", width: 80, height: 15, listScrollTop: inside.listScrollTop }));
+  assert.equal(edge.listScrollTop, first.listScrollTop + 1);
+});
+
 test("groups view is unchanged when viewMode is omitted", () => {
   const backlog = { ...session("bk", "experiments", "idle"), bucket: "backlog" as const, bucketChangedAt: 1 };
   const model = buildRenderModel({ sessions: [session("a", "default", "idle"), backlog], width: 120 });

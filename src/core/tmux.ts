@@ -86,16 +86,20 @@ export interface WindowPane {
   tty: string;
   active: boolean;
   top: number;
+  width: number;
+  windowWidth: number;
 }
 
 export async function listWindowPanes(pane: string, exec: TmuxExec = realTmuxExec): Promise<WindowPane[]> {
-  const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top}"]);
+  const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top} #{pane_width} #{window_width}"]);
   return result.stdout.split(/\r?\n/).flatMap((line) => {
     if (!line.trim()) return [];
-    const [id, tty, active, topText] = line.split(" ");
+    const [id, tty, active, topText, widthText, windowWidthText] = line.split(" ");
     const top = Number(topText);
-    if (!id || !tty || !Number.isFinite(top)) return [];
-    return [{ id, tty, active: active === "1", top }];
+    const width = Number(widthText);
+    const windowWidth = Number(windowWidthText);
+    if (!id || !tty || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(windowWidth)) return [];
+    return [{ id, tty, active: active === "1", top, width, windowWidth }];
   });
 }
 
@@ -114,6 +118,10 @@ export async function switchClientTo(options: { clientTty: string; target: strin
 
 export async function killPane(paneId: string, exec: TmuxExec = realTmuxExec): Promise<void> {
   await exec.exec("tmux", ["kill-pane", "-t", paneId]);
+}
+
+export async function resizePaneWidth(paneId: string, width: number, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["resize-pane", "-t", paneId, "-x", String(width)]);
 }
 
 export async function selectPane(paneId: string, exec: TmuxExec = realTmuxExec): Promise<void> {

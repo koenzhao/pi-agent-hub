@@ -109,7 +109,7 @@ Opening or retargeting a side pane keeps tmux focus on the sidebar so repeated `
 
 Native tmux keys handle the layout after that: `prefix+←/→/↑/↓` moves focus, `prefix+z` zooms the focused pane to hide/show neighbors, `prefix+x` closes a pane, and `prefix+{` / `prefix+}` swaps panes. `Enter` and `Ctrl+Q` keep their full-screen switch/return behavior unchanged; if `Enter` opens a session currently shown in any side pane, Hub closes that pane first to avoid tmux size flapping.
 
-The side panes are stateless and self-healing. Hub inspects the current window live and only owns panes whose tty maps to a nested client attached to a `pi-agent-hub-*` managed session. User-created shell/editor panes are never killed or retargeted. If a shown session exits, tmux normally closes its nested pane automatically.
+The side panes are stateless and self-healing. Hub inspects the current window live and only owns panes whose tty maps to a nested client attached to a `pi-agent-hub-*` managed session. User-created shell/editor panes are never killed or retargeted. If the terminal is squeezed too narrow, the dashboard shows a compact narrow-pane notice instead of exiting; when side panes exist and the window is wide enough again, Hub restores a collapsed sidebar to its normal width without disturbing manual sidebar widths of 40 columns or more. If a shown session exits, tmux normally closes its nested pane automatically.
 
 If the dashboard tmux session is missing, the temporary return binding recreates it before switching back.
 

@@ -12,8 +12,8 @@ import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mc
 import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
-import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setDashboardStatusBarVisible, switchClientWithReturn } from "../core/tmux.js";
-import { closeSidePaneShowing, closeSidePanes, listSidePaneSessions, openInSidePane } from "./side-pane.js";
+import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, resizePaneWidth, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setDashboardStatusBarVisible, switchClientWithReturn } from "../core/tmux.js";
+import { closeSidePaneShowing, closeSidePanes, openInSidePane, sidebarRepairWidth, sidePaneStatus } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
@@ -181,7 +181,12 @@ export async function runTui(): Promise<void> {
     const ownPane = process.env.TMUX_PANE;
     const next = new Set<string>();
     if (ownPane) {
-      for (const tmuxSession of await listSidePaneSessions({ ownPane })) next.add(tmuxSession);
+      const status = await sidePaneStatus({ ownPane });
+      for (const tmuxSession of status.sessions) next.add(tmuxSession);
+      if (status.sessions.length && status.ownWidth !== undefined && status.windowWidth !== undefined) {
+        const repairWidth = sidebarRepairWidth(status.ownWidth, status.windowWidth);
+        if (repairWidth !== undefined) await resizePaneWidth(ownPane, repairWidth);
+      }
     }
     const changed = !sameStringSets(sidePaneTmuxSessions, next);
     const hadSidePanes = sidePaneTmuxSessions.size > 0;
@@ -444,6 +449,7 @@ export async function runTui(): Promise<void> {
   });
   tui.addChild(view);
   tui.setFocus(view);
+  terminal.write("\x1b[2J\x1b[H");
   tui.start();
   terminal.write(MOUSE_ENABLE);
   if (process.env.TMUX) void setDashboardMouse({ name: DASHBOARD_SESSION, enabled: true }).catch(() => {});

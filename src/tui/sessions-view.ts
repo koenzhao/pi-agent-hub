@@ -22,6 +22,8 @@ function normalizeSidePaneSessionIds(sessionIds: ReadonlySet<string> | readonly 
   return Array.isArray(sessionIds) ? sessionIds : [...sessionIds];
 }
 
+const MIN_RENDER_WIDTH = 40;
+
 export class SessionsView implements Component {
   private dialog: SessionDialog | undefined;
   private message: string | undefined;
@@ -32,6 +34,7 @@ export class SessionsView implements Component {
   private busy = false;
   private rowSessions: (string | undefined)[] = [];
   private listWidth = 0;
+  private listScrollTop = 0;
 
   constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {}
 
@@ -133,12 +136,18 @@ export class SessionsView implements Component {
 
   render(width: number): string[] {
     this.clearExpiredFlash();
-    if (this.dialog?.kind === "help") return renderHelp(width, this.theme);
-    if (this.dialog?.kind === "picker") return renderPickerDialog(this.dialog, width, this.dialogContext());
-    if (this.dialog?.kind === "new" || this.dialog?.kind === "repoPicker") return renderNewSessionDialog(this.dialog, width, this.dialogContext());
-    if (this.dialog?.kind === "form") return renderFormDialog(this.dialog, width, this.dialogContext());
-    if (this.dialog?.kind === "confirm") return renderConfirmDialog(this.dialog, width, this.dialogContext());
-    if (this.pendingRestart) return renderRestartDialog(width, this.dialogContext());
+    const height = this.actions.terminalRows?.() ?? process.stdout.rows;
+    if (width < MIN_RENDER_WIDTH) {
+      this.rowSessions = [];
+      this.listWidth = 0;
+      return narrowNotice(width);
+    }
+    if (this.dialog?.kind === "help") return limitRows(renderHelp(width, this.theme), height, width, this.theme);
+    if (this.dialog?.kind === "picker") return limitRows(renderPickerDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
+    if (this.dialog?.kind === "new" || this.dialog?.kind === "repoPicker") return limitRows(renderNewSessionDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
+    if (this.dialog?.kind === "form") return limitRows(renderFormDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
+    if (this.dialog?.kind === "confirm") return limitRows(renderConfirmDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
+    if (this.pendingRestart) return limitRows(renderRestartDialog(width, this.dialogContext()), height, width, this.theme);
     const snapshot = this.controller.snapshot();
     const selected = this.controller.selected();
     const now = this.actions.now?.() ?? Date.now();
@@ -150,7 +159,8 @@ export class SessionsView implements Component {
       filterEditing: this.dialog?.kind === "prompt" && this.dialog.purpose === "filter",
       preview: snapshot.preview,
       detailsExpanded: this.detailsExpanded,
-      height: this.actions.terminalRows?.() ?? process.stdout.rows,
+      height,
+      listScrollTop: this.listScrollTop,
       selectedSkillCount: selected ? this.actions.skillCount?.(selected.cwd) : undefined,
       viewMode: this.viewMode,
       now,
@@ -158,6 +168,7 @@ export class SessionsView implements Component {
     }), this.theme);
     this.rowSessions = layout.rowSessions;
     this.listWidth = layout.listWidth;
+    this.listScrollTop = layout.listScrollTop;
     const footer = this.dialog?.kind === "prompt" ? promptFooter(this.dialog, this.dialogContext()) : undefined;
     const withFooter = footer ? replaceFooter(layout.lines, footer, this.theme) : layout.lines;
     if (this.message) return replaceFooter(withFooter, this.message, this.theme);
@@ -678,6 +689,21 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
 function padVisibleLine(line: string, width: number): string {
   const text = truncateVisible(line, width);
   return `${text}${" ".repeat(Math.max(0, width - stripAnsi(text).length))}`;
+}
+
+function limitRows(lines: string[], height: number | undefined, width: number, theme?: SessionsTheme): string[] {
+  if (!height || height <= 0 || lines.length <= height) return lines;
+  const marker = theme ? styleToken(theme, "dim", "… resize for full help") : "… resize for full help";
+  return [...lines.slice(0, Math.max(0, height - 1)), truncateVisible(marker, Math.max(1, width))];
+}
+
+function narrowNotice(width: number): string[] {
+  const safeWidth = Math.max(1, width);
+  return [
+    "pi agent hub",
+    "pane too narrow",
+    `widen to ≥${MIN_RENDER_WIDTH} cols`,
+  ].map((line) => truncateVisible(line, safeWidth));
 }
 
 function replaceFooter(lines: string[], message: string, theme?: SessionsTheme): string[] {

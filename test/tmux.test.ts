@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setDashboardStatusBarVisible, shellQuote, splitPaneBelowAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSwitchReturnBinding, killPane, listWindowPanes, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setDashboardStatusBarVisible, shellQuote, splitPaneBelowAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -51,13 +51,13 @@ test("shellQuote uses POSIX single quote escaping", () => {
 });
 
 test("listWindowPanes parses panes for the current window", async () => {
-  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 12\n%3 /dev/ttys003 0 nope\n", stderr: "" }));
+  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 12 117 160\n%3 /dev/ttys003 0 nope 40 160\n%4 /dev/ttys004 0 20 nope 160\n", stderr: "" }));
 
   assert.deepEqual(await listWindowPanes("%1", exec), [
-    { id: "%1", tty: "/dev/ttys001", active: true, top: 0 },
-    { id: "%2", tty: "/dev/ttys002", active: false, top: 12 },
+    { id: "%1", tty: "/dev/ttys001", active: true, top: 0, width: 42, windowWidth: 160 },
+    { id: "%2", tty: "/dev/ttys002", active: false, top: 12, width: 117, windowWidth: 160 },
   ]);
-  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top}"] }]);
+  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top} #{pane_width} #{window_width}"] }]);
 });
 
 test("splitWindowAttach creates a detached side pane and resizes the sidebar", async () => {
@@ -89,15 +89,17 @@ test("switchClientTo switches a nested client by tty", async () => {
   assert.deepEqual(exec.calls, [{ command: "tmux", args: ["switch-client", "-c", "/dev/ttys002", "-t", "pi-agent-hub-docs"] }]);
 });
 
-test("killPane and selectPane target pane ids directly", async () => {
+test("killPane selectPane and resizePaneWidth target pane ids directly", async () => {
   const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
 
   await killPane("%2", exec);
   await selectPane("%2", exec);
+  await resizePaneWidth("%0", 42, exec);
 
   assert.deepEqual(exec.calls, [
     { command: "tmux", args: ["kill-pane", "-t", "%2"] },
     { command: "tmux", args: ["select-pane", "-t", "%2"] },
+    { command: "tmux", args: ["resize-pane", "-t", "%0", "-x", "42"] },
   ]);
 });
 

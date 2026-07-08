@@ -247,3 +247,28 @@
   id: split-view-005
   plan_file: agent-work/history/20260706_split-view-005_sidebar_mouse.md
   completed_at: '2026-07-06'
+- epic: split-view
+  title: Height-bounded dashboard layout with viewport-safe mouse mapping
+  description: 'Dashboard never renders more lines than the terminal height: the session
+    list scrolls in a window that follows the selection with hidden-row count indicators,
+    the details/preview pane is clipped to the same budget, and the screen is cleared
+    on startup so rendered line 0 sits at terminal row 1. Fixes WSL row-click misalignment
+    and idle full-redraw flicker caused by content overflowing the pi-tui viewport.'
+  priority: 1
+  status: done
+  id: split-view-006
+  created_at: '2026-07-08'
+  plan_file: agent-work/history/20260708_split-view-006_height_bounded_layout.md
+  completed_at: '2026-07-08'
+- epic: split-view
+  title: Survive and repair sidebar pane collapse on terminal resize
+  description: The dashboard TUI renders width-safe at any pane width instead of crashing
+    below 40 columns (pi-tui width-overflow kills the pane today), and the side-pane
+    presence loop re-applies the sidebar width when tmux squeezes it during a terminal
+    resize, so the sidebar recovers automatically when the window grows again.
+  priority: 1
+  status: done
+  id: split-view-007
+  created_at: '2026-07-08'
+  plan_file: agent-work/history/20260708_split-view-007_sidebar_resize_repair.md
+  completed_at: '2026-07-08'

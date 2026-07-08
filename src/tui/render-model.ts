@@ -71,6 +71,7 @@ export interface RenderSummary {
 export interface RenderModel {
   width: number;
   height?: number;
+  listScrollTop?: number;
   empty: boolean;
   noMatches: boolean;
   showPreview: boolean;
@@ -93,6 +94,7 @@ export interface BuildRenderModelInput {
   selectedId?: string;
   width: number;
   height?: number;
+  listScrollTop?: number;
   filter?: string;
   filterEditing?: boolean;
   preview?: string;
@@ -136,6 +138,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
       statusCounts: countRenderSessions(mapped),
     },
     ...(input.height ? { height: input.height } : {}),
+    ...(input.listScrollTop ? { listScrollTop: input.listScrollTop } : {}),
     selected,
     footer: compactFooter ? `Enter · o · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  v · ?` : `Enter Open · ${sideFooter} · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
     filter: input.filter,

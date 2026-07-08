@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { closeSidePaneShowing, closeSidePanes, listSidePaneSessions, openInSidePane } from "../src/app/side-pane.js";
+import { closeSidePaneShowing, closeSidePanes, openInSidePane, sidebarRepairWidth, sidePaneStatus } from "../src/app/side-pane.js";
 import type { TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
@@ -29,29 +29,51 @@ function sidePaneExec(panes: string, clients: string): TmuxExec & { calls: Call[
   });
 }
 
-const listPanesCall = ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top}"];
+const listPanesCall = ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top} #{pane_width} #{window_width}"];
 const listClientsCall = ["list-clients", "-F", "#{client_tty} #{client_session}"];
 
-test("listSidePaneSessions reports managed content panes in visual order", async () => {
+test("sidePaneStatus reports managed content panes in visual order", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%3 /dev/ttys003 0 40\n%2 /dev/ttys002 0 10\n",
+    "%1 /dev/ttys001 1 0 42 160\n%3 /dev/ttys003 0 40 42 160\n%2 /dev/ttys002 0 10 42 160\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
-  assert.deepEqual(await listSidePaneSessions({ ownPane: "%1" }, exec), ["pi-agent-hub-api", "pi-agent-hub-docs"]);
+  assert.deepEqual((await sidePaneStatus({ ownPane: "%1" }, exec)).sessions, ["pi-agent-hub-api", "pi-agent-hub-docs"]);
 });
 
-test("listSidePaneSessions ignores user panes and the dashboard pane", async () => {
+test("sidePaneStatus ignores user panes and the dashboard pane", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%4 /dev/ttys004 0 5\n%2 /dev/ttys002 0 10\n",
+    "%1 /dev/ttys001 1 0 42 160\n%4 /dev/ttys004 0 5 42 160\n%2 /dev/ttys002 0 10 42 160\n",
     "/dev/ttys001 pi-agent-hub-dashboard\n/dev/ttys004 user-shell\n/dev/ttys002 pi-agent-hub-api\n",
   );
 
-  assert.deepEqual(await listSidePaneSessions({ ownPane: "%1" }, exec), ["pi-agent-hub-api"]);
+  assert.deepEqual((await sidePaneStatus({ ownPane: "%1" }, exec)).sessions, ["pi-agent-hub-api"]);
+});
+
+test("sidePaneStatus reports visible sessions and dashboard dimensions", async () => {
+  const exec = sidePaneExec(
+    "%1 /dev/ttys001 1 0 12 160\n%3 /dev/ttys003 0 40 72 160\n%2 /dev/ttys002 0 10 74 160\n",
+    "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
+  );
+
+  assert.deepEqual(await sidePaneStatus({ ownPane: "%1" }, exec), {
+    sessions: ["pi-agent-hub-api", "pi-agent-hub-docs"],
+    ownWidth: 12,
+    windowWidth: 160,
+  });
+  assert.deepEqual(exec.calls.map((call) => call.args), [listPanesCall, listClientsCall]);
+});
+
+test("sidebarRepairWidth only repairs collapsed sidebars when content can fit", () => {
+  assert.equal(sidebarRepairWidth(12, 160), 42);
+  assert.equal(sidebarRepairWidth(12, 100), 42);
+  assert.equal(sidebarRepairWidth(12, 80), undefined);
+  assert.equal(sidebarRepairWidth(40, 160), undefined);
+  assert.equal(sidebarRepairWidth(60, 160), undefined);
 });
 
 test("openInSidePane splits when only the dashboard pane exists", async () => {
-  const exec = sidePaneExec("%1 /dev/ttys001 1 0\n", "");
+  const exec = sidePaneExec("%1 /dev/ttys001 1 0 42 160\n", "");
 
   assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-api", ownPane: "%1" }, exec), { kind: "opened" });
 
@@ -63,7 +85,7 @@ test("openInSidePane splits when only the dashboard pane exists", async () => {
 });
 
 test("openInSidePane preserves custom sidebar width for the first content pane", async () => {
-  const exec = sidePaneExec("%1 /dev/ttys001 1 0\n", "");
+  const exec = sidePaneExec("%1 /dev/ttys001 1 0 42 160\n", "");
 
   assert.deepEqual(await openInSidePane({ target: "pi-agent-hub-api", ownPane: "%1", sidebarWidth: 50 }, exec), { kind: "opened" });
 
@@ -76,7 +98,7 @@ test("openInSidePane preserves custom sidebar width for the first content pane",
 
 test("openInSidePane with one content pane splits below it", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 0\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 0 42 160\n",
     "/dev/ttys002 pi-agent-hub-api\n",
   );
 
@@ -91,7 +113,7 @@ test("openInSidePane with one content pane splits below it", async () => {
 
 test("openInSidePane with two content panes retargets the visually bottom managed pane without selecting it", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
@@ -106,7 +128,7 @@ test("openInSidePane with two content panes retargets the visually bottom manage
 
 test("toggle closes a visible target regardless of position", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
@@ -121,7 +143,7 @@ test("toggle closes a visible target regardless of position", async () => {
 
 test("non-owned panes are ignored when choosing managed panes", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%4 /dev/ttys004 0 5\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
+    "%1 /dev/ttys001 1 0 42 160\n%4 /dev/ttys004 0 5 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n",
     "/dev/ttys004 user-shell\n/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
@@ -136,7 +158,7 @@ test("non-owned panes are ignored when choosing managed panes", async () => {
 
 test("unowned panes do not prevent opening a fresh pane", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n",
     "/dev/ttys003 user-shell\n",
   );
 
@@ -152,7 +174,7 @@ test("unowned panes do not prevent opening a fresh pane", async () => {
 
 test("closeSidePaneShowing kills the matching content pane even when it is second", async () => {
   const matching = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
 
@@ -160,7 +182,7 @@ test("closeSidePaneShowing kills the matching content pane even when it is secon
   assert.deepEqual(matching.calls.map((call) => call.args).at(-1), ["kill-pane", "-t", "%3"]);
 
   const other = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n",
   );
   assert.equal(await closeSidePaneShowing({ target: "pi-agent-hub-web", ownPane: "%1" }, other), false);
@@ -169,7 +191,7 @@ test("closeSidePaneShowing kills the matching content pane even when it is secon
 
 test("closeSidePanes kills only owned side panes", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n%4 /dev/ttys004 0 50\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n%4 /dev/ttys004 0 50 42 160\n",
     "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 user-shell\n/dev/ttys004 pi-agent-hub-docs\n",
   );
 
@@ -183,7 +205,7 @@ test("closeSidePanes kills only owned side panes", async () => {
 
 test("closeSidePanes is a no-op when no owned panes exist", async () => {
   const exec = sidePaneExec(
-    "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n",
+    "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n",
     "/dev/ttys002 user-shell\n",
   );
 
@@ -194,7 +216,7 @@ test("closeSidePanes is a no-op when no owned panes exist", async () => {
 
 test("closeSidePanes tolerates panes that close during shutdown", async () => {
   const exec = fakeTmux((call) => {
-    if (call.args[0] === "list-panes") return { stdout: "%1 /dev/ttys001 1 0\n%2 /dev/ttys002 0 10\n%3 /dev/ttys003 0 40\n", stderr: "" };
+    if (call.args[0] === "list-panes") return { stdout: "%1 /dev/ttys001 1 0 42 160\n%2 /dev/ttys002 0 10 42 160\n%3 /dev/ttys003 0 40 42 160\n", stderr: "" };
     if (call.args[0] === "list-clients") return { stdout: "/dev/ttys002 pi-agent-hub-api\n/dev/ttys003 pi-agent-hub-docs\n", stderr: "" };
     if (call.args[0] === "kill-pane" && call.args[2] === "%2") throw new Error("can't find pane");
     return { stdout: "", stderr: "" };

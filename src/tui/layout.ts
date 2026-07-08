@@ -7,31 +7,34 @@ export interface SessionsLayout {
   lines: string[];
   rowSessions: (string | undefined)[];
   listWidth: number;
+  listScrollTop: number;
 }
 
 export function renderSessions(model: RenderModel, theme?: SessionsTheme): SessionsLayout {
   const styles = theme ? createStyles(theme) : plainStyles();
   const width = Math.max(40, model.width);
   if (model.empty) {
-    const lines = box(width, emptyLines(width, styles), styles);
-    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0 };
+    const lines = box(width, fitBoxBody(emptyLines(width, styles), model.height), styles);
+    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
   }
 
   const bodyWidth = width - 2;
   if (model.noMatches) {
-    const lines = box(width, [renderTopSummary(model, bodyWidth, styles), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)], styles);
-    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0 };
+    const body = [renderTopSummary(model, bodyWidth, styles), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)];
+    const lines = box(width, fitBoxBody(body, model.height), styles);
+    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
   }
 
   const split = model.showPreview ? Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38))) : bodyWidth;
   const targetRows = bodyRowsFromHeight(model.height);
   const left = renderSessionList(model, split, styles);
   const right = model.showPreview ? renderDetails(model.selected, bodyWidth - split - 1, model.preview, model.detailsExpanded, targetRows, styles) : [];
-  const rows = Math.max(left.lines.length, right.length, targetRows ?? 8);
+  const rows = targetRows ?? Math.max(left.lines.length, right.length, 8);
+  const windowedLeft = windowList(left, rows, model.listScrollTop ?? 0, styles);
   const body: string[] = [renderTopSummary(model, bodyWidth, styles)];
   for (let i = 0; i < rows; i += 1) {
-    const padded = pad(left.lines[i] ?? "", split);
-    const l = i === left.selectedIndex ? styles.selected(padded) : padded;
+    const padded = pad(windowedLeft.lines[i] ?? "", split);
+    const l = i === windowedLeft.selectedIndex ? styles.selected(padded) : padded;
     if (!model.showPreview) body.push(l);
     else body.push(`${l}${styles.border("│")}${pad(right[i] ?? "", bodyWidth - split - 1)}`);
   }
@@ -39,8 +42,8 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
   body.push(truncate(styleFooter(model.footer, styles), bodyWidth));
   const lines = box(width, body, styles);
   const rowSessions = lines.map(() => undefined as string | undefined);
-  for (let i = 0; i < rows; i += 1) rowSessions[2 + i] = left.sessions[i];
-  return { lines, rowSessions, listWidth: split };
+  for (let i = 0; i < rows; i += 1) rowSessions[2 + i] = windowedLeft.sessions[i];
+  return { lines, rowSessions, listWidth: split, listScrollTop: windowedLeft.top };
 }
 
 // Footer strings stay plain in the render model for testability; keys get
@@ -58,7 +61,14 @@ function styleFooter(footer: string, styles: LayoutStyles): string {
 
 function bodyRowsFromHeight(height: number | undefined): number | undefined {
   if (!height || height <= 0) return undefined;
-  return Math.max(8, height - 5);
+  return Math.max(1, height - 5);
+}
+
+function fitBoxBody(lines: string[], height: number | undefined): string[] {
+  if (!height || height <= 0) return lines;
+  const target = Math.max(0, height - 2);
+  if (lines.length >= target) return lines.slice(0, target);
+  return [...lines, ...Array.from({ length: target - lines.length }, () => "")];
 }
 
 interface LayoutStyles {
@@ -168,6 +178,74 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
     pushLine(styles.dim(truncate(`+${model.hiddenNonActive} backlog/archived · v groups view`, width)));
   }
   return { lines, sessions, selectedIndex };
+}
+
+interface ListWindow {
+  lines: string[];
+  sessions: (string | undefined)[];
+  selectedIndex: number;
+  top: number;
+}
+
+function windowList(
+  list: { lines: string[]; sessions: (string | undefined)[]; selectedIndex: number },
+  capacity: number,
+  scrollTop: number,
+  styles: LayoutStyles,
+): ListWindow {
+  if (capacity <= 0 || list.lines.length <= capacity) return { ...list, top: 0 };
+  const total = list.lines.length;
+  const selectedIndex = Math.max(0, list.selectedIndex);
+  const sessionCount = (from: number, to: number) => list.sessions.slice(Math.max(0, from), Math.min(total, to)).filter(Boolean).length;
+  const indicator = (arrow: "↑" | "↓", count: number) => styles.dim(`${arrow} ${count} more`);
+  const slice = (top: number, lines: string[], sessions: (string | undefined)[], selectedOffset = top): ListWindow => ({
+    lines,
+    sessions,
+    selectedIndex: selectedIndex >= selectedOffset && selectedIndex < selectedOffset + lines.length ? selectedIndex - selectedOffset : -1,
+    top,
+  });
+
+  if (capacity === 1) {
+    return slice(selectedIndex, [list.lines[selectedIndex] ?? ""], [list.sessions[selectedIndex]], selectedIndex);
+  }
+
+  if (selectedIndex < capacity - 1) {
+    const visibleEnd = capacity - 1;
+    return slice(0, [...list.lines.slice(0, visibleEnd), indicator("↓", sessionCount(visibleEnd, total))], [...list.sessions.slice(0, visibleEnd), undefined]);
+  }
+
+  if (selectedIndex >= total - (capacity - 1)) {
+    const top = total - (capacity - 1);
+    return {
+      lines: [indicator("↑", sessionCount(0, top)), ...list.lines.slice(top)],
+      sessions: [undefined, ...list.sessions.slice(top)],
+      selectedIndex: selectedIndex - top + 1,
+      top,
+    };
+  }
+
+  if (capacity === 2) {
+    return {
+      lines: [indicator("↑", sessionCount(0, selectedIndex)), list.lines[selectedIndex] ?? ""],
+      sessions: [undefined, list.sessions[selectedIndex]],
+      selectedIndex: 1,
+      top: selectedIndex,
+    };
+  }
+
+  const lastContent = capacity - 3;
+  const maxTop = total - (capacity - 1);
+  let top = Math.max(1, Math.min(scrollTop, maxTop));
+  if (selectedIndex < top) top = selectedIndex;
+  if (selectedIndex > top + lastContent) top = selectedIndex - lastContent;
+  top = Math.max(1, Math.min(top, maxTop));
+  const bottomStart = top + capacity - 2;
+  return {
+    lines: [indicator("↑", sessionCount(0, top)), ...list.lines.slice(top, bottomStart), indicator("↓", sessionCount(bottomStart, total))],
+    sessions: [undefined, ...list.sessions.slice(top, bottomStart), undefined],
+    selectedIndex: selectedIndex - top + 1,
+    top,
+  };
 }
 
 function renderDetails(session: RenderSession | undefined, width: number, preview: string, expanded: boolean, targetRows: number | undefined, styles: LayoutStyles): string[] {
