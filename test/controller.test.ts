@@ -209,6 +209,24 @@ test("moving parent bucket moves child rows too", async () => {
   });
 });
 
+test("archiving selected row keeps selection in non-archived rows above its old position", async () => {
+  await withTempSessionsDir(async () => {
+    const controller = new SessionsController({
+      version: 1,
+      sessions: [
+        session("idle", { id: "a", title: "a", order: 0 }),
+        session("idle", { id: "b", title: "b", order: 1 }),
+        session("idle", { id: "c", title: "c", order: 2 }),
+      ],
+    });
+    controller.move(1);
+
+    await controller.moveSessionToBucket("b", "archived", 100);
+
+    assert.equal(controller.snapshot().selectedId, "a");
+  });
+});
+
 test("archive pruning removes expired archived rows only when tmux is missing", async () => {
   await withTempSessionsDir(async () => {
     const registry = {

@@ -38,7 +38,7 @@ Ctrl+Q returns to the dashboard
 | Key | Action |
 | --- | --- |
 | `n` | Create a new Pi session |
-| `Enter` | Open or switch to the selected session |
+| `Enter` | Open/switch to the selected live session, or restart a stopped/error session |
 | `o` | Open, retarget, or close the selected session in a side pane |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
@@ -92,11 +92,11 @@ Running `pi-hub` uses one stable tmux session named `pi-agent-hub`:
 
 The dashboard runs the current CLI file's `tui` command inside tmux so it does not recursively create dashboards or depend on a stale `pi-hub` on PATH. It also applies its own tmux status bar instead of inheriting global tmux theme chrome.
 
-When the dashboard is running inside tmux, `Enter` switches the current tmux client to the selected managed session and briefly shows the equivalent `tmux switch-client -t <session>` command. Opening a `waiting` session marks it read before attaching, so it can show `idle` after you return; `a` remains the manual mark-read shortcut.
+When the dashboard is running inside tmux, `Enter` switches the current tmux client to the selected live session and briefly shows the equivalent `tmux switch-client -t <session>` command. On a stopped or error session, `Enter` restarts it instead of attempting to attach. Opening a `waiting` session marks it read before attaching, so it can show `idle` after you return; `a` remains the manual mark-read shortcut.
 
 ### Sidebar workspace
 
-Press `o` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and up to two selected sessions are attached interactively in stacked right-side panes. Sessions currently visible beside the sidebar show a compact `◫` glyph in their row.
+Press `o` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and up to two selected sessions are attached interactively in stacked right-side panes. Sessions currently visible beside the sidebar show a compact `◫` glyph in their row. At sidebar width, the footer labels only the primary controls—move, open, side pane, and help; press `?` for the complete key map.
 
 The side-pane action is a toggle with stateless placement:
 

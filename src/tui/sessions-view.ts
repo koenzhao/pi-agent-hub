@@ -373,9 +373,9 @@ export class SessionsView implements Component {
     this.message = undefined;
     const selected = this.controller.selected();
     if (!selected) return;
-    if (selected.status === "stopped") {
-      if (this.actions.restart) this.runAction(() => this.actions.restart?.(selected.id), "starting stopped session...");
-      else this.message = "session stopped; press r twice to restart";
+    if (selected.status === "stopped" || selected.status === "error") {
+      if (this.actions.restart) this.runAction(() => this.actions.restart?.(selected.id), "starting session...");
+      else this.message = `session ${selected.status}; press r twice to restart`;
       return;
     }
     if (selected.status === "waiting") {

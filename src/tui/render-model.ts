@@ -120,7 +120,6 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const worktreeFooter = selected?.worktreeOwnedByHub ? " · w Finish WT" : "";
   const showLifecycleFooter = selected && selected.kind !== "subagent" && input.width >= 120;
   const lifecycleFooter = showLifecycleFooter ? selected.section === "active" ? " · A Archive · B Backlog" : " · U Restore" : "";
-  const compactLifecycleFooter = selected && selected.kind !== "subagent" ? selected.section === "active" ? " · A · B" : " · U" : "";
   const sideFooter = input.width >= 120 ? "o Side" : "o";
   const deleteFooter = input.width >= 120 ? "d Delete" : "d Del";
   return {
@@ -140,7 +139,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     ...(input.height ? { height: input.height } : {}),
     ...(input.listScrollTop ? { listScrollTop: input.listScrollTop } : {}),
     selected,
-    footer: compactFooter ? `Enter · o · n · /  │  p · i · r · R · d${selected?.worktreeOwnedByHub ? " · w" : ""}${compactLifecycleFooter}  │  v · ?` : `Enter Open · ${sideFooter} · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
+    footer: compactFooter ? "j/k Move · Enter Open · o Side · ? Help" : `Enter Open · ${sideFooter} · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  ${input.width >= 120 ? "v View · " : ""}? Help`,
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,

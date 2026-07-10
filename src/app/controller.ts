@@ -157,11 +157,14 @@ export class SessionsController {
   async moveSessionToBucket(id: string, bucket: SessionBucket, now = Date.now()): Promise<void> {
     const selected = this.registry.sessions.find((session) => session.id === id);
     if (!selected || isSubagentSession(selected)) return;
+    const wasSelected = this.selectedId === id;
+    const oldIndex = this.visibleSessions().findIndex((session) => session.id === id);
     const ids = sessionCascadeIds(this.registry.sessions, id);
     this.registry = {
       ...this.registry,
       sessions: this.registry.sessions.map((session) => ids.has(session.id) ? moveToBucket(session, bucket, now) : session),
     };
+    if (wasSelected && bucket === "archived") this.selectedId = selectionAboveArchivedRow(this.visibleSessions(), oldIndex) ?? this.selectedId;
     await saveRegistry(this.registry);
   }
 
@@ -248,6 +251,13 @@ function keepSelection(sessions: RuntimeSession[], selectedId: string | undefine
   if (!sessions.length) return undefined;
   if (selectedId && sessions.some((session) => session.id === selectedId)) return selectedId;
   return sessions[0]?.id;
+}
+
+function selectionAboveArchivedRow(sessions: RuntimeSession[], oldIndex: number): string | undefined {
+  const nonArchived = sessions.filter((session) => sessionSection(session) !== "archived");
+  if (!nonArchived.length) return undefined;
+  const targetIndex = Math.min(Math.max(oldIndex - 1, 0), nonArchived.length - 1);
+  return nonArchived[targetIndex]?.id;
 }
 
 function visibleSessions(sessions: RuntimeSession[], filter: string | undefined): RuntimeSession[] {

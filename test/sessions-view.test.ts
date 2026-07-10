@@ -598,6 +598,15 @@ test("short dashboard renders to terminal rows and clicks visible rows", () => {
   assert.equal(controller.snapshot().selectedId, "s7");
 });
 
+test("sidebar dashboard renders readable primary controls", () => {
+  const controller = new SessionsController({ version: 1, sessions: manyViewSessions(3) });
+  const view = new SessionsView(controller, () => {}, { terminalRows: () => 15, sidePaneSessionIds: () => ["s0"] });
+  const rendered = view.render(42).map(stripAnsi);
+
+  assert.match(rendered.at(-2) ?? "", /j\/k Move · Enter Open · o Side · \? Help/);
+  assert.doesNotMatch(rendered.at(-2) ?? "", /…/);
+});
+
 test("mouse hit map follows scrolled list window", () => {
   const controller = new SessionsController({ version: 1, sessions: manyViewSessions(25) });
   const view = new SessionsView(controller, () => {}, { terminalRows: () => 15 });
@@ -807,6 +816,30 @@ test("enter on stopped session restarts instead of switching to missing tmux ses
     const restarted: string[] = [];
     const switched: string[] = [];
     const controller = new SessionsController({ version: 1, sessions: [stopped] });
+    const view = new SessionsView(controller, () => {}, {
+      restart: async (id) => { restarted.push(id); },
+      switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
+    });
+
+    view.handleInput("\r");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(restarted, ["api"]);
+    assert.deepEqual(switched, []);
+  } finally {
+    if (oldTmux === undefined) delete process.env.TMUX;
+    else process.env.TMUX = oldTmux;
+  }
+});
+
+test("enter on error session restarts instead of switching to missing tmux session", async () => {
+  const oldTmux = process.env.TMUX;
+  process.env.TMUX = "/tmp/tmux";
+  try {
+    const dead = { ...session("api", "api"), status: "error" as const };
+    const restarted: string[] = [];
+    const switched: string[] = [];
+    const controller = new SessionsController({ version: 1, sessions: [dead] });
     const view = new SessionsView(controller, () => {}, {
       restart: async (id) => { restarted.push(id); },
       switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },

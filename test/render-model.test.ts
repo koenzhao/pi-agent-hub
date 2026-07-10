@@ -351,13 +351,10 @@ test("session order is stable and ignores status and title", () => {
   assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["worker", "api", "docs"]);
 });
 
-test("narrow layout hides preview and uses compact footer", () => {
-  const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 70 });
+test("narrow layout hides preview and uses readable compact footer", () => {
+  const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 42 });
   assert.equal(model.showPreview, false);
-  assert.match(model.footer, /\?/);
-  assert.match(model.footer, /i/);
-  assert.match(model.footer, /│/);
-  assert.doesNotMatch(model.footer, /Info/);
+  assert.equal(model.footer, "j/k Move · Enter Open · o Side · ? Help");
 });
 
 
