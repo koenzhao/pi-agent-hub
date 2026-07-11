@@ -32,6 +32,7 @@ export interface SessionsViewActions {
   resetSidePane?: (sessionId: string) => SidePaneActionResult | Promise<SidePaneActionResult>;
   focusSidePaneSlot?: (slot: 1 | 2 | 3 | 4) => FocusSidePaneResult | Promise<FocusSidePaneResult>;
   sidePaneSessionIds?: () => ReadonlyMap<string, number>;
+  sidePaneFocusedSlot?: () => number | undefined;
   restart?: (sessionId: string) => unknown;
   restartNew?: (sessionId: string) => unknown;
   restartAll?: () => unknown;

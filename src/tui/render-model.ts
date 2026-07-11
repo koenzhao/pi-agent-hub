@@ -68,6 +68,11 @@ export interface RenderSummary {
   statusCounts: StatusCounts;
 }
 
+export interface PanelStripItem {
+  slot: 1 | 2 | 3 | 4;
+  title?: string;
+}
+
 export interface RenderModel {
   width: number;
   height?: number;
@@ -87,6 +92,8 @@ export interface RenderModel {
   detailsExpanded: boolean;
   viewMode: "groups" | "stages";
   hiddenNonActive: number;
+  panelStrip?: PanelStripItem[];
+  sidePaneFocusedSlot?: number;
 }
 
 export interface BuildRenderModelInput {
@@ -103,6 +110,7 @@ export interface BuildRenderModelInput {
   viewMode?: "groups" | "stages";
   now?: number;
   sidePaneSessionIds?: ReadonlyMap<string, number>;
+  sidePaneFocusedSlot?: number;
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
@@ -111,6 +119,14 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const visible = stages ? stageLaneRows(allRows.filter((session) => sessionSection(session) === "active")).flatMap((lane) => lane.rows) : allRows;
   const selectedId = pickSelectedId(visible, input.selectedId);
   const sidePaneSessionIds = input.sidePaneSessionIds;
+  const occupiedSlots = new Map<number, string>();
+  for (const session of input.sessions) {
+    const slot = sidePaneSessionIds?.get(session.id);
+    if (slot !== undefined) occupiedSlots.set(slot, session.title);
+  }
+  const panelStrip = occupiedSlots.size
+    ? ([1, 2, 3, 4] as const).map((slot) => ({ slot, ...(occupiedSlots.has(slot) ? { title: occupiedSlots.get(slot) } : {}) }))
+    : undefined;
   const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId, input.sessions, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id)));
   const groups = groupsForSessions(mapped);
   const sections = stages ? lanesForSessions(mapped) : sectionsForSessions(mapped);
@@ -148,6 +164,8 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     detailsExpanded: input.detailsExpanded ?? false,
     viewMode: stages ? "stages" : "groups",
     hiddenNonActive: allRows.length - visible.length,
+    ...(panelStrip ? { panelStrip } : {}),
+    ...(input.sidePaneFocusedSlot !== undefined ? { sidePaneFocusedSlot: input.sidePaneFocusedSlot } : {}),
   };
 }
 

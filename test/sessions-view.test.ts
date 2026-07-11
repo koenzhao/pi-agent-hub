@@ -608,7 +608,7 @@ function mouseReleaseAtLine(lineIndex: number, x = 3): string {
 function rowIndexFor(rendered: string[], title: string): number {
   const index = rendered.findIndex((line) => {
     const text = stripAnsi(line);
-    return text.includes(title) && /^│[▶ ] [●◐○×-]/.test(text);
+    return text.includes(title) && /^│[▌ ] [●◐○×-]/.test(text);
   });
   assert.notEqual(index, -1, `missing rendered row for ${title}`);
   return index;
@@ -861,7 +861,7 @@ test("mouse wheel keeps selected row inside the bounded render", () => {
   const rendered = view.render(100).map(stripAnsi);
 
   assert.equal(controller.snapshot().selectedId, "s12");
-  assert.ok(rendered.some((line) => /▶ .*session-12/.test(line)), rendered.join("\n"));
+  assert.ok(rendered.some((line) => /▌ .*session-12/.test(line)), rendered.join("\n"));
 });
 
 test("short help dialog is clipped with a resize marker", () => {
@@ -1920,7 +1920,7 @@ test("p opens footer send prompt and submits message to selected live session", 
   assert.match(rawPrompt, /\u001b\[5m█\u001b\[25m/);
   const prompt = stripAnsi(rawPrompt);
   assert.match(prompt, /pi agent hub/);
-  assert.match(prompt, /▶ . api/);
+  assert.match(prompt, /▌ . api/);
   assert.match(prompt, /send to api: █/);
   assert.doesNotMatch(prompt, /Send to api/);
   now = 1_100;

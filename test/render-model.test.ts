@@ -39,7 +39,7 @@ test("workflow rail renders compact in the list row and full in details", () => 
   assert.equal(model.selected?.workflow?.activeIndex, 3);
 
   const lines = renderSessions(model).lines.map(stripAnsi);
-  const row = lines.find((line) => line.includes("▶"));
+  const row = lines.find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /● a\s+EX 4\/7/);
   assert.match(lines.join("\n"), /NX─PR─PL─▐EX▌─RV─RF─CM · auth-003/);
   for (const line of renderSessions(model).lines) assert.ok(visibleWidth(line) <= 110, line);
@@ -62,7 +62,7 @@ test("sessions without workflow render no rail", () => {
 test("archive expiry badge takes priority over the compact rail", () => {
   const archived = { ...session("a", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
   const model = buildRenderModel({ sessions: [archived, session("b", "default", "running")], selectedId: "a", width: 110, now: 100 });
-  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /\[exp 3d\]/);
   assert.doesNotMatch(row ?? "", /EX 4\/7/);
 });
@@ -99,7 +99,7 @@ test("stages view groups sessions into workflow lanes", () => {
 
 test("stages view rows show the group name instead of the rail", () => {
   const model = buildRenderModel({ sessions: [{ ...session("p", "agents", "running"), workflow: WORKFLOW }], viewMode: "stages", width: 120 });
-  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /● p\s+agents/);
   assert.doesNotMatch(row ?? "", /EX 4\/7/);
 });
@@ -113,6 +113,28 @@ test("render model records side pane slots by session id", () => {
 
   assert.equal(model.groups[0]?.sessions.find((item) => item.id === "api")?.sidePaneSlot, 2);
   assert.equal(model.groups[0]?.sessions.find((item) => item.id === "docs")?.sidePaneSlot, undefined);
+});
+
+test("panel strip uses all sessions and records the focused slot", () => {
+  const model = buildRenderModel({
+    sessions: [session("api", "default", "running"), session("docs", "default", "idle")],
+    filter: "api",
+    width: 100,
+    sidePaneSessionIds: new Map([["api", 2], ["docs", 1]]),
+    sidePaneFocusedSlot: 2,
+  });
+  assert.deepEqual(model.panelStrip, [
+    { slot: 1, title: "docs" },
+    { slot: 2, title: "api" },
+    { slot: 3 },
+    { slot: 4 },
+  ]);
+  assert.equal(model.sidePaneFocusedSlot, 2);
+  assert.match(renderSessions(model).lines.map(stripAnsi).join("\n"), /◫1 docs  ◫2 api  ·3  ·4/);
+});
+
+test("render model omits the panel strip when no panels are open", () => {
+  assert.equal(buildRenderModel({ sessions: [session("api", "default", "running")], width: 100 }).panelStrip, undefined);
 });
 
 test("side pane glyphs render numbered slots on the left", () => {
@@ -133,7 +155,7 @@ test("side pane glyphs do not crowd compact workflow rails", () => {
     width: 110,
     sidePaneSessionIds: new Map([["api", 1]]),
   });
-  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /● ◫1 api\s+EX 4\/7/);
   assert.doesNotMatch(row ?? "", /EX 4\/7 ◫1/);
 });
@@ -146,7 +168,7 @@ test("side pane glyphs remain left-visible at narrow widths", () => {
     width: 40,
     sidePaneSessionIds: new Map([["api", 1]]),
   });
-  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /● ◫1 long-t/);
   assert.match(row ?? "", /EXECUTE-LONG-LABEL 4\/7/);
 });
@@ -159,7 +181,7 @@ test("stages view keeps side pane glyphs separate from group adornments", () => 
     viewMode: "stages",
     sidePaneSessionIds: new Map([["api", 1]]),
   });
-  const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
+  const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /● ◫1 long-title/);
 });
 
@@ -424,7 +446,7 @@ test("error reason appears in selected metadata", () => {
 test("selected and stopped rows have distinct treatments without moving stopped rows", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "stopped", "api"), session("b", "default", "idle", "docs")], selectedId: "b", width: 100 });
   const lines = renderSessions(model).lines.join("\n");
-  assert.match(lines, /· - api[\s\S]*▶ ○ docs/);
+  assert.match(lines, /· - api[\s\S]*▌ ○ docs/);
   assert.doesNotMatch(lines, /Stopped/);
 });
 
@@ -553,7 +575,7 @@ test("preview divider has no read-only label", () => {
 test("selected title and status render inline on the same line", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "running", "c-bridge")], selectedId: "a", width: 200 });
   const rendered = renderSessions(model).lines.join("\n");
-  const titleLine = rendered.split("\n").find((line) => line.includes("c-bridge") && !line.includes("▶"));
+  const titleLine = rendered.split("\n").find((line) => line.includes("c-bridge") && !line.includes("▌"));
   assert.ok(titleLine, "expected an inline title row in the right pane");
   assert.match(titleLine!, /c-bridge\s{1,}● running/);
 });
@@ -562,7 +584,7 @@ test("selected title and status render inline on the same line", () => {
 test("long selected title preserves inline status", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "waiting", "selected-title-".repeat(10))], selectedId: "a", width: 80 });
   const lines = renderSessions(model).lines;
-  const titleLine = lines.find((line) => line.includes("◐ waiting") && !line.includes("▶"));
+  const titleLine = lines.find((line) => line.includes("◐ waiting") && !line.includes("▌"));
   assert.ok(titleLine, "expected selected details to keep the status badge");
   assert.match(stripAnsi(titleLine!), /…\s+◐ waiting/);
   for (const line of lines) assert.ok(visibleWidth(line) <= 80, line);

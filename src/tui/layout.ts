@@ -20,18 +20,20 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
 
   const bodyWidth = width - 2;
   if (model.noMatches) {
-    const body = [renderTopSummary(model, bodyWidth, styles), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)];
+    const body = [renderTopSummary(model, bodyWidth, styles), ...(model.panelStrip ? [renderPanelStrip(model, bodyWidth, styles)] : []), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)];
     const lines = box(width, fitBoxBody(body, model.height), styles);
     return { lines, rowSessions: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
   }
 
   const split = model.showPreview ? Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38))) : bodyWidth;
-  const targetRows = bodyRowsFromHeight(model.height);
+  const stripLines = model.panelStrip ? 1 : 0;
+  const targetRows = bodyRowsFromHeight(model.height, stripLines);
   const left = renderSessionList(model, split, styles);
   const right = model.showPreview ? renderDetails(model.selected, bodyWidth - split - 1, model.preview, model.detailsExpanded, targetRows, styles) : [];
   const rows = targetRows ?? Math.max(left.lines.length, right.length, 8);
   const windowedLeft = windowList(left, rows, model.listScrollTop ?? 0, styles);
   const body: string[] = [renderTopSummary(model, bodyWidth, styles)];
+  if (model.panelStrip) body.push(renderPanelStrip(model, bodyWidth, styles));
   for (let i = 0; i < rows; i += 1) {
     const padded = pad(windowedLeft.lines[i] ?? "", split);
     const l = i === windowedLeft.selectedIndex ? styles.selected(padded) : padded;
@@ -42,7 +44,7 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
   body.push(truncate(styleFooter(model.footer, styles), bodyWidth));
   const lines = box(width, body, styles);
   const rowSessions = lines.map(() => undefined as string | undefined);
-  for (let i = 0; i < rows; i += 1) rowSessions[2 + i] = windowedLeft.sessions[i];
+  for (let i = 0; i < rows; i += 1) rowSessions[2 + stripLines + i] = windowedLeft.sessions[i];
   return { lines, rowSessions, listWidth: split, listScrollTop: windowedLeft.top };
 }
 
@@ -59,9 +61,9 @@ function styleFooter(footer: string, styles: LayoutStyles): string {
   ).join(styles.border("│"));
 }
 
-function bodyRowsFromHeight(height: number | undefined): number | undefined {
+function bodyRowsFromHeight(height: number | undefined, stripLines = 0): number | undefined {
   if (!height || height <= 0) return undefined;
-  return Math.max(1, height - 5);
+  return Math.max(1, height - 5 - stripLines);
 }
 
 function fitBoxBody(lines: string[], height: number | undefined): string[] {
@@ -143,6 +145,15 @@ function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyle
   return truncate(parts.join(" · "), width);
 }
 
+function renderPanelStrip(model: RenderModel, width: number, styles: LayoutStyles): string {
+  const segments = model.panelStrip?.map(({ slot, title }) => {
+    if (!title) return styles.dim(`·${slot}`);
+    const text = `◫${slot} ${title}`;
+    return slot === model.sidePaneFocusedSlot ? styles.accent(text) : `${styles.muted(`◫${slot}`)} ${title}`;
+  }) ?? [];
+  return truncate(segments.join("  "), width);
+}
+
 function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): { lines: string[]; sessions: (string | undefined)[]; selectedIndex: number } {
   const stages = model.viewMode === "stages";
   const lines: string[] = [];
@@ -154,7 +165,7 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
   };
   const pushRow = (session: RenderSession) => {
     if (session.selected) selectedIndex = lines.length;
-    pushLine(renderSessionRow(session, width, styles, stages), session.id);
+    pushLine(renderSessionRow(session, width, styles, stages, model.sidePaneFocusedSlot), session.id);
   };
   if (!model.showSections) {
     for (const group of model.groups) {
@@ -273,8 +284,9 @@ function railCompact(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
   return `${styles.accent(step.short)} ${styles.dim(`${workflow.activeIndex + 1}/${workflow.steps.length}`)}`;
 }
 
-function sidePaneGlyph(slot: number | undefined, styles: LayoutStyles): string {
-  return slot === undefined ? "" : `${styles.accent(`◫${slot}`)} `;
+function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined, styles: LayoutStyles): string {
+  if (slot === undefined) return "";
+  return `${slot === focusedSlot ? styles.accent(`◫${slot}`) : styles.muted(`◫${slot}`)} `;
 }
 
 function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages: boolean, width: number): string {
@@ -411,12 +423,12 @@ function truncatePath(path: string, width: number): string {
   return truncateValue(path, width, "start");
 }
 
-function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, stages = false): string {
-  const prefix = session.selected ? styles.accent("▶") : session.status === "stopped" ? styles.dim("·") : " ";
+function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, stages = false, focusedSlot?: number): string {
+  const prefix = session.selected ? styles.accent("▌") : session.status === "stopped" ? styles.dim("·") : " ";
   const symbol = styles.status(session.displayStatus, session.symbol);
   const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : session.title;
   const title = session.status === "stopped" ? styles.dim(titleText) : titleText;
-  const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, styles);
+  const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, focusedSlot, styles);
   const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
   const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" [wt]") : "";
   const archiveBadge = session.archiveExpiresIn ? styles.dim(` [exp ${session.archiveExpiresIn}]`) : "";

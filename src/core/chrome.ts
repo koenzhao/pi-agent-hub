@@ -12,6 +12,9 @@ export interface TmuxChrome {
   statusStyle: string;
   windowStatusStyle: string;
   windowStatusCurrentStyle: string;
+  paneBorderStyle: string;
+  paneActiveBorderStyle: string;
+  paneBorderFormat: string;
 }
 
 export const darkTmuxChrome: TmuxChrome = {
@@ -19,6 +22,9 @@ export const darkTmuxChrome: TmuxChrome = {
   statusStyle: "bg=#1a1b26,fg=#a9b1d6",
   windowStatusStyle: "fg=#a9b1d6,bg=#1a1b26",
   windowStatusCurrentStyle: "fg=#a9b1d6,bg=#1a1b26",
+  paneBorderStyle: "fg=#565f89",
+  paneActiveBorderStyle: "fg=#7aa2f7",
+  paneBorderFormat: " #{?pane_active,#[fg=#7aa2f7]#[bold],#[fg=#565f89]}#{pane_title}#[default] ",
 };
 
 export function tmuxChromeFromTheme(theme?: ChromeThemeTokens): TmuxChrome {
@@ -26,11 +32,17 @@ export function tmuxChromeFromTheme(theme?: ChromeThemeTokens): TmuxChrome {
   const foreground = tmuxColor(theme.text) ?? tmuxColor(theme.accent) ?? "#a9b1d6";
   const background = tmuxColor(theme.statusLineBg) ?? tmuxColor(theme.border) ?? "#1a1b26";
   const hintColor = tmuxColor(theme.muted) ?? tmuxColor(theme.dim) ?? "#565f89";
+  const borderColor = tmuxColor(theme.border) ?? tmuxColor(theme.dim) ?? "#565f89";
+  const accentColor = tmuxColor(theme.accent) ?? "#7aa2f7";
   return {
     hintColor,
     statusStyle: `bg=${background},fg=${foreground}`,
     windowStatusStyle: `fg=${foreground},bg=${background}`,
     windowStatusCurrentStyle: `fg=${foreground},bg=${background}`,
+    paneBorderStyle: `fg=${borderColor}`,
+    paneActiveBorderStyle: `fg=${accentColor}`,
+    // tmux condition branches use commas, so keep attributes in separate blocks.
+    paneBorderFormat: ` #{?pane_active,#[fg=${accentColor}]#[bold],#[fg=${hintColor}]}#{pane_title}#[default] `,
   };
 }
 

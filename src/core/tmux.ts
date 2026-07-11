@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { isErrno, withFileLock, writeJsonAtomic } from "./atomic-json.js";
-import { tmuxChromeFromTheme, type ChromeThemeTokens } from "./chrome.js";
+import { tmuxChromeFromTheme, type ChromeThemeTokens, type TmuxChrome } from "./chrome.js";
 import { MANAGED_SESSION_PREFIX } from "./names.js";
 import { sessionsStateDir } from "./paths.js";
 import type { CommandResult } from "./types.js";
@@ -155,14 +155,20 @@ export async function setPaneTitle(paneId: string, title: string, exec: TmuxExec
   await exec.exec("tmux", ["select-pane", "-t", paneId, "-T", title]);
 }
 
-export async function setWindowPaneBorderStatus(paneId: string, visible: boolean, exec: TmuxExec = realTmuxExec): Promise<void> {
+export async function setWindowPaneBorderStatus(paneId: string, visible: boolean, chrome?: TmuxChrome, exec: TmuxExec = realTmuxExec): Promise<void> {
   if (visible) {
-    await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-format", " #{pane_title} "]);
+    await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-format", chrome?.paneBorderFormat ?? " #{pane_title} "]);
+    if (chrome) {
+      await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-style", chrome.paneBorderStyle]);
+      await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-active-border-style", chrome.paneActiveBorderStyle]);
+    }
     await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-status", "top"]);
     return;
   }
   await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-status", "off"]);
   await exec.exec("tmux", ["set-option", "-w", "-u", "-t", paneId, "pane-border-format"]);
+  await exec.exec("tmux", ["set-option", "-w", "-u", "-t", paneId, "pane-border-style"]);
+  await exec.exec("tmux", ["set-option", "-w", "-u", "-t", paneId, "pane-active-border-style"]);
 }
 
 export async function clientSessionsByTty(exec: TmuxExec = realTmuxExec): Promise<Map<string, string>> {

@@ -12,6 +12,9 @@ test("tmuxChromeFromTheme derives tmux hex colors from theme tokens", () => {
     statusStyle: "bg=#547da7,fg=#7aa2f7",
     windowStatusStyle: "fg=#7aa2f7,bg=#547da7",
     windowStatusCurrentStyle: "fg=#7aa2f7,bg=#547da7",
+    paneBorderStyle: "fg=#547da7",
+    paneActiveBorderStyle: "fg=#7aa2f7",
+    paneBorderFormat: " #{?pane_active,#[fg=#7aa2f7]#[bold],#[fg=#767676]}#{pane_title}#[default] ",
   });
 });
 
@@ -33,6 +36,9 @@ test("tmuxChromeFromTheme converts numeric tokens to tmux colour indexes", () =>
     statusStyle: "bg=colour240,fg=colour33",
     windowStatusStyle: "fg=colour33,bg=colour240",
     windowStatusCurrentStyle: "fg=colour33,bg=colour240",
+    paneBorderStyle: "fg=colour240",
+    paneActiveBorderStyle: "fg=colour33",
+    paneBorderFormat: " #{?pane_active,#[fg=colour33]#[bold],#[fg=colour244]}#{pane_title}#[default] ",
   });
 });
 

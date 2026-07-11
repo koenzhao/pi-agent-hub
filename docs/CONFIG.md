@@ -204,4 +204,4 @@ For the anchored session, a fresh live theme wins. When no fresh live theme is a
 
 While open, the dashboard periodically reloads the effective theme state and updates its ANSI colors when tokens change.
 
-Built-in Pi theme names `light` and `dark` map to compact theme token maps. Missing or invalid custom themes fall back to the built-in dark token map. Dashboard tmux status/footer chrome is configured separately; dashboard and managed-session tmux status bars are refreshed from the same effective theme while the dashboard is running.
+Built-in Pi theme names `light` and `dark` map to compact theme token maps. Missing or invalid custom themes fall back to the built-in dark token map. The dashboard uses `selectedBg` for the selected session row, `accent` for the focused panel border/title and slot cues, and `border` or `dim` for inactive panel borders. Dashboard pane chrome and dashboard/managed-session status bars are refreshed from the same effective theme while the dashboard is running.

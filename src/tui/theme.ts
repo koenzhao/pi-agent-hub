@@ -22,7 +22,7 @@ export const darkTheme: SessionsTheme = {
   text: "",
   border: 240,
   statusLineBg: "#1a1b26",
-  selectedBg: "#292e42",
+  selectedBg: "#33405e",
 };
 
 export const lightTheme: SessionsTheme = {

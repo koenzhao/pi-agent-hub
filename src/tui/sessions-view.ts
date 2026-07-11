@@ -194,6 +194,7 @@ export class SessionsView implements Component {
       viewMode: this.viewMode,
       now,
       sidePaneSessionIds: this.actions.sidePaneSessionIds?.(),
+      sidePaneFocusedSlot: this.actions.sidePaneFocusedSlot?.(),
     }), this.theme);
     this.rowSessions = layout.rowSessions;
     this.listWidth = layout.listWidth;

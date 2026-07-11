@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { darkTmuxChrome } from "../src/core/chrome.js";
 import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, clientSize, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSidebarReturnBinding, inspectSwitchReturnBinding, installSidebarReturnBinding, killPane, listWindowPanes, presizeSessionWindow, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resetSessionWindowSize, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setDashboardStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, shellQuote, splitPaneAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
@@ -109,8 +110,8 @@ test("pane helpers target pane ids and window-local border chrome", async () => 
   await selectPane("%2", exec);
   await resizePaneWidth("%0", 42, exec);
   await setPaneTitle("%2", "[1] API", exec);
-  await setWindowPaneBorderStatus("%0", true, exec);
-  await setWindowPaneBorderStatus("%0", false, exec);
+  await setWindowPaneBorderStatus("%0", true, undefined, exec);
+  await setWindowPaneBorderStatus("%0", false, undefined, exec);
 
   assert.deepEqual(exec.calls, [
     { command: "tmux", args: ["kill-pane", "-t", "%2"] },
@@ -121,6 +122,19 @@ test("pane helpers target pane ids and window-local border chrome", async () => 
     { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-status", "top"] },
     { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-status", "off"] },
     { command: "tmux", args: ["set-option", "-w", "-u", "-t", "%0", "pane-border-format"] },
+    { command: "tmux", args: ["set-option", "-w", "-u", "-t", "%0", "pane-border-style"] },
+    { command: "tmux", args: ["set-option", "-w", "-u", "-t", "%0", "pane-active-border-style"] },
+  ]);
+});
+
+test("pane border chrome applies theme-derived active and inactive styles", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+  await setWindowPaneBorderStatus("%0", true, darkTmuxChrome, exec);
+  assert.deepEqual(exec.calls, [
+    { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-format", darkTmuxChrome.paneBorderFormat] },
+    { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-style", darkTmuxChrome.paneBorderStyle] },
+    { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-active-border-style", darkTmuxChrome.paneActiveBorderStyle] },
+    { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-status", "top"] },
   ]);
 });
 

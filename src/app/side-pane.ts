@@ -21,6 +21,7 @@ interface ContentPane {
 export interface SidePaneStatus {
   sessions: string[];
   paneIds: string[];
+  activeSlot?: SidePaneSlot;
   ownWidth?: number;
   windowWidth?: number;
 }
@@ -141,9 +142,11 @@ export async function closeSidePanes(options: { ownPane: string }, exec: TmuxExe
 
 export async function sidePaneStatus(options: { ownPane: string }, exec: TmuxExec = realTmuxExec): Promise<SidePaneStatus> {
   const inspected = await inspectSidePaneWindow(options.ownPane, exec);
+  const activeIndex = inspected.content.findIndex((pane) => pane.pane.active);
   return {
     sessions: inspected.content.map((pane) => pane.session),
     paneIds: inspected.content.map((pane) => pane.pane.id),
+    ...(activeIndex >= 0 ? { activeSlot: (activeIndex + 1) as SidePaneSlot } : {}),
     ownWidth: inspected.own?.width,
     windowWidth: inspected.own?.windowWidth,
   };

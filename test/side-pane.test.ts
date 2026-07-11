@@ -67,6 +67,17 @@ test("sidePaneStatus reports four managed panes in visual slot order", async () 
   ]);
 });
 
+test("sidePaneStatus reports the active managed pane as a visual slot", async () => {
+  const panes = `${dashboard}%2 /dev/ttys002 0 43 0 117 29 160 60\n%3 /dev/ttys003 1 43 30 117 29 160 60\n`;
+  const status = await sidePaneStatus({ ownPane: "%1" }, sidePaneExec(panes, sessions.two));
+  assert.equal(status.activeSlot, 2);
+});
+
+test("sidePaneStatus omits activeSlot while the dashboard is focused", async () => {
+  const status = await sidePaneStatus({ ownPane: "%1" }, sidePaneExec(twoPanes, sessions.two));
+  assert.equal(status.activeSlot, undefined);
+});
+
 test("sidePaneStatus ignores user panes and reports dashboard dimensions", async () => {
   const exec = sidePaneExec(
     `${dashboard}%2 /dev/ttys002 0 43 0 58 60 160 60\n%9 /dev/ttys009 0 102 0 58 60 160 60\n`,
