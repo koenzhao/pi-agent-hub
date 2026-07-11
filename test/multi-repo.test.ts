@@ -97,6 +97,10 @@ test("ensureMultiRepoWorkspace creates workspace AGENTS.md from each repo contex
 
   const context = await readFile(join(ensured.workspaceCwd!, "AGENTS.md"), "utf8");
   assert.match(context, /Multi-repo workspace instructions/);
+  assert.match(
+    context,
+    /Store repository-specific state, including `agent-work\/`, inside that repository's workspace link—not at this workspace root\./,
+  );
   assert.match(context, /Repository: api/);
   assert.match(context, new RegExp(escapeRegExp(join(api, "AGENTS.md"))));
   assert.match(context, /API instructions/);
