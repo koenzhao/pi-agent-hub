@@ -12,6 +12,7 @@ import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mc
 import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { tmuxChromeFromTheme } from "../core/chrome.js";
+import { sessionSection } from "../core/session-bucket.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
 import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resizePaneWidth, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setDashboardStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, switchClientWithReturn } from "../core/tmux.js";
 import { closeSidePaneShowing, closeSidePanes, focusSidePaneSlot as focusPanel, resetSidePane, sidebarRepairWidth, sidePaneStatus, toggleSidePaneSlot, type SidePaneResult } from "./side-pane.js";
@@ -55,6 +56,10 @@ function newSessionAdditionalCwds(session: ManagedSession): string[] {
 
 function isHubWorktree(session: ManagedSession): boolean {
   return session.worktreeOwnedByHub === true && sessionWorktrees(session).length > 0;
+}
+
+export function restartAllTargets(sessions: ManagedSession[]): ManagedSession[] {
+  return sessions.filter((session) => session.kind !== "subagent" && sessionSection(session) === "active");
 }
 
 export interface ThemeRefreshLoopOptions {
@@ -414,7 +419,7 @@ export async function runTui(): Promise<void> {
     },
     restartAll() {
       return mutateRegistry(async () => {
-        const sessions = controller.snapshot().registry.sessions.filter((session) => session.kind !== "subagent");
+        const sessions = restartAllTargets(controller.snapshot().registry.sessions);
         for (const session of sessions) await restartManagedSession(session.id);
       });
     },

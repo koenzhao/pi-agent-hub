@@ -48,7 +48,7 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `i` | Toggle compact/full selected-session info |
 | `v` | Toggle groups view ↔ stages view |
 | `q` | Quit the dashboard |
-| `r` | Open restart choices (`r` selected, `n` new conversation, `a` all) |
+| `r` | Open restart choices (`r` selected, `n` new conversation, `a` all active sessions) |
 | `R` | Rename the selected session |
 | `d` | Delete or forget the selected session |
 | `f` | Fork the selected session |

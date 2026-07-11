@@ -649,7 +649,7 @@ export class SessionsView implements Component {
       this.message = "restart all unavailable";
       return;
     }
-    this.runAction(() => this.actions.restartAll?.(), "restarting all sessions...");
+    this.runAction(() => this.actions.restartAll?.(), "restarting active sessions...");
   }
 
   private startDeleteDialog() {

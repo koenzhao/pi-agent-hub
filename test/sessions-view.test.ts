@@ -2327,7 +2327,7 @@ test("restart requires confirmation and supports new conversation", () => {
   assert.match(rendered, /Restart session/);
   assert.match(rendered, /▶ r restart selected/);
   assert.match(rendered, /▶ n new conversation/);
-  assert.match(rendered, /▶ a restart all/);
+  assert.match(rendered, /▶ a restart active/);
   assert.deepEqual(restarted, []);
   view.handleInput("n");
   assert.deepEqual(fresh, ["api"]);

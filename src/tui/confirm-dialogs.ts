@@ -53,7 +53,7 @@ export function renderRestartDialog(width: number, ctx: DialogContext): string[]
     "",
     confirmLine("warning", "r restart selected", ctx.theme),
     confirmLine("warning", "n new conversation", ctx.theme),
-    confirmLine("warning", "a restart all", ctx.theme),
+    confirmLine("warning", "a restart active", ctx.theme),
     hintLine("Esc cancel", ctx.theme),
   ], width, ctx.theme);
 }

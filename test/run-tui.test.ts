@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId, startSidePanePresenceRefreshLoop } from "../src/app/run-tui.js";
+import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId, restartAllTargets, startSidePanePresenceRefreshLoop } from "../src/app/run-tui.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function deferred<T = void>() {
@@ -26,6 +26,15 @@ function session(id: string, cwd: string, group: string, additionalCwds?: string
     updatedAt: 1,
   };
 }
+
+test("restartAllTargets includes only active parent sessions", () => {
+  const active = session("active", "/repo/active", "one");
+  const backlog = { ...session("backlog", "/repo/backlog", "one"), bucket: "backlog" as const };
+  const archived = { ...session("archived", "/repo/archived", "one"), bucket: "archived" as const };
+  const subagent = { ...session("subagent", "/repo/active", "one"), kind: "subagent" as const, parentId: active.id };
+
+  assert.deepEqual(restartAllTargets([active, backlog, archived, subagent]), [active]);
+});
 
 test("resolveDashboardThemeSessionId prefers persisted existing session", () => {
   const first = session("first", "/repo/first", "one");
