@@ -634,6 +634,7 @@ test("double-click opens the clicked live session", () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
   const view = new SessionsView(controller, () => {}, {
     now: () => now,
+    attachOutsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
     switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
   });
   const rendered = view.render(100);
