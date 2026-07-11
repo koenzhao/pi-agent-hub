@@ -117,8 +117,10 @@ test("pane helpers target pane ids and window-local border chrome", async () => 
     { command: "tmux", args: ["select-pane", "-t", "%2"] },
     { command: "tmux", args: ["resize-pane", "-t", "%0", "-x", "42"] },
     { command: "tmux", args: ["select-pane", "-t", "%2", "-T", "[1] API"] },
+    { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-format", " #{pane_title} "] },
     { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-status", "top"] },
     { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-status", "off"] },
+    { command: "tmux", args: ["set-option", "-w", "-u", "-t", "%0", "pane-border-format"] },
   ]);
 });
 

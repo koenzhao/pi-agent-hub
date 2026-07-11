@@ -156,7 +156,13 @@ export async function setPaneTitle(paneId: string, title: string, exec: TmuxExec
 }
 
 export async function setWindowPaneBorderStatus(paneId: string, visible: boolean, exec: TmuxExec = realTmuxExec): Promise<void> {
-  await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-status", visible ? "top" : "off"]);
+  if (visible) {
+    await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-format", " #{pane_title} "]);
+    await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-status", "top"]);
+    return;
+  }
+  await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-status", "off"]);
+  await exec.exec("tmux", ["set-option", "-w", "-u", "-t", paneId, "pane-border-format"]);
 }
 
 export async function clientSessionsByTty(exec: TmuxExec = realTmuxExec): Promise<Map<string, string>> {
