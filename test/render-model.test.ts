@@ -104,26 +104,26 @@ test("stages view rows show the group name instead of the rail", () => {
   assert.doesNotMatch(row ?? "", /EX 4\/7/);
 });
 
-test("render model marks side pane visibility by session id", () => {
+test("render model records side pane slots by session id", () => {
   const model = buildRenderModel({
     sessions: [session("api", "default", "running"), session("docs", "default", "running")],
     width: 120,
-    sidePaneSessionIds: ["api"],
+    sidePaneSessionIds: new Map([["api", 2]]),
   });
 
-  assert.equal(model.groups[0]?.sessions.find((item) => item.id === "api")?.inSidePane, true);
-  assert.equal(model.groups[0]?.sessions.find((item) => item.id === "docs")?.inSidePane, false);
+  assert.equal(model.groups[0]?.sessions.find((item) => item.id === "api")?.sidePaneSlot, 2);
+  assert.equal(model.groups[0]?.sessions.find((item) => item.id === "docs")?.sidePaneSlot, undefined);
 });
 
-test("side pane glyphs render on the left for visible side-pane sessions", () => {
+test("side pane glyphs render numbered slots on the left", () => {
   const model = buildRenderModel({
     sessions: [session("api", "default", "running"), session("docs", "default", "idle")],
     width: 100,
-    sidePaneSessionIds: ["api", "docs"],
+    sidePaneSessionIds: new Map([["api", 2], ["docs", 1]]),
   });
   const rendered = renderSessions(model).lines.map(stripAnsi);
-  assert.match(rendered.find((line) => /● ◫ api/.test(line)) ?? "", /● ◫ api/);
-  assert.match(rendered.find((line) => /○ ◫ docs/.test(line)) ?? "", /○ ◫ docs/);
+  assert.match(rendered.find((line) => /● ◫2 api/.test(line)) ?? "", /● ◫2 api/);
+  assert.match(rendered.find((line) => /○ ◫1 docs/.test(line)) ?? "", /○ ◫1 docs/);
 });
 
 test("side pane glyphs do not crowd compact workflow rails", () => {
@@ -131,11 +131,11 @@ test("side pane glyphs do not crowd compact workflow rails", () => {
     sessions: [{ ...session("api", "default", "running"), workflow: WORKFLOW }],
     selectedId: "api",
     width: 110,
-    sidePaneSessionIds: ["api"],
+    sidePaneSessionIds: new Map([["api", 1]]),
   });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
-  assert.match(row ?? "", /● ◫ api\s+EX 4\/7/);
-  assert.doesNotMatch(row ?? "", /EX 4\/7 ◫/);
+  assert.match(row ?? "", /● ◫1 api\s+EX 4\/7/);
+  assert.doesNotMatch(row ?? "", /EX 4\/7 ◫1/);
 });
 
 test("side pane glyphs remain left-visible at narrow widths", () => {
@@ -144,10 +144,10 @@ test("side pane glyphs remain left-visible at narrow widths", () => {
     sessions: [{ ...session("api", "default", "running", "long-title-".repeat(4)), workflow }],
     selectedId: "api",
     width: 40,
-    sidePaneSessionIds: ["api"],
+    sidePaneSessionIds: new Map([["api", 1]]),
   });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
-  assert.match(row ?? "", /● ◫ long-t/);
+  assert.match(row ?? "", /● ◫1 long-t/);
   assert.match(row ?? "", /EXECUTE-LONG-LABEL 4\/7/);
 });
 
@@ -157,10 +157,10 @@ test("stages view keeps side pane glyphs separate from group adornments", () => 
     selectedId: "api",
     width: 40,
     viewMode: "stages",
-    sidePaneSessionIds: ["api"],
+    sidePaneSessionIds: new Map([["api", 1]]),
   });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => line.includes("▶"));
-  assert.match(row ?? "", /● ◫ long-title/);
+  assert.match(row ?? "", /● ◫1 long-title/);
 });
 
 test("side pane glyphs stay width-safe with workflow rails", () => {
@@ -169,7 +169,7 @@ test("side pane glyphs stay width-safe with workflow rails", () => {
     session("docs", "default", "idle", "docs-title-".repeat(6)),
   ];
   for (const width of [42, 70, 120]) {
-    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "api", width, sidePaneSessionIds: ["api", "docs"] })).lines) {
+    for (const line of renderSessions(buildRenderModel({ sessions, selectedId: "api", width, sidePaneSessionIds: new Map([["api", 1], ["docs", 2]]) })).lines) {
       assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
     }
   }
@@ -354,13 +354,13 @@ test("session order is stable and ignores status and title", () => {
 test("narrow layout hides preview and uses readable compact footer", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 42 });
   assert.equal(model.showPreview, false);
-  assert.equal(model.footer, "j/k Move · Enter Open · o Side · ? Help");
+  assert.equal(model.footer, "1-4 Set · ⇧1-4 Focus · o Reset · ? Help");
 });
 
 
 test("wide footer groups keys by intent", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 120 });
-  assert.equal(model.footer, "Enter Open · o Side · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  v View · ? Help");
+  assert.equal(model.footer, "Enter Open · 1-4 Panels · ⇧1-4/F# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  v View · ? Help");
 });
 
 test("wide footer shows worktree finish only for worktree sessions", () => {
@@ -368,7 +368,7 @@ test("wide footer shows worktree finish only for worktree sessions", () => {
     sessions: [{ ...session("a", "default", "idle"), worktreeOwnedByHub: true, worktreePath: "/tmp/wt" }],
     width: 120,
   });
-  assert.equal(model.footer, "Enter Open · o Side · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  v View · ? Help");
+  assert.equal(model.footer, "Enter Open · 1-4 Panels · ⇧1-4/F# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  v View · ? Help");
 });
 
 test("long titles/cwd truncate without exceeding width", () => {

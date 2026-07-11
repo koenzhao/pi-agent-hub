@@ -12,8 +12,8 @@ import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mc
 import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
-import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, resizePaneWidth, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setDashboardStatusBarVisible, switchClientWithReturn } from "../core/tmux.js";
-import { closeSidePaneShowing, closeSidePanes, openInSidePane, sidebarRepairWidth, sidePaneStatus } from "./side-pane.js";
+import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resizePaneWidth, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setDashboardStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, switchClientWithReturn } from "../core/tmux.js";
+import { closeSidePaneShowing, closeSidePanes, focusSidePaneSlot as focusPanel, resetSidePane, sidebarRepairWidth, sidePaneStatus, toggleSidePaneSlot, type SidePaneResult } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
@@ -175,52 +175,92 @@ export async function runTui(): Promise<void> {
   let stopLoop: RefreshLoopHandle | undefined;
   let stopThemeLoop: (() => void) | undefined;
   let stopActionLoop: (() => void) | undefined;
-  let stopSidePanePresenceLoop: (() => void) | undefined;
-  let sidePaneTmuxSessions = new Set<string>();
+  let stopSidePanePresenceLoop: (() => Promise<void>) | undefined;
+  let sidePanePresenceDrain: Promise<void> | undefined;
+  let sidePaneTail = Promise.resolve();
+  let sidePaneTmuxSessions: string[] = [];
+  let stopped = false;
+  const titleForTmuxSession = (tmuxSession: string) => controller.snapshot().registry.sessions.find((session) => session.tmuxSession === tmuxSession)?.title;
   const refreshSidePanePresence = async () => {
     const ownPane = process.env.TMUX_PANE;
-    const next = new Set<string>();
+    let next: string[] = [];
     if (ownPane) {
       const status = await sidePaneStatus({ ownPane });
-      for (const tmuxSession of status.sessions) next.add(tmuxSession);
+      next = status.sessions;
       if (status.sessions.length && status.ownWidth !== undefined && status.windowWidth !== undefined) {
         const repairWidth = sidebarRepairWidth(status.ownWidth, status.windowWidth);
         if (repairWidth !== undefined) await resizePaneWidth(ownPane, repairWidth);
       }
+      for (const [index, paneId] of status.paneIds.entries()) {
+        const tmuxSession = status.sessions[index];
+        if (tmuxSession) await setPaneTitle(paneId, `[${index + 1}] ${titleForTmuxSession(tmuxSession) ?? tmuxSession}`);
+      }
     }
-    const changed = !sameStringSets(sidePaneTmuxSessions, next);
-    const hadSidePanes = sidePaneTmuxSessions.size > 0;
-    const hasSidePanes = next.size > 0;
-    if (hadSidePanes !== hasSidePanes) await applyDashboardStatusVisibility(!hasSidePanes);
+    const changed = !sameStringArrays(sidePaneTmuxSessions, next);
+    const hadSidePanes = sidePaneTmuxSessions.length > 0;
+    const hasSidePanes = next.length > 0;
+    if (ownPane && hadSidePanes !== hasSidePanes) {
+      await applyDashboardStatusVisibility(!hasSidePanes);
+      await setWindowPaneBorderStatus(ownPane, hasSidePanes);
+      if (hasSidePanes) await setPaneTitle(ownPane, "");
+    }
+    if (ownPane) await reconcileSidebarReturnBinding({ desired: hasSidePanes, dashboardSession: DASHBOARD_SESSION, sidebarPane: ownPane });
     sidePaneTmuxSessions = next;
     return changed;
   };
+  const serializeSidePaneOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = sidePaneTail.then(operation);
+    sidePaneTail = result.then(() => {}, () => {});
+    return result;
+  };
+  const refreshSidePanePresenceSerialized = () => serializeSidePaneOperation(
+    () => stopped ? Promise.resolve(false) : refreshSidePanePresence(),
+  );
   const shortcutTimers = new Set<NodeJS.Timeout>();
-  let stopped = false;
+  const pauseSidePanePresenceLoop = () => {
+    if (sidePanePresenceDrain) return sidePanePresenceDrain;
+    const stopPresence = stopSidePanePresenceLoop;
+    stopSidePanePresenceLoop = undefined;
+    sidePanePresenceDrain = Promise.resolve(stopPresence?.())
+      .finally(() => { sidePanePresenceDrain = undefined; });
+    return sidePanePresenceDrain;
+  };
+  const resumeSidePanePresenceLoop = () => {
+    if (stopped || stopSidePanePresenceLoop) return;
+    stopSidePanePresenceLoop = startSidePanePresenceRefreshLoop({
+      ownPane: process.env.TMUX_PANE,
+      load: refreshSidePanePresenceSerialized,
+      render: () => tui.requestRender(),
+    });
+  };
   const stop = () => {
     if (stopped) return;
     stopped = true;
     stopThemeLoop?.();
     stopActionLoop?.();
-    stopSidePanePresenceLoop?.();
+    const presencePaused = pauseSidePanePresenceLoop();
+    const sidePaneDrained = sidePaneTail;
     for (const timer of shortcutTimers) clearTimeout(timer);
     shortcutTimers.clear();
     void stopLoop?.stop();
-    void restoreSwitchReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {});
     const ownPane = process.env.TMUX_PANE;
     const finish = () => {
       terminal.write(MOUSE_DISABLE);
       tui.stop();
     };
+    const restoreBindings = () => Promise.all([presencePaused, sidePaneDrained])
+      .then(() => restoreSwitchReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {}))
+      .then(() => removeSidebarReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {}));
     if (ownPane) {
-      void closeSidePanes({ ownPane })
-        .catch(() => {})
+      void restoreBindings()
+        .then(() => closeSidePanes({ ownPane }).catch(() => {}))
         .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
+        .then(() => setWindowPaneBorderStatus(ownPane, false).catch(() => {}))
         .then(() => process.env.TMUX ? setDashboardMouse({ name: DASHBOARD_SESSION, enabled: false }).catch(() => {}) : undefined)
         .finally(finish);
     } else {
-      void applyDashboardStatusVisibility(true, true)
-        .catch(() => {})
+      void restoreBindings()
+        .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
         .then(() => process.env.TMUX ? setDashboardMouse({ name: DASHBOARD_SESSION, enabled: false }).catch(() => {}) : undefined)
         .finally(finish);
     }
@@ -256,6 +296,55 @@ export async function runTui(): Promise<void> {
     const enabledSkillNames = new Set(state.attached.map((skill) => skill.name));
     return skillPool.map((skill) => ({ name: skill.name, enabled: enabledSkillNames.has(skill.name) }));
   };
+  const updateSidePane = async (
+    sessionId: string,
+    update: (tmuxSession: string, ownPane: string) => Promise<SidePaneResult>,
+  ): Promise<SidePaneResult> => {
+    await pauseSidePanePresenceLoop();
+    try {
+      return await serializeSidePaneOperation(async () => {
+        if (stopped) throw new Error("dashboard stopped");
+        const session = controller.snapshot().registry.sessions.find((item) => item.id === sessionId);
+        if (!session) throw new Error("session not found");
+        const ownPane = process.env.TMUX_PANE;
+        if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
+        if (session.status === "waiting") await mutateRegistry(() => controller.acknowledgeSession(session.id));
+        const openingFirstPanel = sidePaneTmuxSessions.length === 0;
+        if (openingFirstPanel) {
+          await applyDashboardStatusVisibility(false);
+          await setWindowPaneBorderStatus(ownPane, true);
+          await setPaneTitle(ownPane, "");
+        }
+        let result: SidePaneResult;
+        try {
+          result = await update(session.tmuxSession, ownPane);
+        } catch (error) {
+          if (openingFirstPanel) {
+            const status = await sidePaneStatus({ ownPane }).catch(() => undefined);
+            if (status?.sessions.length) {
+              sidePaneTmuxSessions = status.sessions;
+              await reconcileSidebarReturnBinding({ desired: true, dashboardSession: DASHBOARD_SESSION, sidebarPane: ownPane }).catch(() => {});
+            } else {
+              await applyDashboardStatusVisibility(true).catch(() => {});
+              await setWindowPaneBorderStatus(ownPane, false).catch(() => {});
+            }
+          }
+          throw error;
+        }
+        if (openingFirstPanel && result.kind === "too-narrow") {
+          await applyDashboardStatusVisibility(true);
+          await setWindowPaneBorderStatus(ownPane, false);
+        }
+        const changed = await refreshSidePanePresence();
+        if (stopped) return result;
+        if (changed) tui.requestRender();
+        if (result.kind === "opened" || result.kind === "retargeted") await applyManagedSessionTheme(session);
+        return result;
+      });
+    } finally {
+      resumeSidePanePresenceLoop();
+    }
+  };
   const view = new SessionsView(controller, stop, {
     attachOutsideTmux(tmuxSession) {
       const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
@@ -265,32 +354,45 @@ export async function runTui(): Promise<void> {
       spawn(attach.command, attach.args, { stdio: "inherit" });
     },
     async switchInsideTmux(tmuxSession) {
-      const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
-      const ownPane = process.env.TMUX_PANE;
-      if (ownPane && await closeSidePaneShowing({ target: tmuxSession, ownPane })) await refreshSidePanePresence();
-      if (session) await applyManagedSessionTheme(session);
-      return switchClientWithReturn({
-        targetSession: tmuxSession,
-        renameKey: "M-r",
-        returnSession: { name: DASHBOARD_SESSION, cwd, command: "pi-agent-hub tui", env: dashboardEnv() },
+      await pauseSidePanePresenceLoop();
+      try {
+        await serializeSidePaneOperation(async () => {
+          if (stopped) return;
+          const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
+          const ownPane = process.env.TMUX_PANE;
+          if (session) await applyManagedSessionTheme(session);
+          if (stopped) return;
+          await removeSidebarReturnBinding({ onlyOwnerPid: process.pid });
+          await switchClientWithReturn({
+            targetSession: tmuxSession,
+            renameKey: "M-r",
+            returnSession: { name: DASHBOARD_SESSION, cwd, command: "pi-agent-hub tui", env: dashboardEnv() },
+          });
+          if (ownPane && await closeSidePaneShowing({ target: tmuxSession, ownPane })) await refreshSidePanePresence();
+        });
+      } finally {
+        resumeSidePanePresenceLoop();
+      }
+    },
+    toggleSidePaneSlot(sessionId, slot) {
+      return updateSidePane(sessionId, (target, ownPane) => toggleSidePaneSlot({ target, ownPane, slot, titleFor: titleForTmuxSession }));
+    },
+    resetSidePane(sessionId) {
+      return updateSidePane(sessionId, (target, ownPane) => resetSidePane({ target, ownPane, titleFor: titleForTmuxSession }));
+    },
+    focusSidePaneSlot(slot) {
+      return serializeSidePaneOperation(() => {
+        if (stopped) return Promise.resolve({ kind: "unavailable" as const });
+        const ownPane = process.env.TMUX_PANE;
+        if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
+        return focusPanel({ ownPane, slot });
       });
     },
-    async openSidePane(sessionId) {
-      const session = controller.snapshot().registry.sessions.find((item) => item.id === sessionId);
-      if (!session) throw new Error("session not found");
-      const ownPane = process.env.TMUX_PANE;
-      if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
-      if (session.status === "waiting") await mutateRegistry(() => controller.acknowledgeSession(session.id));
-      const result = await openInSidePane({ target: session.tmuxSession, ownPane });
-      const changed = await refreshSidePanePresence();
-      if (changed) tui.requestRender();
-      if (result.kind !== "closed") await applyManagedSessionTheme(session);
-      return result;
-    },
     sidePaneSessionIds() {
-      const result = new Set<string>();
-      for (const session of controller.snapshot().registry.sessions) {
-        if (sidePaneTmuxSessions.has(session.tmuxSession)) result.add(session.id);
+      const result = new Map<string, number>();
+      for (const [index, tmuxSession] of sidePaneTmuxSessions.entries()) {
+        const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
+        if (session) result.set(session.id, index + 1);
       }
       return result;
     },
@@ -442,11 +544,7 @@ export async function runTui(): Promise<void> {
     if (action.action === "rename") view.openRenameForTmuxSession(action.tmuxSession);
     tui.requestRender();
   });
-  stopSidePanePresenceLoop = startSidePanePresenceRefreshLoop({
-    ownPane: process.env.TMUX_PANE,
-    load: refreshSidePanePresence,
-    render: () => tui.requestRender(),
-  });
+  resumeSidePanePresenceLoop();
   tui.addChild(view);
   tui.setFocus(view);
   terminal.write("\x1b[2J\x1b[H");
@@ -482,12 +580,12 @@ function startDashboardActionLoop(processAction: () => Promise<void>, intervalMs
   };
 }
 
-function startSidePanePresenceRefreshLoop(options: {
+export function startSidePanePresenceRefreshLoop(options: {
   ownPane: string | undefined;
   load(): Promise<boolean>;
   render(): void;
-}, intervalMs = 500): () => void {
-  if (!options.ownPane) return () => {};
+}, intervalMs = 500): () => Promise<void> {
+  if (!options.ownPane) return async () => {};
   let inFlight: Promise<void> | undefined;
   let stopped = false;
   const run = () => {
@@ -501,16 +599,15 @@ function startSidePanePresenceRefreshLoop(options: {
   };
   const timer = setInterval(run, intervalMs);
   run();
-  return () => {
+  return async () => {
     stopped = true;
     clearInterval(timer);
+    await inFlight;
   };
 }
 
-function sameStringSets(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const value of a) if (!b.has(value)) return false;
-  return true;
+function sameStringArrays(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 function selectedProjectCwd(selected: ManagedSession | undefined, fallback: string): string {

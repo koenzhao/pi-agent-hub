@@ -272,3 +272,42 @@
   created_at: '2026-07-08'
   plan_file: agent-work/history/20260708_split-view-007_sidebar_resize_repair.md
   completed_at: '2026-07-08'
+- epic: personal
+  status: done
+  title: Assistant rest session
+  description: Assistant takes a short playful rest-style pause by doing something
+    light and enjoyable, with no code or repo changes.
+  steps: []
+  priority: 3
+  depends_on: []
+  discovered_from: null
+  plan_file: null
+  references: []
+  created_at: '2026-07-09'
+  id: personal-001
+  completed_at: '2026-07-09'
+- epic: split-view
+  status: done
+  priority: 2
+  description: 'Sidebar panel UX refinements: C-q return from focused side panels,
+    slot-numbered row indicators and pane titles, F+digit layout-neutral focus chord,
+    auto-append slot assignment, narrow-width panel guard'
+  depends_on: []
+  references: []
+  id: split-view-008
+  created_at: '2026-07-09'
+  plan_file: agent-work/history/20260710_split-view-008_sidebar_panel_refinements.md
+  completed_at: '2026-07-10'
+- epic: split-view
+  status: done
+  priority: 2
+  description: 'Eliminate chat re-print flicker when opening sessions in dashboard
+    panels (1-4) and full-screen: pre-size session windows off-screen with resize-window
+    and split panes at exact final sizes so nested Pi sessions never receive a visible
+    resize'
+  depends_on: []
+  references: []
+  id: split-view-009
+  created_at: '2026-07-10'
+  plan_file: agent-work/history/20260710_split-view-009_flicker_free_panels.md
+  completed_at: '2026-07-10'

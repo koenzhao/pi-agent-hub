@@ -18,13 +18,20 @@ export interface SessionDialogInput {
   worktree?: { branch: string };
 }
 
-export type OpenSidePaneResult = { kind: "opened" } | { kind: "retargeted" } | { kind: "closed" };
+export type SidePaneActionResult =
+  | { kind: "opened"; slot: 1 | 2 | 3 | 4 }
+  | { kind: "retargeted"; slot: 1 | 2 | 3 | 4 }
+  | { kind: "closed" }
+  | { kind: "too-narrow"; panels: number };
+export type FocusSidePaneResult = { kind: "focused" } | { kind: "unavailable" };
 
 export interface SessionsViewActions {
   attachOutsideTmux?: (tmuxSession: string) => void | Promise<void>;
   switchInsideTmux?: (tmuxSession: string) => void | Promise<void>;
-  openSidePane?: (sessionId: string) => OpenSidePaneResult | Promise<OpenSidePaneResult>;
-  sidePaneSessionIds?: () => ReadonlySet<string> | readonly string[];
+  toggleSidePaneSlot?: (sessionId: string, slot: 1 | 2 | 3 | 4) => SidePaneActionResult | Promise<SidePaneActionResult>;
+  resetSidePane?: (sessionId: string) => SidePaneActionResult | Promise<SidePaneActionResult>;
+  focusSidePaneSlot?: (slot: 1 | 2 | 3 | 4) => FocusSidePaneResult | Promise<FocusSidePaneResult>;
+  sidePaneSessionIds?: () => ReadonlyMap<string, number>;
   restart?: (sessionId: string) => unknown;
   restartNew?: (sessionId: string) => unknown;
   restartAll?: () => unknown;

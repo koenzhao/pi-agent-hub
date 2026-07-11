@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId } from "../src/app/run-tui.js";
+import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId, startSidePanePresenceRefreshLoop } from "../src/app/run-tui.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function deferred<T = void>() {
@@ -101,6 +101,28 @@ test("registry mutator resumes and propagates action failures", async () => {
   }), /boom/);
 
   assert.deepEqual(events, ["pause", "action", "resume"]);
+});
+
+test("side pane presence loop stop drains an in-flight refresh", async () => {
+  let finishLoad: ((changed: boolean) => void) | undefined;
+  let rendered = false;
+  const stop = startSidePanePresenceRefreshLoop({
+    ownPane: "%1",
+    load: () => new Promise<boolean>((resolve) => { finishLoad = resolve; }),
+    render: () => { rendered = true; },
+  }, 10_000);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  let drained = false;
+  const stopping = stop().then(() => { drained = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(drained, false);
+
+  finishLoad?.(true);
+  await stopping;
+
+  assert.equal(drained, true);
+  assert.equal(rendered, false);
 });
 
 test("registry mutator queue survives rejections", async () => {

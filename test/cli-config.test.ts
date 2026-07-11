@@ -48,6 +48,24 @@ test("pi-hub config manages session-prelude", async () => {
 });
 
 
+test("pi-hub doctor reports sidebar return binding state", async () => {
+  const state = await mkdtemp(join(tmpdir(), "pi-agent-hub-cli-sidebar-return-"));
+  const sidebarReturn = join(state, "sidebar-return");
+  await mkdir(sidebarReturn, { recursive: true });
+  await writeFile(join(sidebarReturn, "active.json"), JSON.stringify({
+    ownerPid: process.pid,
+    dashboardSession: "pi-agent-hub",
+    sidebarPane: "%1",
+    returnKey: "C-q",
+    restorePath: join(sidebarReturn, "previous.tmux"),
+  }));
+
+  const doctor = await runCli(["doctor"], { PI_AGENT_HUB_DIR: state });
+
+  assert.equal(doctor.code, 0, doctor.stderr);
+  assert.match(doctor.stdout, /sidebar return: active C-q -> %1/);
+});
+
 test("pi-hub doctor reports Pi package CLI drift", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-cli-install-"));
   const agent = join(root, "agent");

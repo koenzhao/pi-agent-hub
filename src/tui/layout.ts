@@ -273,8 +273,8 @@ function railCompact(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
   return `${styles.accent(step.short)} ${styles.dim(`${workflow.activeIndex + 1}/${workflow.steps.length}`)}`;
 }
 
-function sidePaneGlyph(inSidePane: boolean | undefined, styles: LayoutStyles): string {
-  return inSidePane ? `${styles.accent("◫")} ` : "";
+function sidePaneGlyph(slot: number | undefined, styles: LayoutStyles): string {
+  return slot === undefined ? "" : `${styles.accent(`◫${slot}`)} `;
 }
 
 function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages: boolean, width: number): string {
@@ -416,7 +416,7 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const symbol = styles.status(session.displayStatus, session.symbol);
   const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : session.title;
   const title = session.status === "stopped" ? styles.dim(titleText) : titleText;
-  const sidePaneMarker = sidePaneGlyph(session.inSidePane, styles);
+  const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, styles);
   const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
   const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" [wt]") : "";
   const archiveBadge = session.archiveExpiresIn ? styles.dim(` [exp ${session.archiveExpiresIn}]`) : "";

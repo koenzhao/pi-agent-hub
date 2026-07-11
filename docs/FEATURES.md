@@ -39,7 +39,9 @@ Ctrl+Q returns to the dashboard
 | --- | --- |
 | `n` | Create a new Pi session |
 | `Enter` | Open/switch to the selected live session, or restart a stopped/error session |
-| `o` | Open, retarget, or close the selected session in a side pane |
+| `1`–`4` | Target a side-panel slot; requests past the next available slot append there |
+| `Shift+1`–`Shift+4` or `F`, then `1`–`4` | Focus the corresponding open panel |
+| `o` | Reset side panels to the selected session, or close it when it is the only panel |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
@@ -96,18 +98,20 @@ When the dashboard is running inside tmux, `Enter` switches the current tmux cli
 
 ### Sidebar workspace
 
-Press `o` in the dashboard to open the selected live session beside the session tree. The dashboard stays as a narrow left sidebar, and up to two selected sessions are attached interactively in stacked right-side panes. Sessions currently visible beside the sidebar show a compact `◫` glyph in their row. At sidebar width, the footer labels only the primary controls—move, open, side pane, and help; press `?` for the complete key map.
+Use `1`–`4` in the dashboard to place the selected live session beside the session tree. The number targets the corresponding visual panel: an empty next slot opens it, an occupied slot switches to the selected session, and pressing the selected session's current slot closes it. Requesting a slot beyond the next available position appends at the next position, and moving a session already shown in another slot swaps it into the requested position. The footer reports the actual landed slot. Closing a panel compacts the remaining sessions into the lower-numbered slots.
 
-The side-pane action is a toggle with stateless placement:
+The dashboard stays as a narrow left sidebar while the content region grows through these layouts:
 
-- selected session already visible in either pane: close that pane;
-- no side pane: open the first right-side pane;
-- one side pane: split it vertically to create a bottom pane;
-- two side panes: switch the bottom nested client to the selected session and keep the top pane pinned.
+- one panel: one full content pane;
+- two panels: vertically stacked panes;
+- three panels: one full-height left pane and two stacked right panes;
+- four panels: an even 2×2 grid.
 
-Opening or retargeting a side pane keeps tmux focus on the sidebar so repeated `o` actions can be driven from the dashboard. Mouse support is additive: click a sidebar row to select it, click the already-selected row to run the same `o` side-pane action, and scroll the wheel over the sidebar to move selection. Hub enables tmux mouse mode only on the dashboard session while it is running and unsets that session override on quit.
+Press `Shift+1`–`Shift+4`, or the layout-neutral chord `F` then `1`–`4`, to focus an open panel without changing its assignment. Press `o` to reset any current arrangement to one panel showing the selected session. If that session is already the sole panel, `o` closes it. Rows show numbered `◫1`–`◫4` indicators, and panel borders show matching `[n] <title>` labels. At sidebar width, the footer labels panel assignment, focus, reset, and help controls.
 
-Native tmux keys handle the layout after that: `prefix+←/→/↑/↓` moves focus, `prefix+z` zooms the focused pane to hide/show neighbors, `prefix+x` closes a pane, and `prefix+{` / `prefix+}` swaps panes. `Enter` and `Ctrl+Q` keep their full-screen switch/return behavior unchanged; if `Enter` opens a session currently shown in any side pane, Hub closes that pane first to avoid tmux size flapping.
+Successful `1`–`4` assignment, replacement, and move actions focus the resulting panel. Closing a panel, refusing an addition because the window is too narrow, and `o` reset leave focus on the sidebar. Press `Ctrl+Q` from a focused panel to return to the sidebar. A single mouse click selects a session row; a double-click opens/switches to a live session or restarts a stopped/error session. The mouse wheel moves selection. Hub enables tmux mouse mode only on the dashboard session while it is running and unsets that session override on quit.
+
+Native tmux keys also handle the layout: `prefix+←/→/↑/↓` moves focus, `prefix+z` zooms the focused pane to hide/show neighbors, `prefix+x` closes a pane, and `prefix+{` / `prefix+}` swaps panes. If `Enter` opens a session currently shown in any side pane, Hub closes that pane first to avoid tmux size flapping. Hub refuses to grow a layout when the resulting panels would be narrower than 40 columns.
 
 The side panes are stateless and self-healing. Hub inspects the current window live and only owns panes whose tty maps to a nested client attached to a `pi-agent-hub-*` managed session. User-created shell/editor panes are never killed or retargeted. If the terminal is squeezed too narrow, the dashboard shows a compact narrow-pane notice instead of exiting; when side panes exist and the window is wide enough again, Hub restores a collapsed sidebar to its normal width without disturbing manual sidebar widths of 40 columns or more. If a shown session exits, tmux normally closes its nested pane automatically.
 

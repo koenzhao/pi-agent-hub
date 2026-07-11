@@ -2,7 +2,7 @@
 import { constants } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { cliTuiCommand, hasTmux, inspectSwitchReturnBinding } from "./core/tmux.js";
+import { cliTuiCommand, hasTmux, inspectSidebarReturnBinding, inspectSwitchReturnBinding } from "./core/tmux.js";
 import { configPath, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, loadSessionsConfig, setSessionPrelude, unsetSessionPrelude } from "./core/config.js";
 import { extensionPath } from "./core/extension-path.js";
 import { formatCliInstallDoctor, formatCliInstallWarning, inspectCliInstall, shouldWarnForCommand } from "./core/install-diagnostics.js";
@@ -199,6 +199,11 @@ async function doctor() {
   if (returnKey.active) {
     const state = returnKey.stale ? "stale" : "active";
     console.log(`return key: ${state} ${returnKey.returnKey} ${returnKey.targetSession} -> ${returnKey.controlSession}`);
+  }
+  const sidebarReturn = await inspectSidebarReturnBinding();
+  if (sidebarReturn.active) {
+    const state = sidebarReturn.stale ? "stale" : "active";
+    console.log(`sidebar return: ${state} ${sidebarReturn.returnKey} -> ${sidebarReturn.sidebarPane}`);
   }
   console.log(`extension:  ${ext}`);
 }

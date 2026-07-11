@@ -93,7 +93,10 @@ test("help overlay opens and closes", () => {
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
   assert.match(help, /zero counts are hidden/);
-  assert.match(help, /o side pane/);
+  assert.match(help, /1-4 assign\/toggle panels/);
+  assert.match(help, /Shift\+1-4 or F then 1-4 focus panel/);
+  assert.match(help, /o reset to one panel/);
+  assert.match(help, /mouse click select · double-click open\/switch/);
   assert.match(help, /v toggle groups\/stages view/);
   assert.match(help, /Stages view lanes active sessions by workflow step/);
   view.handleInput("\u001b");
@@ -147,10 +150,7 @@ test("narrow mouse press is ignored", () => {
   const opened: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
-    },
+    switchInsideTmux: (sessionId) => { opened.push(sessionId); },
   });
 
   view.render(38);
@@ -343,86 +343,204 @@ test("stages view snaps selection to a visible lane row", () => {
   assert.equal(controller.snapshot().selectedId, "a");
 });
 
-test("side pane presence snapshots render visibility glyphs", () => {
+test("side pane presence snapshots render numbered slot glyphs", () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
-  const sidePaneSessionIds = new Set(["api", "docs"]);
+  const sidePaneSessionIds = new Map([["api", 2], ["docs", 1]]);
   const view = new SessionsView(controller, () => {}, { sidePaneSessionIds: () => sidePaneSessionIds });
 
   const rendered = stripAnsi(view.render(100).join("\n"));
-  assert.match(rendered, /○ ◫ api/);
-  assert.match(rendered, /○ ◫ docs/);
+  assert.match(rendered, /○ ◫2 api/);
+  assert.match(rendered, /○ ◫1 docs/);
 });
 
 test("side pane presence snapshots update without registry mutation", () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
-  let sidePaneSessionIds = new Set<string>();
+  let sidePaneSessionIds = new Map<string, number>();
   const view = new SessionsView(controller, () => {}, { sidePaneSessionIds: () => sidePaneSessionIds });
 
   assert.doesNotMatch(stripAnsi(view.render(100).join("\n")), /◫/);
-  sidePaneSessionIds = new Set(["api"]);
-  assert.match(stripAnsi(view.render(100).join("\n")), /○ ◫ api/);
+  sidePaneSessionIds = new Map([["api", 1]]);
+  assert.match(stripAnsi(view.render(100).join("\n")), /○ ◫1 api/);
 });
 
-test("o opens the selected live session in a side pane", async () => {
-  const opened: string[] = [];
+test("number keys assign the selected live session to matching panel slots", () => {
+  const opened: { id: string; slot: number }[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    toggleSidePaneSlot: (sessionId, slot) => {
+      opened.push({ id: sessionId, slot });
+      return { kind: "opened", slot };
+    },
+  });
+
+  for (const key of ["1", "2", "3", "4"]) view.handleInput(key);
+
+  assert.deepEqual(opened, [1, 2, 3, 4].map((slot) => ({ id: "api", slot })));
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 4: api/);
+});
+
+test("shift-number keys focus matching panel slots", () => {
+  const focused: number[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: async (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
+    focusSidePaneSlot: (slot) => {
+      focused.push(slot);
+      return { kind: "focused" };
+    },
+  });
+
+  for (const key of ["!", "@", "#", "$"]) view.handleInput(key);
+
+  assert.deepEqual(focused, [1, 2, 3, 4]);
+});
+
+test("F then a digit focuses the matching panel instead of toggling it", () => {
+  const focused: number[] = [];
+  const toggled: number[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    focusSidePaneSlot: (slot) => {
+      focused.push(slot);
+      return { kind: "focused" };
+    },
+    toggleSidePaneSlot: (_sessionId, slot) => {
+      toggled.push(slot);
+      return { kind: "opened", slot };
+    },
+  });
+
+  view.handleInput("F");
+  assert.match(stripAnsi(view.render(100).join("\n")), /focus panel: press 1-4/);
+  view.handleInput("2");
+
+  assert.deepEqual(focused, [2]);
+  assert.deepEqual(toggled, []);
+});
+
+test("the F focus chord cancels on non-digits and dialog or mouse input", () => {
+  const focused: number[] = [];
+  const toggled: number[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    focusSidePaneSlot: (slot) => {
+      focused.push(slot);
+      return { kind: "focused" };
+    },
+    toggleSidePaneSlot: (_sessionId, slot) => {
+      toggled.push(slot);
+      return { kind: "opened", slot };
+    },
+  });
+
+  view.handleInput("F");
+  view.handleInput("?");
+  view.handleInput("?");
+  view.handleInput("2");
+
+  view.render(100);
+  view.handleInput("F");
+  view.handleInput("\u001b[<0;3;4M");
+  view.handleInput("3");
+
+  view.handleInput("F");
+  view.handleInput("j");
+  view.handleInput("4");
+
+  assert.deepEqual(focused, []);
+  assert.deepEqual(toggled, [2, 3, 4]);
+});
+
+test("shift-number reports an unavailable panel", () => {
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    focusSidePaneSlot: () => ({ kind: "unavailable" }),
+  });
+
+  view.handleInput("@");
+
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 2 is not open/);
+});
+
+test("number keys override configured dashboard shortcuts", () => {
+  const panelSlots: number[] = [];
+  const sent: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    dashboardShortcuts: [{ key: "1", send: "legacy" }, { key: "!", send: "legacy focus" }],
+    runDashboardShortcut: (_id, shortcut) => { sent.push(shortcut.send); },
+    toggleSidePaneSlot: (_sessionId, slot) => {
+      panelSlots.push(slot);
+      return { kind: "opened", slot };
+    },
+    focusSidePaneSlot: () => ({ kind: "focused" }),
+  });
+
+  view.handleInput("1");
+  view.handleInput("!");
+
+  assert.deepEqual(panelSlots, [1]);
+  assert.deepEqual(sent, []);
+});
+
+test("o resets side panels to the selected session", async () => {
+  const reset: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    resetSidePane: async (sessionId) => {
+      reset.push(sessionId);
+      return { kind: "retargeted", slot: 1 };
     },
   });
 
   view.handleInput("o");
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(opened, ["api"]);
-  assert.match(stripAnsi(view.render(100).join("\n")), /side: api/);
+  assert.deepEqual(reset, ["api"]);
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel: api/);
 });
 
-test("uppercase O is not a side-pane shortcut", async () => {
-  const opened: string[] = [];
+test("panel shortcuts flash the actual appended slot", () => {
+  const results = [{ kind: "closed" as const }, { kind: "opened" as const, slot: 2 as const }];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: async (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
-    },
+    toggleSidePaneSlot: () => results.shift() ?? { kind: "opened", slot: 1 },
   });
 
-  view.handleInput("O");
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(opened, []);
+  view.handleInput("1");
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 1 closed/);
+  view.handleInput("3");
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 2: api/);
 });
 
-test("o flashes side pane result variants", async () => {
-  const results = [{ kind: "retargeted" as const }, { kind: "closed" as const }];
+test("panel shortcuts explain narrow-window refusals", () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: () => results.shift() ?? { kind: "opened" },
+    toggleSidePaneSlot: () => ({ kind: "too-narrow", panels: 3 }),
   });
 
-  view.handleInput("o");
-  assert.match(stripAnsi(view.render(100).join("\n")), /side: api/);
-  view.handleInput("o");
-  assert.match(stripAnsi(view.render(100).join("\n")), /side closed/);
+  view.handleInput("3");
+
+  assert.match(stripAnsi(view.render(100).join("\n")), /window too narrow for 3 panels/);
 });
 
-test("o blocks stopped and error sessions", () => {
+test("panel shortcuts block stopped and error sessions", () => {
   const opened: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [
     { ...session("stopped", "stopped"), status: "stopped" },
     { ...session("error", "error"), status: "error" },
   ] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: (sessionId) => {
+    toggleSidePaneSlot: (sessionId) => {
       opened.push(sessionId);
-      return { kind: "opened" };
+      return { kind: "opened", slot: 1 };
+    },
+    resetSidePane: (sessionId) => {
+      opened.push(sessionId);
+      return { kind: "opened", slot: 1 };
     },
   });
 
-  view.handleInput("o");
+  view.handleInput("1");
   controller.move(1);
   view.handleInput("o");
 
@@ -430,48 +548,49 @@ test("o blocks stopped and error sessions", () => {
   assert.match(stripAnsi(view.render(100).join("\n")), /session not running/);
 });
 
-test("o allows live subagent rows", () => {
-  const opened: string[] = [];
+test("panel shortcuts allow live subagent rows", () => {
+  const opened: { id: string; slot: number }[] = [];
   const controller = new SessionsController({ version: 1, sessions: [
     session("parent", "parent"),
     { ...session("child", "child"), kind: "subagent" as const, parentId: "parent", agentName: "scout" },
   ] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
+    toggleSidePaneSlot: (sessionId, slot) => {
+      opened.push({ id: sessionId, slot });
+      return { kind: "opened", slot };
     },
   });
 
   controller.move(1);
-  view.handleInput("o");
+  view.handleInput("2");
 
-  assert.deepEqual(opened, ["child"]);
+  assert.deepEqual(opened, [{ id: "child", slot: 2 }]);
 });
 
-test("o flashes tmux guidance from the action", async () => {
+test("panel shortcuts flash tmux guidance from the action", async () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: async () => { throw new Error("side pane needs tmux — run pi-hub"); },
+    toggleSidePaneSlot: async () => { throw new Error("side pane needs tmux — run pi-hub"); },
   });
 
-  view.handleInput("o");
+  view.handleInput("1");
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.match(stripAnsi(view.render(100).join("\n")), /side pane needs tmux — run pi-hub/);
 });
 
-test("o is swallowed while a dialog is open", () => {
+test("panel shortcuts are swallowed while a dialog is open", () => {
   const opened: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: (sessionId) => {
+    toggleSidePaneSlot: (sessionId) => {
       opened.push(sessionId);
-      return { kind: "opened" };
+      return { kind: "opened", slot: 1 };
     },
   });
 
   view.handleInput("?");
+  view.handleInput("1");
   view.handleInput("o");
 
   assert.deepEqual(opened, []);
@@ -480,6 +599,10 @@ test("o is swallowed while a dialog is open", () => {
 
 function mousePressAtLine(lineIndex: number, x = 3): string {
   return `\u001b[<0;${x};${lineIndex + 1}M`;
+}
+
+function mouseReleaseAtLine(lineIndex: number, x = 3): string {
+  return `\u001b[<0;${x};${lineIndex + 1}m`;
 }
 
 function rowIndexFor(rendered: string[], title: string): number {
@@ -491,40 +614,135 @@ function rowIndexFor(rendered: string[], title: string): number {
   return index;
 }
 
-test("mouse click on a non-selected row selects it", () => {
+test("single mouse click selects without opening", () => {
+  const switched: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
-  const view = new SessionsView(controller, () => {});
+  const view = new SessionsView(controller, () => {}, {
+    switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
+  });
   const rendered = view.render(100);
 
   view.handleInput(mousePressAtLine(rowIndexFor(rendered, "docs")));
 
   assert.equal(controller.snapshot().selectedId, "docs");
+  assert.deepEqual(switched, []);
 });
 
-test("mouse click on the selected row opens the side pane action", () => {
-  const opened: string[] = [];
+test("double-click opens the clicked live session", () => {
+  const switched: string[] = [];
+  let now = 100;
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
-    },
+    now: () => now,
+    switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
+  });
+  const rendered = view.render(100);
+  const docsClick = mousePressAtLine(rowIndexFor(rendered, "docs"));
+
+  view.handleInput(docsClick);
+  view.handleInput(mouseReleaseAtLine(rowIndexFor(rendered, "docs")));
+  now = 300;
+  view.handleInput(docsClick);
+  now = 350;
+  view.handleInput(docsClick);
+
+  assert.equal(controller.snapshot().selectedId, "docs");
+  assert.deepEqual(switched, ["pi-agent-hub-docs"]);
+});
+
+test("double-click restarts a stopped session", () => {
+  const restarted: string[] = [];
+  let now = 100;
+  const controller = new SessionsController({ version: 1, sessions: [{ ...session("api", "api"), status: "stopped" }] });
+  const view = new SessionsView(controller, () => {}, {
+    now: () => now,
+    restart: (sessionId) => { restarted.push(sessionId); },
+  });
+  const rendered = view.render(100);
+  const click = mousePressAtLine(rowIndexFor(rendered, "api"));
+
+  view.handleInput(click);
+  assert.deepEqual(restarted, []);
+  now = 300;
+  view.handleInput(click);
+
+  assert.deepEqual(restarted, ["api"]);
+});
+
+test("double-click expires and is cancelled by keyboard input", () => {
+  const switched: string[] = [];
+  let now = 100;
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    now: () => now,
+    switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
+  });
+  const rendered = view.render(100);
+  const docsClick = mousePressAtLine(rowIndexFor(rendered, "docs"));
+
+  view.handleInput(docsClick);
+  now = 600;
+  view.handleInput(docsClick);
+  now = 700;
+  view.handleInput("j");
+  view.handleInput(docsClick);
+
+  assert.deepEqual(switched, []);
+});
+
+test("clicking a different row starts a new double-click sequence", () => {
+  const switched: string[] = [];
+  let now = 100;
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    now: () => now,
+    switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
   });
   const rendered = view.render(100);
 
   view.handleInput(mousePressAtLine(rowIndexFor(rendered, "api")));
+  now = 200;
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "docs")));
 
-  assert.deepEqual(opened, ["api"]);
+  assert.equal(controller.snapshot().selectedId, "docs");
+  assert.deepEqual(switched, []);
+});
+
+test("non-row mouse input cancels a pending double-click", () => {
+  const switched: string[] = [];
+  let now = 100;
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    now: () => now,
+    switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
+  });
+  const rendered = view.render(100);
+  const docsLine = rowIndexFor(rendered, "docs");
+  const headerLine = rendered.findIndex((line) => stripAnsi(line).includes("default"));
+  assert.notEqual(headerLine, -1, "missing group header");
+
+  view.handleInput(mousePressAtLine(docsLine));
+  now += 50;
+  view.handleInput(mousePressAtLine(headerLine));
+  now += 50;
+  view.handleInput(mousePressAtLine(docsLine));
+  now += 50;
+  view.handleInput("\u001b[<65;5;5M");
+  now += 50;
+  view.handleInput(mousePressAtLine(docsLine));
+  now += 50;
+  view.handleInput(mousePressAtLine(docsLine, 99));
+  now += 50;
+  view.handleInput(mousePressAtLine(docsLine));
+
+  assert.deepEqual(switched, []);
 });
 
 test("mouse clicks ignore group headers and details pane", () => {
-  const opened: string[] = [];
+  const switched: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
-    },
+    switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
   });
   const rendered = view.render(100);
   const before = controller.snapshot().selectedId;
@@ -535,7 +753,7 @@ test("mouse clicks ignore group headers and details pane", () => {
   view.handleInput(mousePressAtLine(rowIndexFor(rendered, "docs"), 99));
 
   assert.equal(controller.snapshot().selectedId, before);
-  assert.deepEqual(opened, []);
+  assert.deepEqual(switched, []);
 });
 
 test("mouse wheel moves selection", () => {
@@ -565,10 +783,7 @@ test("mouse press only dismisses restart choices and wheel is ignored", () => {
   const opened: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
   const view = new SessionsView(controller, () => {}, {
-    openSidePane: (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
-    },
+    switchInsideTmux: (sessionId) => { opened.push(sessionId); },
   });
   const rendered = view.render(100);
 
@@ -600,10 +815,10 @@ test("short dashboard renders to terminal rows and clicks visible rows", () => {
 
 test("sidebar dashboard renders readable primary controls", () => {
   const controller = new SessionsController({ version: 1, sessions: manyViewSessions(3) });
-  const view = new SessionsView(controller, () => {}, { terminalRows: () => 15, sidePaneSessionIds: () => ["s0"] });
+  const view = new SessionsView(controller, () => {}, { terminalRows: () => 15, sidePaneSessionIds: () => new Map([["s0", 1]]) });
   const rendered = view.render(42).map(stripAnsi);
 
-  assert.match(rendered.at(-2) ?? "", /j\/k Move · Enter Open · o Side · \? Help/);
+  assert.match(rendered.at(-2) ?? "", /1-4 Set · ⇧1-4 Focus · o Reset · \? Help/);
   assert.doesNotMatch(rendered.at(-2) ?? "", /…/);
 });
 
@@ -625,10 +840,7 @@ test("mouse clicks on list scroll indicators are ignored", () => {
   const controller = new SessionsController({ version: 1, sessions: manyViewSessions(20) });
   const view = new SessionsView(controller, () => {}, {
     terminalRows: () => 15,
-    openSidePane: (sessionId) => {
-      opened.push(sessionId);
-      return { kind: "opened" };
-    },
+    switchInsideTmux: (sessionId) => { opened.push(sessionId); },
   });
   const rendered = view.render(100);
   const indicator = rendered.findIndex((line) => stripAnsi(line).includes("↓"));

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { isErrno } from "./atomic-json.js";
+import { isErrno, withFileLock, writeJsonAtomic } from "./atomic-json.js";
 import { tmuxChromeFromTheme, type ChromeThemeTokens } from "./chrome.js";
 import { MANAGED_SESSION_PREFIX } from "./names.js";
 import { sessionsStateDir } from "./paths.js";
@@ -85,35 +85,58 @@ export interface WindowPane {
   id: string;
   tty: string;
   active: boolean;
+  left: number;
   top: number;
   width: number;
+  height: number;
   windowWidth: number;
+  windowHeight: number;
 }
 
 export async function listWindowPanes(pane: string, exec: TmuxExec = realTmuxExec): Promise<WindowPane[]> {
-  const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_top} #{pane_width} #{window_width}"]);
+  const format = "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height}";
+  const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", format]);
   return result.stdout.split(/\r?\n/).flatMap((line) => {
     if (!line.trim()) return [];
-    const [id, tty, active, topText, widthText, windowWidthText] = line.split(" ");
-    const top = Number(topText);
-    const width = Number(widthText);
-    const windowWidth = Number(windowWidthText);
-    if (!id || !tty || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(windowWidth)) return [];
-    return [{ id, tty, active: active === "1", top, width, windowWidth }];
+    const [id, tty, active, ...geometryText] = line.split(" ");
+    const geometry = geometryText.map(Number);
+    if (!id || !tty || geometry.length !== 6 || geometry.some((value) => !Number.isFinite(value))) return [];
+    const [left, top, width, height, windowWidth, windowHeight] = geometry as [number, number, number, number, number, number];
+    return [{ id, tty, active: active === "1", left, top, width, height, windowWidth, windowHeight }];
   });
 }
 
-export async function splitWindowAttach(options: { pane: string; target: string; sidebarWidth: number }, exec: TmuxExec = realTmuxExec): Promise<void> {
-  await exec.exec("tmux", ["split-window", "-d", "-h", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
-  await exec.exec("tmux", ["resize-pane", "-t", options.pane, "-x", String(options.sidebarWidth)]);
+export async function splitWindowAttach(options: { pane: string; target: string; size: number }, exec: TmuxExec = realTmuxExec): Promise<string> {
+  return splitPaneAttach({ pane: options.pane, target: options.target, direction: "horizontal", size: options.size }, exec);
 }
 
-export async function splitPaneBelowAttach(options: { pane: string; target: string }, exec: TmuxExec = realTmuxExec): Promise<void> {
-  await exec.exec("tmux", ["split-window", "-d", "-v", "-t", options.pane, `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`]);
+export async function splitPaneAttach(options: {
+  pane: string;
+  target: string;
+  direction: "horizontal" | "vertical";
+  size?: number;
+}, exec: TmuxExec = realTmuxExec): Promise<string> {
+  const direction = options.direction === "horizontal" ? "-h" : "-v";
+  const size = options.size === undefined ? [] : ["-l", String(options.size)];
+  const result = await exec.exec("tmux", [
+    "split-window", "-d", direction, ...size, "-P", "-F", "#{pane_id}", "-t", options.pane,
+    `env -u TMUX tmux attach-session -t ${shellQuote(options.target)}`,
+  ]);
+  const paneId = result.stdout.trim();
+  if (!paneId) throw new Error("tmux did not report the new pane id");
+  return paneId;
 }
 
 export async function switchClientTo(options: { clientTty: string; target: string }, exec: TmuxExec = realTmuxExec): Promise<void> {
   await exec.exec("tmux", ["switch-client", "-c", options.clientTty, "-t", options.target]);
+}
+
+export async function presizeSessionWindow(options: { target: string; width: number; height: number }, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["resize-window", "-t", options.target, "-x", String(options.width), "-y", String(options.height)]);
+}
+
+export async function resetSessionWindowSize(target: string, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["set-option", "-w", "-t", target, "window-size", "latest"]);
 }
 
 export async function killPane(paneId: string, exec: TmuxExec = realTmuxExec): Promise<void> {
@@ -126,6 +149,14 @@ export async function resizePaneWidth(paneId: string, width: number, exec: TmuxE
 
 export async function selectPane(paneId: string, exec: TmuxExec = realTmuxExec): Promise<void> {
   await exec.exec("tmux", ["select-pane", "-t", paneId]);
+}
+
+export async function setPaneTitle(paneId: string, title: string, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["select-pane", "-t", paneId, "-T", title]);
+}
+
+export async function setWindowPaneBorderStatus(paneId: string, visible: boolean, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["set-option", "-w", "-t", paneId, "pane-border-status", visible ? "top" : "off"]);
 }
 
 export async function clientSessionsByTty(exec: TmuxExec = realTmuxExec): Promise<Map<string, string>> {
@@ -269,6 +300,13 @@ export async function currentTmuxClient(exec: TmuxExec = realTmuxExec): Promise<
   return client;
 }
 
+export async function clientSize(client: string, exec: TmuxExec = realTmuxExec): Promise<{ width: number; height: number }> {
+  const result = await exec.exec("tmux", ["display-message", "-p", "-c", client, "#{client_width} #{client_height}"]);
+  const [width, height] = result.stdout.trim().split(/\s+/).map(Number);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error("tmux client size is invalid");
+  return { width: width!, height: height! };
+}
+
 export async function switchClientWithReturn(
   options: SwitchClientOptions,
   exec: TmuxExec = realTmuxExec,
@@ -305,6 +343,8 @@ export async function switchClientWithReturn(
   };
   await writeFile(activePath, `${JSON.stringify(active, null, 2)}\n`, "utf8");
 
+  let targetPresized = false;
+  let switched = false;
   try {
     await exec.exec("tmux", ["bind-key", "-n", returnKey, "run-shell", returnBindingScript({
       controlSession,
@@ -326,12 +366,24 @@ export async function switchClientWithReturn(
         },
       })]);
     }
-    await exec.exec("tmux", ["switch-client", "-c", controlClient, "-t", options.targetSession]);
-  } catch (error) {
     try {
-      await restoreSwitchReturnBinding({ stateDir, onlyOwnerPid: process.pid }, exec);
-    } catch (restoreError) {
-      throw new Error(`${errorMessage(error)}; restore failed: ${errorMessage(restoreError)}`);
+      const size = await clientSize(controlClient, exec);
+      await presizeSessionWindow({ target: options.targetSession, width: size.width, height: size.height - 1 }, exec);
+      targetPresized = true;
+    } catch {
+      // Pre-sizing is optional; switching must still work if tmux cannot report or apply the target geometry.
+    }
+    await exec.exec("tmux", ["switch-client", "-c", controlClient, "-t", options.targetSession]);
+    switched = true;
+    if (targetPresized) await resetSessionWindowSize(options.targetSession, exec);
+  } catch (error) {
+    if (targetPresized && !switched) await resetSessionWindowSize(options.targetSession, exec).catch(() => {});
+    if (!switched) {
+      try {
+        await restoreSwitchReturnBinding({ stateDir, onlyOwnerPid: process.pid }, exec);
+      } catch (restoreError) {
+        throw new Error(`${errorMessage(error)}; restore failed: ${errorMessage(restoreError)}`);
+      }
     }
     throw error;
   }
@@ -349,13 +401,136 @@ export async function inspectSwitchReturnBinding(options: { stateDir?: string } 
   }
 }
 
-async function currentKeyBinding(returnKey: string, exec: TmuxExec): Promise<string> {
+export async function currentKeyBinding(returnKey: string, exec: TmuxExec = realTmuxExec): Promise<string> {
   try {
     const result = await exec.exec("tmux", ["list-keys", "-T", "root", returnKey]);
     return result.stdout.trim() ? result.stdout : "";
   } catch (error) {
     if (errorMessage(error).includes("unknown key")) return "";
     throw error;
+  }
+}
+
+interface ActiveSidebarReturnBinding {
+  ownerPid: number;
+  dashboardSession: string;
+  sidebarPane: string;
+  returnKey: string;
+  restorePath: string;
+}
+
+export type SidebarReturnBindingStatus =
+  | { active: false }
+  | (ActiveSidebarReturnBinding & { active: true; stale: boolean });
+
+export async function inspectSidebarReturnBinding(options: { stateDir?: string } = {}): Promise<SidebarReturnBindingStatus> {
+  const stateDir = options.stateDir ?? join(sessionsStateDir(), "sidebar-return");
+  try {
+    const active = JSON.parse(await readFile(join(stateDir, "active.json"), "utf8")) as ActiveSidebarReturnBinding;
+    return { ...active, active: true, stale: !isProcessAlive(active.ownerPid) };
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return { active: false };
+    throw error;
+  }
+}
+
+export async function installSidebarReturnBinding(options: {
+  dashboardSession: string;
+  sidebarPane: string;
+  stateDir?: string;
+  returnKey?: string;
+}, exec: TmuxExec = realTmuxExec): Promise<void> {
+  const stateDir = options.stateDir ?? join(sessionsStateDir(), "sidebar-return");
+  const activePath = join(stateDir, "active.json");
+  await withFileLock(activePath, async () => {
+    const restorePath = join(stateDir, "previous.tmux");
+    const returnKey = options.returnKey ?? "C-q";
+    await removeSidebarReturnBindingUnlocked({ stateDir, refuseLiveForeignOwner: true }, exec);
+    await writeFile(restorePath, await currentKeyBinding(returnKey, exec), "utf8");
+    await writeJsonAtomic(activePath, {
+      ownerPid: process.pid,
+      dashboardSession: options.dashboardSession,
+      sidebarPane: options.sidebarPane,
+      returnKey,
+      restorePath,
+    } satisfies ActiveSidebarReturnBinding);
+
+    const script = `S=$(tmux display-message -p '#{session_name}'); [ "$S" = ${shellQuote(options.dashboardSession)} ] && tmux select-pane -t ${shellQuote(options.sidebarPane)}`;
+    try {
+      await exec.exec("tmux", ["bind-key", "-n", returnKey, "run-shell", script]);
+    } catch (error) {
+      await removeSidebarReturnBindingUnlocked({ stateDir, onlyOwnerPid: process.pid }, exec);
+      throw error;
+    }
+  });
+}
+
+export async function removeSidebarReturnBinding(
+  options: { stateDir?: string; onlyOwnerPid?: number; refuseLiveForeignOwner?: boolean } = {},
+  exec: TmuxExec = realTmuxExec,
+): Promise<void> {
+  const stateDir = options.stateDir ?? join(sessionsStateDir(), "sidebar-return");
+  await withFileLock(join(stateDir, "active.json"), () => removeSidebarReturnBindingUnlocked({ ...options, stateDir }, exec));
+}
+
+async function removeSidebarReturnBindingUnlocked(
+  options: { stateDir: string; onlyOwnerPid?: number; refuseLiveForeignOwner?: boolean },
+  exec: TmuxExec,
+): Promise<void> {
+  const activePath = join(options.stateDir, "active.json");
+  let active: ActiveSidebarReturnBinding;
+  try {
+    active = JSON.parse(await readFile(activePath, "utf8")) as ActiveSidebarReturnBinding;
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return;
+    throw error;
+  }
+  if (options.onlyOwnerPid !== undefined && active.ownerPid !== options.onlyOwnerPid) return;
+  if (options.refuseLiveForeignOwner && active.ownerPid !== process.pid && isProcessAlive(active.ownerPid)) {
+    throw new Error(`tmux sidebar return binding is already active for pid ${active.ownerPid}`);
+  }
+  try {
+    await exec.exec("tmux", ["unbind-key", "-T", "root", active.returnKey]);
+  } catch (error) {
+    if (!errorMessage(error).includes("unknown key")) throw error;
+  }
+  let previous = "";
+  try {
+    previous = await readFile(active.restorePath, "utf8");
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) throw error;
+  }
+  if (previous.trim()) await exec.exec("tmux", ["source-file", active.restorePath]);
+  await rm(active.restorePath, { force: true });
+  await rm(activePath, { force: true });
+}
+
+export async function reconcileSidebarReturnBinding(options: {
+  desired: boolean;
+  dashboardSession: string;
+  sidebarPane: string;
+  stateDir?: string;
+  switchStateDir?: string;
+}, exec: TmuxExec = realTmuxExec): Promise<void> {
+  const switchBinding = await inspectSwitchReturnBinding({ stateDir: options.switchStateDir });
+  if (switchBinding.active && !switchBinding.stale) return;
+  if (switchBinding.active) {
+    await restoreSwitchReturnBinding({ stateDir: options.switchStateDir, onlyOwnerPid: switchBinding.ownerPid }, exec);
+    if ((await inspectSwitchReturnBinding({ stateDir: options.switchStateDir })).active) return;
+  }
+
+  const sidebarBinding = await inspectSidebarReturnBinding({ stateDir: options.stateDir });
+  if (options.desired) {
+    if (sidebarBinding.active && !sidebarBinding.stale) return;
+    await installSidebarReturnBinding({
+      dashboardSession: options.dashboardSession,
+      sidebarPane: options.sidebarPane,
+      stateDir: options.stateDir,
+    }, exec);
+    return;
+  }
+  if (sidebarBinding.active && (sidebarBinding.stale || sidebarBinding.ownerPid === process.pid)) {
+    await removeSidebarReturnBinding({ stateDir: options.stateDir, onlyOwnerPid: sidebarBinding.ownerPid }, exec);
   }
 }
 

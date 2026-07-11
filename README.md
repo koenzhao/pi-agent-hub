@@ -38,8 +38,10 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | Key | Action |
 | --- | --- |
 | `n` | Create a new Pi session |
-| `Enter` | Open or switch to the selected session |
-| `o` | Open, retarget, or close the selected session in a side pane |
+| `Enter` | Open/switch to the selected live session, or restart a stopped/error session |
+| `1`–`4` | Target a side-panel slot; requests past the next available slot append there |
+| `Shift+1`–`Shift+4` or `F`, then `1`–`4` | Focus the corresponding open panel |
+| `o` | Reset side panels to the selected session, or close it when it is the only panel |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
@@ -58,6 +60,7 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `g` / `G` | Move a session to a group (Ctrl+N/P cycles visible groups) or rename its group |
 | `K` / `J` | Move the selected session up/down within its group |
 | `s` / `m` | Pick project skills or MCP servers; `←→` switches Enabled/Available |
+| Click / double-click | Select a session / open, switch, or restart it |
 
 ## Install
 

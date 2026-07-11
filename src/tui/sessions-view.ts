@@ -10,19 +10,15 @@ import { renderSessions } from "./layout.js";
 import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
-import { errorMessage, isPromise, type DialogContext, type OpenSidePaneResult, type SessionDialog, type SessionsViewActions } from "./dialog.js";
+import { errorMessage, isPromise, type DialogContext, type FocusSidePaneResult, type SessionDialog, type SessionsViewActions, type SidePaneActionResult } from "./dialog.js";
 import { handlePromptInput, openFilterPrompt, openRenamePrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
 import { handleFormDialogInput, openForkDialog, openMoveGroupDialog, openRenameGroupDialog, openRenameSessionForm, renderFormDialog } from "./form-dialogs.js";
 import { handleConfirmInput, openDeleteDialog, openFinishDialog, renderConfirmDialog, renderRestartDialog } from "./confirm-dialogs.js";
 import { createPickerDialog, handlePickerDialogInput, renderPickerDialog } from "./picker-dialog.js";
 import { handleNewSessionInput, openNewSessionDialog, renderNewSessionDialog } from "./new-session-dialog.js";
 
-function normalizeSidePaneSessionIds(sessionIds: ReadonlySet<string> | readonly string[] | undefined): readonly string[] | undefined {
-  if (!sessionIds) return undefined;
-  return Array.isArray(sessionIds) ? sessionIds : [...sessionIds];
-}
-
 const MIN_RENDER_WIDTH = 40;
+const DOUBLE_CLICK_MS = 400;
 
 export class SessionsView implements Component {
   private dialog: SessionDialog | undefined;
@@ -31,6 +27,8 @@ export class SessionsView implements Component {
   private detailsExpanded = false;
   private viewMode: "groups" | "stages" = "groups";
   private pendingRestart: { sessionId: string } | undefined;
+  private pendingFocusSlot = false;
+  private lastMouseClick: { sessionId: string; at: number } | undefined;
   private busy = false;
   private rowSessions: (string | undefined)[] = [];
   private listWidth = 0;
@@ -48,11 +46,14 @@ export class SessionsView implements Component {
 
   handleInput(data: string): void {
     if (isMouseSequence(data)) {
+      this.clearPendingFocusSlot();
       const event = parseMouseEvent(data);
       if (event && !this.dialog && !this.busy) this.handleMouse(event);
+      else if (event) this.lastMouseClick = undefined;
       return;
     }
 
+    this.lastMouseClick = undefined;
     if (this.dialog) {
       if (this.dialog.kind === "help") {
         if (data === "q") this.stop();
@@ -85,6 +86,34 @@ export class SessionsView implements Component {
       return;
     }
 
+    if (this.pendingFocusSlot) {
+      this.pendingFocusSlot = false;
+      this.clearFlash();
+      const slot = sidePaneSlot(data);
+      if (slot) {
+        this.focusSidePane(slot);
+        return;
+      }
+    }
+    if (data === "F") {
+      this.clearPendingRestart();
+      this.clearFlash();
+      this.message = undefined;
+      this.pendingFocusSlot = true;
+      this.flashMessage("focus panel: press 1-4");
+      return;
+    }
+
+    const panelSlot = sidePaneSlot(data);
+    if (panelSlot) {
+      this.openSelectedSidePane(panelSlot);
+      return;
+    }
+    const focusSlot = focusedSidePaneSlot(data);
+    if (focusSlot) {
+      this.focusSidePane(focusSlot);
+      return;
+    }
     if (this.runConfiguredShortcut(data)) return;
 
     if (data === "J" || matchesKey(data, Key.shift("down"))) this.reorderSelected(1);
@@ -164,7 +193,7 @@ export class SessionsView implements Component {
       selectedSkillCount: selected ? this.actions.skillCount?.(selected.cwd) : undefined,
       viewMode: this.viewMode,
       now,
-      sidePaneSessionIds: normalizeSidePaneSessionIds(this.actions.sidePaneSessionIds?.()),
+      sidePaneSessionIds: this.actions.sidePaneSessionIds?.(),
     }), this.theme);
     this.rowSessions = layout.rowSessions;
     this.listWidth = layout.listWidth;
@@ -278,7 +307,7 @@ export class SessionsView implements Component {
     this.openDialog(openSendPrompt);
   }
 
-  private openSelectedSidePane() {
+  private openSelectedSidePane(slot?: 1 | 2 | 3 | 4) {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
@@ -288,31 +317,36 @@ export class SessionsView implements Component {
       this.flashMessage("session not running");
       return;
     }
-    const openSidePane = this.actions.openSidePane;
-    if (!openSidePane) {
+    const action = slot ? this.actions.toggleSidePaneSlot : this.actions.resetSidePane;
+    if (!action) {
       this.message = "side pane unavailable";
       return;
     }
-    const apply = (result: OpenSidePaneResult) => {
-      this.flashMessage(result.kind === "closed" ? "side closed" : `side: ${selected.title}`);
+    const apply = (result: SidePaneActionResult) => {
+      if (result.kind === "too-narrow") this.flashMessage(`window too narrow for ${result.panels} panels`);
+      else if (result.kind === "closed") this.flashMessage(slot ? `panel ${slot} closed` : "panel closed");
+      else this.flashMessage(slot ? `panel ${result.slot}: ${selected.title}` : `panel: ${selected.title}`);
     };
     const applyError = (error: unknown) => {
       const message = errorMessage(error);
       if (message.startsWith("side pane needs tmux")) this.flashMessage(message);
       else this.message = message;
     };
+    const pending = slot ? `opening panel ${slot}...` : "resetting panels...";
     try {
-      const result = openSidePane(selected.id);
-      if (isPromise<OpenSidePaneResult>(result)) {
+      const result = slot
+        ? this.actions.toggleSidePaneSlot!(selected.id, slot)
+        : this.actions.resetSidePane!(selected.id);
+      if (isPromise<SidePaneActionResult>(result)) {
         this.busy = true;
-        this.message = "opening side pane...";
+        this.message = pending;
         void result.then((sidePaneResult) => {
           this.busy = false;
           apply(sidePaneResult);
-          if (this.message === "opening side pane...") this.message = undefined;
+          if (this.message === pending) this.message = undefined;
         }).catch((error: unknown) => {
           this.busy = false;
-          if (this.message === "opening side pane...") this.message = undefined;
+          if (this.message === pending) this.message = undefined;
           applyError(error);
         });
         return;
@@ -323,20 +357,61 @@ export class SessionsView implements Component {
     }
   }
 
+  private focusSidePane(slot: 1 | 2 | 3 | 4) {
+    this.clearPendingRestart();
+    this.clearFlash();
+    this.message = undefined;
+    const focus = this.actions.focusSidePaneSlot;
+    if (!focus) {
+      this.message = "side pane unavailable";
+      return;
+    }
+    const apply = (result: FocusSidePaneResult) => {
+      if (result.kind === "unavailable") this.flashMessage(`panel ${slot} is not open`);
+    };
+    try {
+      const result = focus(slot);
+      if (!isPromise<FocusSidePaneResult>(result)) {
+        apply(result);
+        return;
+      }
+      this.busy = true;
+      this.message = `focusing panel ${slot}...`;
+      void result.then((focusResult) => {
+        this.busy = false;
+        apply(focusResult);
+        if (this.message === `focusing panel ${slot}...`) this.message = undefined;
+      }).catch((error: unknown) => {
+        this.busy = false;
+        this.message = errorMessage(error);
+      });
+    } catch (error) {
+      this.message = errorMessage(error);
+    }
+  }
+
   private handleMouse(event: MouseEvent) {
     if (this.pendingRestart) {
+      this.lastMouseClick = undefined;
       if (event.kind === "press") this.clearPendingRestart();
       return;
     }
     if (event.kind === "wheel") {
+      this.lastMouseClick = undefined;
       this.moveSelection(event.delta);
       return;
     }
     const inList = event.x >= 2 && event.x <= 1 + this.listWidth;
     const id = inList ? this.rowSessions[event.y - 1] : undefined;
-    if (!id) return;
-    if (id === this.controller.snapshot().selectedId) this.openSelectedSidePane();
-    else this.controller.selectSession(id);
+    if (!id || !this.controller.selectSession(id)) {
+      this.lastMouseClick = undefined;
+      return;
+    }
+    const now = this.actions.now?.() ?? Date.now();
+    const elapsed = this.lastMouseClick ? now - this.lastMouseClick.at : undefined;
+    const doubleClick = this.lastMouseClick?.sessionId === id && elapsed !== undefined && elapsed >= 0 && elapsed <= DOUBLE_CLICK_MS;
+    this.lastMouseClick = doubleClick ? undefined : { sessionId: id, at: now };
+    if (doubleClick) this.attachSelected();
   }
 
   private startPicker(mode: "skills" | "mcp") {
@@ -587,7 +662,14 @@ export class SessionsView implements Component {
   private clearPendingRestart() {
     const hadPendingRestart = Boolean(this.pendingRestart);
     this.pendingRestart = undefined;
+    this.clearPendingFocusSlot();
     if (hadPendingRestart) this.message = undefined;
+  }
+
+  private clearPendingFocusSlot() {
+    if (!this.pendingFocusSlot) return;
+    this.pendingFocusSlot = false;
+    this.clearFlash();
   }
 
   private flashMessage(text: string, ttlMs = 1_500): void {
@@ -629,6 +711,20 @@ export class SessionsView implements Component {
 
 }
 
+function sidePaneSlot(data: string): 1 | 2 | 3 | 4 | undefined {
+  if (data === "1" || data === "2" || data === "3" || data === "4") return Number(data) as 1 | 2 | 3 | 4;
+  return undefined;
+}
+
+function focusedSidePaneSlot(data: string): 1 | 2 | 3 | 4 | undefined {
+  const legacyIndex = ["!", "@", "#", "$"].indexOf(data);
+  if (legacyIndex >= 0) return (legacyIndex + 1) as 1 | 2 | 3 | 4;
+  const shiftedNumbers = [Key.shift("1"), Key.shift("2"), Key.shift("3"), Key.shift("4")];
+  const kittyIndex = shiftedNumbers.findIndex((key) => matchesKey(data, key));
+  if (kittyIndex >= 0) return (kittyIndex + 1) as 1 | 2 | 3 | 4;
+  return undefined;
+}
+
 function syncPiNameMessage(result: SyncPiNameResult): string {
   switch (result.status) {
     case "synced": return `renamed from Pi name: ${result.name}`;
@@ -643,10 +739,12 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     heading("pi agent hub help"),
     "",
     heading("Navigation"),
-    "  ↑↓/j/k move selection     Enter open/switch     o side pane     / filter",
-    "  K/J reorder in group      q quit                Esc cancel/clear",
-    "  v toggle groups/stages view",
-    "  mouse click select · click again side pane · wheel move",
+    "  ↑↓/j/k move selection     Enter open/switch     / filter",
+    "  1-4 assign/toggle panels  o reset to one panel",
+    "  Shift+1-4 or F then 1-4 focus panel",
+    "  q quit                     Esc cancel/clear",
+    "  K/J reorder in group      v toggle groups/stages view",
+    "  mouse click select · double-click open/switch · wheel move",
     "",
     heading("Sessions"),
     "  n new     p send     r restart choices     N sync Pi name     f fork     w finish worktree",
@@ -661,8 +759,8 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     heading("Project state"),
     "  s skills picker     m MCP picker     ←→/Tab switch picker columns",
     "",
-    heading("Return from managed sessions"),
-    "  Ctrl+Q return to dashboard     Alt+R rename current session",
+    heading("Return from managed sessions and panels"),
+    "  Ctrl+Q return to dashboard/sidebar     Alt+R rename current session",
     "",
     heading("Sections and views"),
     "  Active · Backlog · Archived keep project/group headers inside each section",
