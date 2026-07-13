@@ -213,8 +213,10 @@ export class SessionsView implements Component {
       this.message = `session not found: ${tmuxSession}`;
       return false;
     }
+    const previousId = this.controller.snapshot().selectedId;
     this.controller.setFilter(undefined);
     if (!this.controller.selectSession(target.id)) return false;
+    if (target.id !== previousId) this.actions.selectionChanged?.();
     this.startRenameSessionDialog(tmuxSession);
     return this.dialog?.kind === "form" && this.dialog.purpose === "renameSession";
   }
@@ -404,10 +406,12 @@ export class SessionsView implements Component {
     }
     const inList = event.x >= 2 && event.x <= 1 + this.listWidth;
     const id = inList ? this.rowSessions[event.y - 1] : undefined;
+    const previousId = this.controller.snapshot().selectedId;
     if (!id || !this.controller.selectSession(id)) {
       this.lastMouseClick = undefined;
       return;
     }
+    if (id !== previousId) this.actions.selectionChanged?.();
     const now = this.actions.now?.() ?? Date.now();
     const elapsed = this.lastMouseClick ? now - this.lastMouseClick.at : undefined;
     const doubleClick = this.lastMouseClick?.sessionId === id && elapsed !== undefined && elapsed >= 0 && elapsed <= DOUBLE_CLICK_MS;
@@ -504,15 +508,17 @@ export class SessionsView implements Component {
   }
 
   private moveSelection(delta: number) {
+    const previousId = this.controller.snapshot().selectedId;
     if (this.viewMode !== "stages") {
       this.controller.move(delta);
-      return;
+    } else {
+      const rows = this.stageRows();
+      if (!rows.length) return;
+      const index = Math.max(0, rows.findIndex((row) => row.id === previousId));
+      const next = rows[(index + delta + rows.length) % rows.length];
+      if (next) this.controller.selectSession(next.id);
     }
-    const rows = this.stageRows();
-    if (!rows.length) return;
-    const index = Math.max(0, rows.findIndex((row) => row.id === this.controller.snapshot().selectedId));
-    const next = rows[(index + delta + rows.length) % rows.length];
-    if (next) this.controller.selectSession(next.id);
+    if (this.controller.snapshot().selectedId !== previousId) this.actions.selectionChanged?.();
   }
 
   private stageRows() {
@@ -527,9 +533,11 @@ export class SessionsView implements Component {
     this.message = undefined;
     this.viewMode = this.viewMode === "groups" ? "stages" : "groups";
     if (this.viewMode !== "stages") return;
+    const previousId = this.controller.snapshot().selectedId;
     const rows = this.stageRows();
-    if (rows.length && !rows.some((row) => row.id === this.controller.snapshot().selectedId)) {
+    if (rows.length && !rows.some((row) => row.id === previousId)) {
       this.controller.selectSession(rows[0]?.id ?? "");
+      if (this.controller.snapshot().selectedId !== previousId) this.actions.selectionChanged?.();
     }
   }
 

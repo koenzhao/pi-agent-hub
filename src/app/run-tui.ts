@@ -9,7 +9,7 @@ import { loadManagedSessionTheme, loadSessionsTheme, type SessionsTheme } from "
 import { loadProjectSkillsState, setProjectSkills } from "../skills/attach.js";
 import { listSkillPool } from "../skills/catalog.js";
 import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mcp/config.js";
-import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
+import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { tmuxChromeFromTheme } from "../core/chrome.js";
 import { sessionSection } from "../core/session-bucket.js";
@@ -24,7 +24,7 @@ import { discardWorktreeSession, finishWorktreeSession } from "./worktree-sessio
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { ManagedSession } from "../core/types.js";
 
-export function buildNewFormContext(input: { cwd: string; sessions: ManagedSession[]; selected?: ManagedSession; historyCwds?: string[] }): NewFormContext {
+export function buildNewFormContext(input: { cwd: string; sessions: ManagedSession[]; selected?: ManagedSession; historyCwds?: string[]; worktreeDefault?: boolean }): NewFormContext {
   const selectedCwd = input.selected ? newSessionCwd(input.selected) : input.cwd;
   const selectedExtraCwds = input.selected ? newSessionAdditionalCwds(input.selected) : [];
   const worktreePaths = new Set(input.sessions.flatMap((session) => sessionWorktrees(session).map((worktree) => worktree.path)));
@@ -40,6 +40,7 @@ export function buildNewFormContext(input: { cwd: string; sessions: ManagedSessi
   return {
     cwd: selectedCwd,
     group: input.selected?.group,
+    ...(input.worktreeDefault !== undefined ? { worktreeDefault: input.worktreeDefault } : {}),
     knownCwds,
     ...(selectedExtraCwds.length ? { additionalCwds: selectedExtraCwds } : {}),
   };
@@ -163,6 +164,7 @@ export async function runTui(): Promise<void> {
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal, false);
   const dashboardShortcuts = await effectiveDashboardShortcuts();
+  const worktreeDefault = await effectiveWorktreeDefault();
   let skillPoolDirs = await effectiveSkillPoolDirs();
   let skillPool = await listSkillPool();
   const mcpCatalog = await loadMcpCatalog();
@@ -411,6 +413,11 @@ export async function runTui(): Promise<void> {
       return result;
     },
     sidePaneFocusedSlot: () => sidePaneFocusedSlot,
+    selectionChanged() {
+      void controller.refreshPreview()
+        .then(() => { if (!stopped) tui.requestRender(); })
+        .catch(() => {});
+    },
     restart(sessionId) {
       return mutateRegistry(() => restartManagedSession(sessionId));
     },
@@ -498,6 +505,7 @@ export async function runTui(): Promise<void> {
         sessions: controller.snapshot().registry.sessions,
         selected: controller.selected(),
         historyCwds,
+        worktreeDefault,
       });
     },
     async skills() {

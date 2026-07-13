@@ -13,6 +13,15 @@ test("new form defaults group to primary cwd basename and title to random slug",
   assert.deepEqual(state.order, ["repo:0", "group", "title"]);
 });
 
+test("new form can default to worktree mode", () => {
+  const state = createNewForm({ cwd: "/repo/api", worktreeDefault: true, titleGenerator: () => "black-aleph" });
+
+  assert.equal(state.worktreeEnabled, true);
+  assert.equal(state.fields.branch.value, "black-aleph");
+  assert.deepEqual(state.order, ["repo:0", "branch", "group"]);
+  assert.deepEqual(submission(state), { cwd: "/repo/api", group: "api", title: "black-aleph", worktree: { branch: "black-aleph" } });
+});
+
 test("new form keeps random title while group auto-updates until edited", () => {
   let state = createNewForm({ cwd: "/repo/api", knownCwds: ["/repo/api", "/repo/web"], titleGenerator: () => "black-aleph" });
 

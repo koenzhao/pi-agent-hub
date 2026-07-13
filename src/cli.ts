@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { cliTuiCommand, hasTmux, inspectSidebarReturnBinding, inspectSwitchReturnBinding } from "./core/tmux.js";
-import { configPath, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, loadSessionsConfig, setSessionPrelude, unsetSessionPrelude } from "./core/config.js";
+import { configPath, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, loadSessionsConfig, setSessionPrelude, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "./core/config.js";
 import { extensionPath } from "./core/extension-path.js";
 import { formatCliInstallDoctor, formatCliInstallWarning, inspectCliInstall, shouldWarnForCommand } from "./core/install-diagnostics.js";
 import { CLI_COMMAND } from "./core/names.js";
@@ -86,6 +86,8 @@ Usage:
   ${CLI_COMMAND} config get
   ${CLI_COMMAND} config set session-prelude <shell snippet>
   ${CLI_COMMAND} config unset session-prelude
+  ${CLI_COMMAND} config set worktree-default true|false
+  ${CLI_COMMAND} config unset worktree-default
 `);
 }
 
@@ -176,6 +178,18 @@ async function configCommand(argv: string[]) {
   if (action === "unset" && argv[1] === "session-prelude") {
     await unsetSessionPrelude();
     console.log("unset session-prelude");
+    return;
+  }
+  if (action === "set" && argv[1] === "worktree-default") {
+    const value = argv[2];
+    if (value !== "true" && value !== "false") throw new Error(`Usage: ${CLI_COMMAND} config set worktree-default true|false`);
+    await setWorktreeDefault(value === "true");
+    console.log(`${value === "true" ? "enabled" : "disabled"} worktree-default`);
+    return;
+  }
+  if (action === "unset" && argv[1] === "worktree-default") {
+    await unsetWorktreeDefault();
+    console.log("unset worktree-default");
     return;
   }
   throw new Error(`Usage: ${CLI_COMMAND} config get|set|unset ...`);

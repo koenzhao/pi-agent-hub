@@ -155,11 +155,13 @@ test("buildNewFormContext defaults to selected session cwd, group, and additiona
     cwd: "/dashboard",
     sessions: [session("docs", "/repo/docs", "docs"), selected],
     selected,
+    worktreeDefault: true,
   });
 
   assert.deepEqual(context, {
     cwd: "/repo/api",
     group: "backend",
+    worktreeDefault: true,
     knownCwds: ["/repo/api", "/dashboard", "/repo/web", "/repo/shared", "/repo/docs"],
     additionalCwds: ["/repo/web", "/repo/shared", "/repo/docs"],
   });

@@ -22,6 +22,7 @@ export interface NewFormContext {
   group?: string;
   knownCwds?: string[];
   additionalCwds?: string[];
+  worktreeDefault?: boolean;
   titleGenerator?: () => string;
 }
 
@@ -47,12 +48,13 @@ export function createNewForm(ctx: NewFormContext): NewFormState {
   const contextGroup = ctx.group?.trim();
   const group = contextGroup || projectBasename(cwd) || "default";
   const title = ctx.titleGenerator?.() ?? randomSessionTitle();
-  const fields = buildFields([cwd, ...(ctx.additionalCwds ?? [])], group, title, knownCwds, false);
+  const worktreeEnabled = ctx.worktreeDefault ?? false;
+  const fields = buildFields([cwd, ...(ctx.additionalCwds ?? [])], group, title, knownCwds, worktreeEnabled);
   return {
     ...createForm<FieldKey, Field>(fields, "repo:0"),
     groupTouched: false,
     knownCwds,
-    worktreeEnabled: false,
+    worktreeEnabled,
   };
 }
 

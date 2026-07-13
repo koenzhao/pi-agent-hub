@@ -5,7 +5,7 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 ## Runtime state
 
 - Global state: `PI_AGENT_HUB_DIR` or `<PI_CODING_AGENT_DIR>/pi-agent-hub` or `~/.pi/agent/pi-agent-hub`
-- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, dashboard theme anchor, dashboard shortcuts)
+- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, `session.worktreeDefault`, dashboard theme anchor, dashboard shortcuts)
 - Registry: `registry.json`
 - Heartbeats: `heartbeats/<session-id>.json`
 - Optional session metadata: `session-metadata/<session-id>.json`
@@ -76,7 +76,8 @@ Optional global config lives at `config.json` under the global state directory:
     "catalogPath": "~/.pi/agent/pi-agent-hub/mcp.json"
   },
   "session": {
-    "prelude": "eval \"$(ssh-agent -s)\" >/dev/null"
+    "prelude": "eval \"$(ssh-agent -s)\" >/dev/null",
+    "worktreeDefault": true
   },
   "dashboard": {
     "themeSessionId": "last-entered-session-id",
@@ -98,6 +99,8 @@ Use the CLI for common config changes:
 pi-hub config get
 pi-hub config set session-prelude '<shell snippet>'
 pi-hub config unset session-prelude
+pi-hub config set worktree-default true
+pi-hub config unset worktree-default
 ```
 
 ## Dashboard shortcuts
@@ -123,6 +126,15 @@ pi-hub config unset session-prelude
 Supported key spelling includes plain single characters, `C-x`/`ctrl+x`, and `M-x`/`alt+x`. Built-in dashboard keys and tmux return keys are reserved. `send` must be a single nonblank line; this is not a shell-command or macro facility.
 
 `syncPiNameAfterMs` is a pi-agent-hub-specific post-action for `/session-summary name` workflows: after sending the shortcut, Hub waits that many milliseconds and then syncs the selected dashboard title from Pi's latest `session_info.name`, equivalent to pressing `N` later. `/session-summary name` is not built into Hub; it is provided by the optional [`pi-session-summary`](https://github.com/masta-g3/pi-session-summary) Pi extension.
+
+## New-session worktree default
+
+Set `session.worktreeDefault` to `true` to open every new-session form in worktree mode. `Ctrl+T` still toggles worktree mode off for an individual session. Omitting or unsetting the option preserves the normal-session default.
+
+```bash
+pi-hub config set worktree-default true
+pi-hub config unset worktree-default
+```
 
 ## Session prelude
 

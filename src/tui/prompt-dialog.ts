@@ -14,7 +14,7 @@ export interface PromptDialog {
 export function openFilterPrompt(ctx: DialogContext): PromptDialog | undefined {
   if (ctx.controller.snapshot().registry.sessions.length === 0) return undefined;
   const draft = createTextInput(ctx.controller.snapshot().filter ?? "");
-  ctx.controller.setFilter(draft.value);
+  setFilter(ctx, draft.value);
   return { kind: "prompt", purpose: "filter", draft };
 }
 
@@ -69,17 +69,23 @@ export function promptFooter(dialog: PromptDialog, ctx: DialogContext): string {
 
 function handleFilterInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
   if (matchesKey(data, Key.escape)) {
-    ctx.controller.setFilter(undefined);
+    setFilter(ctx, undefined);
     return undefined;
   }
   if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
-    ctx.controller.setFilter(dialog.draft.value);
+    setFilter(ctx, dialog.draft.value);
     return undefined;
   }
   const edited = editTextInput(data, dialog.draft);
   if (!edited) return dialog;
-  ctx.controller.setFilter(edited.value);
+  setFilter(ctx, edited.value);
   return { ...dialog, draft: edited };
+}
+
+function setFilter(ctx: DialogContext, value: string | undefined): void {
+  const previousId = ctx.controller.snapshot().selectedId;
+  ctx.controller.setFilter(value);
+  if (ctx.controller.snapshot().selectedId !== previousId) ctx.actions.selectionChanged?.();
 }
 
 function handleRenameInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {

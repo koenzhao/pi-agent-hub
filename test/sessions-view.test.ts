@@ -628,6 +628,24 @@ test("single mouse click selects without opening", () => {
   assert.deepEqual(switched, []);
 });
 
+test("keyboard and mouse selection changes request an immediate preview", () => {
+  let requests = 0;
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    selectionChanged: () => { requests += 1; },
+  });
+
+  view.handleInput("j");
+  const rendered = view.render(100);
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "api")));
+  view.handleInput("/");
+  view.handleInput("d");
+  view.handleInput("o");
+
+  assert.equal(controller.snapshot().selectedId, "docs");
+  assert.equal(requests, 3);
+});
+
 test("double-click opens the clicked live session", () => {
   const switched: string[] = [];
   let now = 100;

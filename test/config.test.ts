@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSessionPrelude, setSkillPoolDir, unsetSessionPrelude } from "../src/core/config.js";
+import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSessionPrelude, setSkillPoolDir, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "../src/core/config.js";
 import { loadMcpCatalog } from "../src/mcp/config.js";
 import { listSkillPool } from "../src/skills/catalog.js";
 
@@ -22,6 +22,7 @@ test("config defaults to the built-in skill pool and MCP catalog", async () => {
   assert.deepEqual(await effectiveSkillPoolDirs(env), [join(root, "skills", "pool")]);
   assert.equal(await effectiveMcpCatalogPath(env), join(root, "mcp.json"));
   assert.equal(await effectiveSessionPrelude(env), undefined);
+  assert.equal(await effectiveWorktreeDefault(env), false);
   assert.equal(await effectiveDashboardThemeSessionId(env), undefined);
   assert.deepEqual(await effectiveDashboardShortcuts(env), []);
 });
@@ -42,6 +43,23 @@ test("session prelude config is trimmed and validated", async () => {
   }), "utf8");
 
   await assert.rejects(() => effectiveSessionPrelude(env), /Invalid session\.prelude/);
+});
+
+test("worktree default is validated and preserves unrelated session config", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
+  const env = { PI_AGENT_HUB_DIR: root };
+  await writeFile(configPath(env), JSON.stringify({ version: 1, session: { prelude: "echo setup" } }), "utf8");
+
+  await setWorktreeDefault(true, env);
+  assert.equal(await effectiveWorktreeDefault(env), true);
+  assert.equal(await effectiveSessionPrelude(env), "echo setup");
+
+  await unsetWorktreeDefault(env);
+  assert.equal(await effectiveWorktreeDefault(env), false);
+  assert.equal(await effectiveSessionPrelude(env), "echo setup");
+
+  await writeFile(configPath(env), JSON.stringify({ version: 1, session: { worktreeDefault: "yes" } }), "utf8");
+  await assert.rejects(() => effectiveWorktreeDefault(env), /Invalid session\.worktreeDefault/);
 });
 
 test("session prelude setters preserve unrelated config", async () => {

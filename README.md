@@ -104,9 +104,11 @@ pi-hub mcp-pool     # run the pooled MCP socket daemon
 pi-hub config get
 pi-hub config set session-prelude '<shell snippet>'
 pi-hub config unset session-prelude
+pi-hub config set worktree-default true
+pi-hub config unset worktree-default
 ```
 
-`add --add-cwd` creates a multi-repo session: `cwd` stays the primary repo, extra paths are symlinked into a per-session workspace, and Pi starts from that workspace. Worktree sessions are created from the TUI new-session form with `Ctrl+T`; the branch name is also the session title. `delete` stops the tmux session if it is still alive, removes the registry row, removes the heartbeat file, and removes any owned multi-repo workspace. Dashboard archive/backlog/restore only reorganizes rows and never stops tmux or Pi; archived rows are forgotten after 72 hours only once their tmux sessions are gone. Pi conversation/session files, source repos, and hub-owned worktree directories are kept by normal delete; use dashboard `w` to merge and remove a clean hub-owned worktree, or `d` then `Shift+D` to discard a clean worktree and branch without merging.
+`add --add-cwd` creates a multi-repo session: `cwd` stays the primary repo, extra paths are symlinked into a per-session workspace, and Pi starts from that workspace. Worktree sessions are created from the TUI new-session form with `Ctrl+T`; the branch name is also the session title. Set `worktree-default` to open new-session forms in worktree mode automatically; `Ctrl+T` can still turn it off per session. `delete` stops the tmux session if it is still alive, removes the registry row, removes the heartbeat file, and removes any owned multi-repo workspace. Dashboard archive/backlog/restore only reorganizes rows and never stops tmux or Pi; archived rows are forgotten after 72 hours only once their tmux sessions are gone. Pi conversation/session files, source repos, and hub-owned worktree directories are kept by normal delete; use dashboard `w` to merge and remove a clean hub-owned worktree, or `d` then `Shift+D` to discard a clean worktree and branch without merging.
 
 ## Troubleshooting
 
