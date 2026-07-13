@@ -4,7 +4,16 @@ import type { ManagedSession } from "./types.js";
 export function orderedSessions<T extends ManagedSession>(sessions: T[]): T[] {
   const ranks = orderRanks(sessions);
   const indexById = new Map(sessions.map((session, index) => [session.id, index]));
-  return sessions.slice().sort((a, b) => sectionRank(a) - sectionRank(b) || groupOrder(a.group, b.group) || ranks.get(a.id)! - ranks.get(b.id)! || indexById.get(a.id)! - indexById.get(b.id)!);
+  return sessions.slice().sort((a, b) => {
+    const sectionDifference = sectionRank(a) - sectionRank(b);
+    if (sectionDifference) return sectionDifference;
+    if (sessionSection(a) === "archived") {
+      const aChangedAt = typeof a.bucketChangedAt === "number" ? a.bucketChangedAt : -Infinity;
+      const bChangedAt = typeof b.bucketChangedAt === "number" ? b.bucketChangedAt : -Infinity;
+      return bChangedAt - aChangedAt || indexById.get(a.id)! - indexById.get(b.id)!;
+    }
+    return groupOrder(a.group, b.group) || ranks.get(a.id)! - ranks.get(b.id)! || indexById.get(a.id)! - indexById.get(b.id)!;
+  });
 }
 
 export function nextOrderInGroup(sessions: ManagedSession[], group: string, section: ReturnType<typeof sessionSection> = "active"): number {

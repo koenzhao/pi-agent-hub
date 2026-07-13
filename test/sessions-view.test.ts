@@ -98,6 +98,8 @@ test("help overlay opens and closes", () => {
   assert.match(help, /o reset to one panel/);
   assert.match(help, /mouse click select · double-click open\/switch/);
   assert.match(help, /v toggle groups\/stages view/);
+  assert.match(help, /Active and Backlog keep project\/group headers/);
+  assert.match(help, /Archived shows 5 parent cascades/);
   assert.match(help, /Stages view lanes active sessions by workflow step/);
   view.handleInput("\u001b");
   assert.doesNotMatch(view.render(80).join("\n"), /pi agent hub help/);
@@ -180,6 +182,19 @@ test("J K and shift arrows reorder selected session", () => {
   view.handleInput("\u001b[a");
 
   assert.deepEqual(deltas, [1, -1, 1, -1]);
+});
+
+test("archived sessions explain that chronological order cannot be changed", () => {
+  const archived = { ...session("api", "api"), bucket: "archived" as const, bucketChangedAt: 100 };
+  const deltas: number[] = [];
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: [archived] }), () => {}, {
+    reorderSelected: (delta) => { deltas.push(delta); },
+  });
+
+  view.handleInput("J");
+
+  assert.deepEqual(deltas, []);
+  assert.match(stripAnsi(view.render(100).join("\n")), /Archived is sorted by archive time/);
 });
 
 test("archive backlog and restore shortcuts call lifecycle actions", () => {
@@ -649,6 +664,146 @@ test("double-click opens the clicked live session", () => {
 
   assert.equal(controller.snapshot().selectedId, "docs");
   assert.deepEqual(switched, ["pi-agent-hub-docs"]);
+});
+
+test("archive disclosure toggles with keyboard and blocks stale session actions", () => {
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, `archive-${index}`),
+    bucket: "archived" as const,
+    bucketChangedAt: 700 - index,
+  }));
+  const events: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: archived });
+  const view = new SessionsView(controller, () => {}, {
+    archiveSession: (id) => { events.push(`archive:${id}`); },
+    reorderSelected: () => { events.push("reorder"); },
+    toggleSidePaneSlot: (id) => { events.push(`panel:${id}`); return { kind: "opened", slot: 1 }; },
+    restart: (id) => { events.push(`restart:${id}`); },
+  });
+
+  for (let index = 0; index < 5; index += 1) view.handleInput("j");
+  assert.match(stripAnsi(view.render(80).join("\n")), /… 2 older archived/);
+
+  for (const key of ["A", "J", "1", "r"]) view.handleInput(key);
+  assert.deepEqual(events, []);
+
+  view.handleInput("\r");
+  assert.match(stripAnsi(view.render(80).join("\n")), /⌃ show fewer/);
+  assert.match(stripAnsi(view.render(80).join("\n")), /archive-6/);
+
+  view.handleInput("\r");
+  assert.match(stripAnsi(view.render(80).join("\n")), /… 2 older archived/);
+  assert.doesNotMatch(stripAnsi(view.render(80).join("\n")), /archive-6/);
+});
+
+test("every session-dependent route is inert while archive disclosure is selected", () => {
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, `archive-${index}`),
+    bucket: "archived" as const,
+    bucketChangedAt: 700 - index,
+  }));
+  const keys = ["x", "N", "f", "g", "G", "s", "m", "w", "a", "A", "B", "U", "d", "r", "R", "p", "1", "o", "J"];
+
+  for (const key of keys) {
+    const events: string[] = [];
+    const view = new SessionsView(new SessionsController({ version: 1, sessions: archived }), () => {}, {
+      dashboardShortcuts: [{ key: "x", send: "status" }],
+      runDashboardShortcut: () => { events.push("shortcut"); },
+      syncPiName: () => { events.push("sync"); return { status: "unavailable" }; },
+      skills: () => { events.push("skills"); return []; },
+      mcpServers: () => { events.push("mcp"); return []; },
+      acknowledge: () => { events.push("acknowledge"); },
+      archiveSession: () => { events.push("archive"); },
+      backlogSession: () => { events.push("backlog"); },
+      restoreSession: () => { events.push("restore"); },
+      toggleSidePaneSlot: () => { events.push("panel"); return { kind: "opened", slot: 1 }; },
+      resetSidePane: () => { events.push("reset"); return { kind: "opened", slot: 1 }; },
+      reorderSelected: () => { events.push("reorder"); },
+    });
+    for (let index = 0; index < 5; index += 1) view.handleInput("j");
+
+    view.handleInput(key);
+
+    assert.deepEqual(events, [], `key ${key} reached a stale session action`);
+    assert.match(stripAnsi(view.render(80).join("\n")), /older archived|show fewer/, `key ${key} left disclosure mode`);
+  }
+});
+
+test("global new-session action remains available on archive disclosure", () => {
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, `archive-${index}`),
+    bucket: "archived" as const,
+    bucketChangedAt: 700 - index,
+  }));
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: archived }), () => {});
+  for (let index = 0; index < 5; index += 1) view.handleInput("j");
+
+  view.handleInput("n");
+
+  assert.match(stripAnsi(view.render(80).join("\n")), /New session/);
+});
+
+test("archive disclosure toggles on double-click without opening a session", () => {
+  let now = 100;
+  const switched: string[] = [];
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, `archive-${index}`),
+    bucket: "archived" as const,
+    bucketChangedAt: 700 - index,
+  }));
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: archived }), () => {}, {
+    now: () => now,
+    switchInsideTmux: (id) => { switched.push(id); },
+  });
+  const rendered = view.render(80);
+  const disclosureLine = rendered.findIndex((line) => stripAnsi(line).includes("older archived"));
+  assert.notEqual(disclosureLine, -1);
+  const click = mousePressAtLine(disclosureLine);
+
+  view.handleInput(click);
+  now = 200;
+  view.handleInput(click);
+
+  assert.match(stripAnsi(view.render(80).join("\n")), /⌃ show fewer/);
+  assert.deepEqual(switched, []);
+});
+
+test("archive filter reveals hidden matches and clearing restores collapse", () => {
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, `archive-${index}`),
+    bucket: "archived" as const,
+    bucketChangedAt: 700 - index,
+  }));
+  const controller = new SessionsController({ version: 1, sessions: archived });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("/");
+  for (const character of "archive-6") view.handleInput(character);
+  view.handleInput("\r");
+  assert.match(stripAnsi(view.render(80).join("\n")), /archive-6/);
+
+  view.handleInput("\u001b");
+  const restored = stripAnsi(view.render(80).join("\n"));
+  assert.match(restored, /… 2 older archived/);
+  assert.doesNotMatch(restored, /archive-6/);
+  assert.notEqual(controller.snapshot().selectedId, "archive-6");
+});
+
+test("archive disclosure selection repairs when pruning removes the toggle", () => {
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, `archive-${index}`),
+    bucket: "archived" as const,
+    bucketChangedAt: 700 - index,
+  }));
+  const controller = new SessionsController({ version: 1, sessions: archived });
+  const view = new SessionsView(controller, () => {});
+  for (let index = 0; index < 5; index += 1) view.handleInput("j");
+
+  controller.snapshot().registry.sessions.splice(5, 2);
+  const rendered = stripAnsi(view.render(80).join("\n"));
+
+  assert.doesNotMatch(rendered, /older archived|show fewer/);
+  assert.ok(controller.snapshot().selectedId);
 });
 
 test("double-click restarts a stopped session", () => {

@@ -51,6 +51,26 @@ test("orderedSessions sorts by section before project groups", () => {
   assert.deepEqual(orderedSessions(sessions).map((item) => item.id), ["active-default", "active-work", "backlog", "archived"]);
 });
 
+test("archived sessions sort newest-first globally while other sections keep group order", () => {
+  const sessions = [
+    { ...session("archive-old", "default", 0), bucket: "archived" as const, bucketChangedAt: 100 },
+    { ...session("backlog-work", "work", 0), bucket: "backlog" as const },
+    { ...session("archive-new", "work", 0), bucket: "archived" as const, bucketChangedAt: 300 },
+    { ...session("active-work", "work", 0) },
+    { ...session("archive-tied-a", "z", 0), bucket: "archived" as const, bucketChangedAt: 200 },
+    { ...session("active-default", "default", 0) },
+    { ...session("archive-tied-b", "default", 1), bucket: "archived" as const, bucketChangedAt: 200 },
+    { ...session("archive-undated", "default", -1), bucket: "archived" as const },
+    { ...session("backlog-default", "default", 0), bucket: "backlog" as const },
+  ];
+
+  assert.deepEqual(orderedSessions(sessions).map((item) => item.id), [
+    "active-default", "active-work",
+    "backlog-default", "backlog-work",
+    "archive-new", "archive-tied-a", "archive-tied-b", "archive-old", "archive-undated",
+  ]);
+});
+
 test("group order helpers are scoped by section", () => {
   const sessions = [
     session("active-a", "default", 0),

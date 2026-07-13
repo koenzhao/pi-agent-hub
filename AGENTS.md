@@ -16,12 +16,12 @@
 
 - Groups are implicit session labels: `g` moves the selected session, `G` renames its current group globally, and no empty-group lifecycle should be added unless the model changes.
 - Active/Backlog/Archived are optional per-session buckets: `A`/`B`/`U` only reorganize rows and must not stop tmux/Pi; subagent rows follow their parent.
-- Row order is user-controlled via `src/core/session-order.ts`; do not reintroduce status/title sorting or a separate stopped section. `K`/`J` reorder within the current group and lifecycle section.
+- Active/Backlog row order is user-controlled via `src/core/session-order.ts`; Archived is globally newest-first by archive time and cannot be reordered with `K`/`J`. Do not reintroduce status/title sorting or a separate stopped section.
 - Do not repurpose established shortcuts: `r` restart choices, `R` rename, `N` sync from Pi `/name`, plus hidden compatibility aliases `e` for rename and `Alt+N` for sync.
 
 ## TUI Rules
 
-- Keep rendering pure/testable and ANSI width-safe through theme/layout helpers; reserve width for right-side badges/counts in left/right columns. Keep dashboard footer rendering in `src/tui/render-model.ts` distinct from managed-session tmux chrome in `src/core/tmux.ts`.
+- Keep rendering pure/testable and ANSI width-safe through theme/layout helpers; reserve width for right-side badges/counts in left/right columns. Archived collapse/disclosure stays ephemeral TUI state and must remain a synthetic non-session target so session actions cannot reach a stale real selection. Keep dashboard footer rendering in `src/tui/render-model.ts` distinct from managed-session tmux chrome in `src/core/tmux.ts`.
 - Route dialogs through `SessionDialog` in `src/tui/dialog.ts` and the small `src/tui/*-dialog.ts` modules. Use `src/tui/text-input.ts` and `src/tui/form.ts`/`renderForm()` for editable inputs instead of one-off state.
 - For themed footers, prefer Pi `statusLineBg` before `border` so Catppuccin border/accent colors do not become unreadable full-bar backgrounds.
 
@@ -47,7 +47,7 @@
 - Delete sessions through `src/app/delete-session.ts`, pause any active refresh loop first, and never delete Pi conversation/session files.
 - Normal delete must not remove hub-owned worktree directories; finish/discard through `src/app/worktree-session.ts`.
 - For worktree finish/discard, preflight Git cleanliness before stopping parent/subagent tmux sessions, process additional repos before the primary repo, and keep workspace `.pi` pointed at the source repo.
-- Archive pruning is dashboard-only: prune only after every row in the session/subagent cascade is confirmed missing from tmux; keep rows when tmux presence is unknown.
+- Archive pruning is dashboard-only and starts after seven days: prune only after every row in the parent/subagent cascade is confirmed missing from tmux; keep rows when tmux presence is unknown.
 
 ## Compatibility Metadata
 
