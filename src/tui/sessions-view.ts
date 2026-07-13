@@ -766,7 +766,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     heading("Sections and views"),
     "  Active · Backlog · Archived keep project/group headers inside each section",
     "  Archived rows auto-remove after 72h once their tmux session is gone",
-    "  Stages view lanes active sessions by workflow step (via the workflow-indicator extension);",
+    "  Stages view lanes active sessions by workflow step (via the workflow-runtime extension);",
     "  backlog/archived rows are summarized and K/J reorder is groups-view only",
     "",
     heading("Status legend"),

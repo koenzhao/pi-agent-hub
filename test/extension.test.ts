@@ -140,18 +140,18 @@ test("piAgentHubExtension records the active Pi theme in heartbeat", async () =>
   }
 });
 
-test("piAgentHubExtension bridges workflow-indicator entries into heartbeat", async () => {
+test("piAgentHubExtension bridges workflow-runtime entries into heartbeat", async () => {
   const branches: Record<string, unknown[]> = {
     "latest wins": [
-      { type: "custom", customType: "workflow-indicator", data: { activeStep: "prime", ticketId: "auth-001" } },
+      { type: "custom", customType: "workflow-runtime", data: { activeStep: "prime", ticketId: "auth-001" } },
       { type: "message" },
-      { type: "custom", customType: "workflow-indicator", data: { activeStep: "execute", ticketId: "auth-002" } },
+      { type: "custom", customType: "workflow-runtime", data: { activeStep: "execute", ticketId: "auth-002" } },
     ],
     cleared: [
-      { type: "custom", customType: "workflow-indicator", data: { activeStep: "execute" } },
-      { type: "custom", customType: "workflow-indicator", data: {} },
+      { type: "custom", customType: "workflow-runtime", data: { activeStep: "execute" } },
+      { type: "custom", customType: "workflow-runtime", data: {} },
     ],
-    malformed: [{ type: "custom", customType: "workflow-indicator", data: { activeStep: "unknown-step" } }],
+    malformed: [{ type: "custom", customType: "workflow-runtime", data: { activeStep: "unknown-step" } }],
     "no entries": [{ type: "message" }],
   };
   const expected: Record<string, { activeIndex: number; ticketId?: string } | undefined> = {

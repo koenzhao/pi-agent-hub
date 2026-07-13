@@ -314,7 +314,7 @@ function compactDetails(session: RenderSession, width: number, styles: LayoutSty
     lines.push(truncate([`agent ${session.agentName ?? "subagent"}`, session.taskPreview ? `task ${session.taskPreview}` : ""].filter(Boolean).join(" · "), width));
   } else {
     const parts = [truncatePath(session.cwd, Math.max(8, Math.floor(width * 0.6)))];
-    if (session.worktreeBranch) parts.push(`wt ${session.worktreeBranch}`);
+    if (session.worktreeBranch) parts.push(`⎇ ${session.worktreeBranch}`);
     if (session.repoCount > 1) parts.push(`${session.repoCount} repos`);
     lines.push(truncate(parts.join(" · "), width));
   }
@@ -430,7 +430,7 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const title = session.status === "stopped" ? styles.dim(titleText) : titleText;
   const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, focusedSlot, styles);
   const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
-  const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" [wt]") : "";
+  const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
   const archiveBadge = session.archiveExpiresIn ? styles.dim(` [exp ${session.archiveExpiresIn}]`) : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
   const text = `${prefix} ${indent}${symbol} ${sidePaneMarker}${title}${repoBadge}${worktreeBadge}${archiveBadge}`;
