@@ -225,12 +225,11 @@ export async function runTui(): Promise<void> {
       if (hasSidePanes) await setPaneTitle(ownPane, "");
     }
     if (ownPane) await reconcileSidebarReturnBinding({ desired: hasSidePanes, dashboardSession: DASHBOARD_SESSION, sidebarPane: ownPane });
-    for (const tmuxSession of sidePaneTmuxSessions) {
-      if (!next.includes(tmuxSession)) await setSessionStatusBarVisible({ name: tmuxSession, visible: true });
-    }
-    for (const tmuxSession of next) {
-      if (!sidePaneTmuxSessions.includes(tmuxSession)) await setSessionStatusBarVisible({ name: tmuxSession, visible: false });
-    }
+    await syncSidePaneSessionFooters(
+      sidePaneTmuxSessions,
+      next,
+      (name, visible) => setSessionStatusBarVisible({ name, visible }),
+    );
     sidePaneTmuxSessions = next;
     sidePaneFocusedSlot = nextFocusedSlot;
     return changed;
@@ -645,6 +644,19 @@ export function startSidePanePresenceRefreshLoop(options: {
     clearInterval(timer);
     await inFlight;
   };
+}
+
+export async function syncSidePaneSessionFooters(
+  previous: readonly string[],
+  next: readonly string[],
+  setVisible: (name: string, visible: boolean) => Promise<void>,
+): Promise<void> {
+  for (const name of previous) {
+    if (!next.includes(name)) await setVisible(name, true).catch(() => {});
+  }
+  for (const name of next) {
+    if (!previous.includes(name)) await setVisible(name, false).catch(() => {});
+  }
 }
 
 function sameStringArrays(a: readonly string[], b: readonly string[]): boolean {

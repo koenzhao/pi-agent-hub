@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId, restartAllTargets, startSidePanePresenceRefreshLoop } from "../src/app/run-tui.js";
+import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId, restartAllTargets, startSidePanePresenceRefreshLoop, syncSidePaneSessionFooters } from "../src/app/run-tui.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function deferred<T = void>() {
@@ -110,6 +110,23 @@ test("registry mutator resumes and propagates action failures", async () => {
   }), /boom/);
 
   assert.deepEqual(events, ["pause", "action", "resume"]);
+});
+
+test("side pane footer sync tolerates a session disappearing during refresh", async () => {
+  const calls: [string, boolean][] = [];
+  await syncSidePaneSessionFooters(
+    ["pi-agent-hub-current", "pi-agent-hub-stale"],
+    ["pi-agent-hub-current", "pi-agent-hub-next"],
+    async (name, visible) => {
+      calls.push([name, visible]);
+      if (name === "pi-agent-hub-stale") throw new Error("can't find session");
+    },
+  );
+
+  assert.deepEqual(calls, [
+    ["pi-agent-hub-stale", true],
+    ["pi-agent-hub-next", false],
+  ]);
 });
 
 test("side pane presence loop stop drains an in-flight refresh", async () => {
