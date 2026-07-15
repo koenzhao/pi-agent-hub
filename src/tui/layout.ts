@@ -472,10 +472,13 @@ export function renderForm(spec: FormSpec, width: number, theme?: SessionsTheme)
       body.push(styles.muted(field.section));
       previousSection = field.section;
     }
-    const focused = field.key === spec.focus && !field.readonly;
+    const focused = field.key === spec.focus;
     const caret = focused ? styles.accent("▎") : " ";
     const label = focused ? field.label : styles.muted(field.label);
-    const rawValue = focused ? styles.accent(renderCursorValue(field.value, field.cursor, valueWidth, field.truncate)) : truncateValue(field.value, valueWidth, field.truncate);
+    const focusedValue = field.readonly
+      ? truncateValue(field.value, valueWidth, field.truncate)
+      : renderCursorValue(field.value, field.cursor, valueWidth, field.truncate);
+    const rawValue = focused ? styles.accent(focusedValue) : truncateValue(field.value, valueWidth, field.truncate);
     const value = field.readonly && !focused ? styles.dim(rawValue) : rawValue;
     body.push(`${caret} ${pad(label, labelWidth)}  ${value}`);
     const hintText = field.error ? styles.error(field.error) : (showHints && field.hint ? styles.dim(field.hint) : "");

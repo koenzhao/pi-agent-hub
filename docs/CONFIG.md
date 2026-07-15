@@ -129,7 +129,7 @@ Supported key spelling includes plain single characters, `C-x`/`ctrl+x`, and `M-
 
 ## New-session worktree default
 
-Set `session.worktreeDefault` to `true` to open every new-session form in worktree mode. `Ctrl+T` still toggles worktree mode off for an individual session. Omitting or unsetting the option preserves the normal-session default.
+New-session forms normally open with worktree mode off. Set `session.worktreeDefault` to `true` only to opt into worktree mode for every new form. In the form, focus the Worktree row and press `Space`, or use `Ctrl+T` from any field, to toggle it for an individual session. Omitting, unsetting, or setting the option to `false` preserves the normal-session default.
 
 ```bash
 pi-hub config set worktree-default true

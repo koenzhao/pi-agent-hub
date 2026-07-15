@@ -63,7 +63,7 @@ function handleNewFormInput(dialog: NewSessionDialog, data: string, ctx: DialogC
     ctx.runAction(() => ctx.actions.createSession?.(submission(result.state)), "creating session...");
     return undefined;
   }
-  if (matchesKey(data, Key.ctrl("t"))) {
+  if (matchesKey(data, Key.ctrl("t")) || (form.focus === "worktree" && data === " ")) {
     ctx.setMessage(undefined);
     return { ...dialog, form: toggleWorktree(form) };
   }
@@ -101,27 +101,7 @@ function applyRepoPickerSelection(dialog: RepoPickerDialog): NewSessionDialog | 
 }
 
 function newFormFields(state: NewFormState) {
-  const fields = [];
-  for (const key of state.order) {
-    if (key === "branch") fields.push(worktreeStatusField(state));
-    if (key === "group" && !state.worktreeEnabled) fields.push(worktreeStatusField(state));
-    fields.push(state.fields[key]);
-  }
-  return fields;
-}
-
-function worktreeStatusField(state: NewFormState) {
-  return {
-    key: "worktree",
-    label: "worktree",
-    value: state.worktreeEnabled ? worktreeStatusValue(state) : "off",
-    readonly: true,
-  };
-}
-
-function worktreeStatusValue(state: NewFormState): string {
-  const repos = state.order.filter((key) => key.startsWith("repo:") && state.fields[key]?.value.trim()).length;
-  return repos > 1 ? `on · ${repos} repos` : "on";
+  return state.order.map((key) => state.fields[key]);
 }
 
 function newFormFooter(state: NewFormState): string {
@@ -132,6 +112,7 @@ function newFormFooter(state: NewFormState): string {
     parts.push("alt-a add repo");
     if (state.focus !== "repo:0") parts.push("alt-x remove");
   }
+  if (state.focus === "worktree") parts.push("space toggle");
   parts.push("ctrl-t worktree", "enter create", "esc cancel");
   return parts.join(" · ");
 }

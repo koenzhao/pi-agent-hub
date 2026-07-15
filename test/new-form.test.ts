@@ -10,7 +10,8 @@ test("new form defaults group to primary cwd basename and title to random slug",
 
   assert.equal(state.fields.group.value, "api");
   assert.match(state.fields.title.value, /^[a-z]+-[a-z]+$/);
-  assert.deepEqual(state.order, ["repo:0", "group", "title"]);
+  assert.equal(state.worktreeEnabled, false);
+  assert.deepEqual(state.order, ["repo:0", "worktree", "group", "title"]);
 });
 
 test("new form can default to worktree mode", () => {
@@ -18,7 +19,7 @@ test("new form can default to worktree mode", () => {
 
   assert.equal(state.worktreeEnabled, true);
   assert.equal(state.fields.branch.value, "black-aleph");
-  assert.deepEqual(state.order, ["repo:0", "branch", "group"]);
+  assert.deepEqual(state.order, ["repo:0", "worktree", "branch", "group"]);
   assert.deepEqual(submission(state), { cwd: "/repo/api", group: "api", title: "black-aleph", worktree: { branch: "black-aleph" } });
 });
 
@@ -39,11 +40,11 @@ test("new form adds removes and submits dynamic repo rows", () => {
   state = addRepo(state);
   state = typeText(state, "/repo/shared");
 
-  assert.deepEqual(state.order, ["repo:0", "repo:1", "repo:2", "group", "title"]);
+  assert.deepEqual(state.order, ["repo:0", "repo:1", "repo:2", "worktree", "group", "title"]);
   assert.deepEqual(submission(state), { cwd: "/repo/api", group: "api", title: "api", additionalCwds: ["/repo/web", "/repo/shared"] });
 
   state = removeFocusedRepo(state);
-  assert.deepEqual(state.order, ["repo:0", "repo:1", "group", "title"]);
+  assert.deepEqual(state.order, ["repo:0", "repo:1", "worktree", "group", "title"]);
   assert.deepEqual(submission(state), { cwd: "/repo/api", group: "api", title: "api", additionalCwds: ["/repo/web"] });
 });
 
