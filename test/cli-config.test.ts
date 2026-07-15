@@ -19,6 +19,23 @@ async function runCli(args: string[], env: NodeJS.ProcessEnv): Promise<{ stdout:
   return { stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), code };
 }
 
+test("pi-hub config manages worktree-default", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-cli-config-"));
+  const env = { PI_AGENT_HUB_DIR: root };
+
+  const set = await runCli(["config", "set", "worktree-default", "true"], env);
+  assert.equal(set.code, 0, set.stderr);
+  assert.match(set.stdout, /enabled worktree-default/);
+
+  const get = await runCli(["config", "get"], env);
+  assert.equal(get.code, 0, get.stderr);
+  assert.equal(JSON.parse(get.stdout).session.worktreeDefault, true);
+
+  const unset = await runCli(["config", "unset", "worktree-default"], env);
+  assert.equal(unset.code, 0, unset.stderr);
+  assert.match(unset.stdout, /unset worktree-default/);
+});
+
 test("pi-hub config manages session-prelude", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-cli-config-"));
   const env = { PI_AGENT_HUB_DIR: root };

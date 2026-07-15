@@ -31,6 +31,27 @@ test("refreshPreview skips sessions with error status", async () => {
   assert.equal(controller.snapshot().preview, "");
 });
 
+test("selection changes clear stale preview and ignore late captures", async () => {
+  let resolveCapture!: (preview: string) => void;
+  const capture = new Promise<string>((resolve) => { resolveCapture = resolve; });
+  let captures = 0;
+  const controller = new SessionsController({
+    version: 1,
+    sessions: [session("idle", { id: "api" }), session("idle", { id: "docs" })],
+  }, async () => ++captures === 1 ? "api preview" : capture);
+
+  await controller.refreshPreview();
+  assert.equal(controller.snapshot().preview, "api preview");
+  const refreshing = controller.refreshPreview();
+  controller.move(1);
+
+  assert.equal(controller.snapshot().selectedId, "docs");
+  assert.equal(controller.snapshot().preview, "");
+  resolveCapture("late api preview");
+  await refreshing;
+  assert.equal(controller.snapshot().preview, "");
+});
+
 test("movement follows stable registry order within groups", () => {
   const controller = new SessionsController({
     version: 1,

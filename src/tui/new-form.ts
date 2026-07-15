@@ -4,10 +4,11 @@ import { charLength, editKey } from "./text-input.js";
 import { createForm, editField, moveFocus as moveFormFocus, setFocus as setFormFocus, setValue, type FormField, type FormState } from "./form.js";
 
 export type RepoFieldKey = `repo:${number}`;
-export type FieldKey = RepoFieldKey | "branch" | "group" | "title";
+export type FieldKey = RepoFieldKey | "worktree" | "branch" | "group" | "title";
 
 export interface Field extends FormField<FieldKey> {
   suggestions?: string[];
+  readonly?: boolean;
   cycleIndex?: number;
 }
 
@@ -22,6 +23,7 @@ export interface NewFormContext {
   group?: string;
   knownCwds?: string[];
   additionalCwds?: string[];
+  worktreeDefault?: boolean;
   titleGenerator?: () => string;
 }
 
@@ -34,6 +36,7 @@ export function setFocus(state: NewFormState, key: FieldKey): NewFormState {
 }
 
 export function editNewForm(state: NewFormState, data: string): NewFormState | undefined {
+  if (state.focus === "worktree") return undefined;
   const key = editKey(data);
   if (!key) return undefined;
   const edited = editField(state, data) as NewFormState | undefined;
@@ -47,12 +50,13 @@ export function createNewForm(ctx: NewFormContext): NewFormState {
   const contextGroup = ctx.group?.trim();
   const group = contextGroup || projectBasename(cwd) || "default";
   const title = ctx.titleGenerator?.() ?? randomSessionTitle();
-  const fields = buildFields([cwd, ...(ctx.additionalCwds ?? [])], group, title, knownCwds, false);
+  const worktreeEnabled = ctx.worktreeDefault ?? false;
+  const fields = buildFields([cwd, ...(ctx.additionalCwds ?? [])], group, title, knownCwds, worktreeEnabled);
   return {
     ...createForm<FieldKey, Field>(fields, "repo:0"),
     groupTouched: false,
     knownCwds,
-    worktreeEnabled: false,
+    worktreeEnabled,
   };
 }
 
@@ -95,9 +99,10 @@ export function toggleWorktree(state: NewFormState): NewFormState {
   const branch = state.fields.branch?.value ?? "";
   const title = state.fields.title?.value ?? branch;
   const nextEnabled = !state.worktreeEnabled;
+  const focus = state.focus === "worktree" ? "worktree" : nextEnabled ? "branch" : "worktree";
   return {
     ...state,
-    ...createForm<FieldKey, Field>(buildFields(repos, state.fields.group.value, title, state.knownCwds, nextEnabled, branch), nextEnabled ? "branch" : "repo:0"),
+    ...createForm<FieldKey, Field>(buildFields(repos, state.fields.group.value, title, state.knownCwds, nextEnabled, branch), focus),
     worktreeEnabled: nextEnabled,
   };
 }
@@ -191,8 +196,16 @@ function rebuildRepoFields(state: NewFormState, repoValues: string[], focus: Fie
 
 function buildFields(repoValues: string[], group: string, title: string, suggestions: string[], worktreeEnabled: boolean, branch = ""): Field[] {
   const repos = repoValues.length ? repoValues : [""];
+  const repoCount = repos.filter((repo) => repo.trim()).length;
   return [
     ...repos.map((value, index) => repoField(index, value, suggestions)),
+    {
+      key: "worktree" as const,
+      label: "worktree",
+      value: worktreeEnabled ? `[x] on${repoCount > 1 ? ` · ${repoCount} repos` : ""}` : "[ ] off",
+      hint: "space toggle · create an isolated Git branch",
+      readonly: true,
+    },
     ...(worktreeEnabled ? [{ key: "branch" as const, label: "branch", value: branch || title, hint: repos.length > 1 ? "same new branch in every repo" : "new local branch and session title" }] : []),
     { key: "group" as const, label: "group", value: group, hint: "existing or new label" },
     ...(worktreeEnabled ? [] : [{ key: "title" as const, label: "title", value: title, hint: "display title" }]),

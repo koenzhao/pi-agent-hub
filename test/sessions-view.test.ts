@@ -366,6 +366,7 @@ test("side pane presence snapshots render numbered slot glyphs", () => {
   const rendered = stripAnsi(view.render(100).join("\n"));
   assert.match(rendered, /○ ◫2 api/);
   assert.match(rendered, /○ ◫1 docs/);
+  assert.doesNotMatch(rendered, /── preview/);
 });
 
 test("side pane presence snapshots update without registry mutation", () => {
@@ -373,9 +374,13 @@ test("side pane presence snapshots update without registry mutation", () => {
   let sidePaneSessionIds = new Map<string, number>();
   const view = new SessionsView(controller, () => {}, { sidePaneSessionIds: () => sidePaneSessionIds });
 
-  assert.doesNotMatch(stripAnsi(view.render(100).join("\n")), /◫/);
+  const withoutPanels = stripAnsi(view.render(100).join("\n"));
+  assert.doesNotMatch(withoutPanels, /◫/);
+  assert.match(withoutPanels, /── preview/);
   sidePaneSessionIds = new Map([["api", 1]]);
-  assert.match(stripAnsi(view.render(100).join("\n")), /○ ◫1 api/);
+  const withPanel = stripAnsi(view.render(100).join("\n"));
+  assert.match(withPanel, /○ ◫1 api/);
+  assert.doesNotMatch(withPanel, /── preview/);
 });
 
 test("number keys assign the selected live session to matching panel slots", () => {
@@ -641,6 +646,24 @@ test("single mouse click selects without opening", () => {
 
   assert.equal(controller.snapshot().selectedId, "docs");
   assert.deepEqual(switched, []);
+});
+
+test("keyboard and mouse selection changes request an immediate preview", () => {
+  let requests = 0;
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    selectionChanged: () => { requests += 1; },
+  });
+
+  view.handleInput("j");
+  const rendered = view.render(100);
+  view.handleInput(mousePressAtLine(rowIndexFor(rendered, "api")));
+  view.handleInput("/");
+  view.handleInput("d");
+  view.handleInput("o");
+
+  assert.equal(controller.snapshot().selectedId, "docs");
+  assert.equal(requests, 3);
 });
 
 test("double-click opens the clicked live session", () => {
@@ -1246,7 +1269,7 @@ test("new form submits with basename group and random title on enter", () => {
   assert.match(rendered, /★ primary/);
   assert.doesNotMatch(rendered, /repo 2/);
   assert.doesNotMatch(rendered, /repo 3/);
-  assert.match(rendered, /worktree\s+off/);
+  assert.match(rendered, /worktree\s+\[ \] off/);
   assert.match(rendered, /group/);
   assert.match(rendered, /title/);
   assert.match(rendered, /black-aleph/);
@@ -1263,9 +1286,25 @@ test("new form tab cycles focus and edits title", () => {
   view.handleInput("n");
   view.handleInput("\t");
   view.handleInput("\t");
+  view.handleInput("\t");
   for (const char of "-prod") view.handleInput(char);
   view.handleInput("\r");
   assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api-prod" });
+});
+
+test("new form worktree row toggles with space", () => {
+  const view = new SessionsView(new SessionsController(), () => {}, {
+    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+  });
+  view.handleInput("n");
+  view.handleInput("\t");
+
+  assert.match(view.render(120).join("\n"), /▎ worktree\s+\[ \] off/);
+
+  view.handleInput(" ");
+
+  assert.match(view.render(120).join("\n"), /▎ worktree\s+\[x\] on/);
+  assert.match(view.render(120).join("\n"), /space toggle/);
 });
 
 test("new form worktree toggle uses branch as session title", () => {
@@ -1277,7 +1316,7 @@ test("new form worktree toggle uses branch as session title", () => {
   view.handleInput("n");
   view.handleInput("\u0014");
   const rendered = view.render(120).join("\n");
-  assert.match(rendered, /worktree\s+on/);
+  assert.match(rendered, /worktree\s+\[x\] on/);
   assert.match(rendered, /branch/);
   assert.doesNotMatch(rendered, /\n│▎?\s+title\s/);
   for (let i = 0; i < "api".length; i += 1) view.handleInput("\u007f");
@@ -1297,7 +1336,7 @@ test("new form worktree toggle can turn off without crashing", () => {
   view.handleInput("\u0014");
   view.handleInput("\u0014");
   const rendered = view.render(120).join("\n");
-  assert.match(rendered, /worktree\s+off/);
+  assert.match(rendered, /worktree\s+\[ \] off/);
   assert.match(rendered, /title/);
   view.handleInput("\r");
 
@@ -1553,6 +1592,7 @@ test("new form printable a and x edit text instead of adding or removing repos",
   view.handleInput("n");
   view.handleInput("\t");
   view.handleInput("\t");
+  view.handleInput("\t");
   view.handleInput("x");
   view.handleInput("a");
   view.handleInput("\r");
@@ -1567,6 +1607,7 @@ test("new form preserves user-edited title across cwd changes", () => {
     newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
   });
   view.handleInput("n");
+  view.handleInput("\t");
   view.handleInput("\t");
   view.handleInput("\t");
   for (let i = 0; i < "api".length; i += 1) view.handleInput("\u007f");
@@ -1584,6 +1625,7 @@ test("new form preserves user-edited group across cwd changes", () => {
     newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
   });
   view.handleInput("n");
+  view.handleInput("\t");
   view.handleInput("\t");
   for (let i = 0; i < "api".length; i += 1) view.handleInput("\u007f");
   for (const char of "backend") view.handleInput(char);

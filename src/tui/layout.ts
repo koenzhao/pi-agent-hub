@@ -325,7 +325,7 @@ function compactDetails(session: RenderSession, width: number, styles: LayoutSty
     lines.push(truncate([`agent ${session.agentName ?? "subagent"}`, session.taskPreview ? `task ${session.taskPreview}` : ""].filter(Boolean).join(" · "), width));
   } else {
     const parts = [truncatePath(session.cwd, Math.max(8, Math.floor(width * 0.6)))];
-    if (session.worktreeBranch) parts.push(`wt ${session.worktreeBranch}`);
+    if (session.worktreeBranch) parts.push(`⎇ ${session.worktreeBranch}`);
     if (session.repoCount > 1) parts.push(`${session.repoCount} repos`);
     lines.push(truncate(parts.join(" · "), width));
   }
@@ -446,7 +446,7 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const title = session.status === "stopped" ? styles.dim(titleText) : titleText;
   const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, focusedSlot, styles);
   const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
-  const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" [wt]") : "";
+  const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
   const text = `${prefix} ${indent}${symbol} ${sidePaneMarker}${title}${repoBadge}${worktreeBadge}`;
   const right = rowRightAdornment(session, styles, stages, width);
@@ -486,10 +486,13 @@ export function renderForm(spec: FormSpec, width: number, theme?: SessionsTheme)
       body.push(styles.muted(field.section));
       previousSection = field.section;
     }
-    const focused = field.key === spec.focus && !field.readonly;
+    const focused = field.key === spec.focus;
     const caret = focused ? styles.accent("▎") : " ";
     const label = focused ? field.label : styles.muted(field.label);
-    const rawValue = focused ? styles.accent(renderCursorValue(field.value, field.cursor, valueWidth, field.truncate)) : truncateValue(field.value, valueWidth, field.truncate);
+    const focusedValue = field.readonly
+      ? truncateValue(field.value, valueWidth, field.truncate)
+      : renderCursorValue(field.value, field.cursor, valueWidth, field.truncate);
+    const rawValue = focused ? styles.accent(focusedValue) : truncateValue(field.value, valueWidth, field.truncate);
     const value = field.readonly && !focused ? styles.dim(rawValue) : rawValue;
     body.push(`${caret} ${pad(label, labelWidth)}  ${value}`);
     const hintText = field.error ? styles.error(field.error) : (showHints && field.hint ? styles.dim(field.hint) : "");

@@ -9,12 +9,12 @@ import { loadManagedSessionTheme, loadSessionsTheme, type SessionsTheme } from "
 import { loadProjectSkillsState, setProjectSkills } from "../skills/attach.js";
 import { listSkillPool } from "../skills/catalog.js";
 import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mcp/config.js";
-import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
+import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { tmuxChromeFromTheme } from "../core/chrome.js";
 import { sessionSection } from "../core/session-bucket.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
-import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resizePaneWidth, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setDashboardStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, switchClientWithReturn } from "../core/tmux.js";
+import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resizePaneWidth, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setSessionStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, switchClientWithReturn } from "../core/tmux.js";
 import { closeSidePaneShowing, closeSidePanes, focusSidePaneSlot as focusPanel, resetSidePane, sidebarRepairWidth, sidePaneStatus, toggleSidePaneSlot, type SidePaneResult } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
@@ -24,7 +24,7 @@ import { discardWorktreeSession, finishWorktreeSession } from "./worktree-sessio
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { ManagedSession } from "../core/types.js";
 
-export function buildNewFormContext(input: { cwd: string; sessions: ManagedSession[]; selected?: ManagedSession; historyCwds?: string[] }): NewFormContext {
+export function buildNewFormContext(input: { cwd: string; sessions: ManagedSession[]; selected?: ManagedSession; historyCwds?: string[]; worktreeDefault?: boolean }): NewFormContext {
   const selectedCwd = input.selected ? newSessionCwd(input.selected) : input.cwd;
   const selectedExtraCwds = input.selected ? newSessionAdditionalCwds(input.selected) : [];
   const worktreePaths = new Set(input.sessions.flatMap((session) => sessionWorktrees(session).map((worktree) => worktree.path)));
@@ -40,6 +40,7 @@ export function buildNewFormContext(input: { cwd: string; sessions: ManagedSessi
   return {
     cwd: selectedCwd,
     group: input.selected?.group,
+    ...(input.worktreeDefault !== undefined ? { worktreeDefault: input.worktreeDefault } : {}),
     knownCwds,
     ...(selectedExtraCwds.length ? { additionalCwds: selectedExtraCwds } : {}),
   };
@@ -139,14 +140,14 @@ export async function runTui(): Promise<void> {
   let dashboardStatusVisible = true;
   const applyDashboardStatusVisibility = async (visible: boolean, force = false) => {
     if (!process.env.TMUX || (!force && dashboardStatusVisible === visible)) return;
-    await setDashboardStatusBarVisible({ name: DASHBOARD_SESSION, visible });
+    await setSessionStatusBarVisible({ name: DASHBOARD_SESSION, visible });
     dashboardStatusVisible = visible;
   };
   const syncDashboardChrome = (nextTheme: SessionsTheme) => {
     if (!process.env.TMUX) return;
     void configureDashboardStatusBar({ name: DASHBOARD_SESSION, cwd, theme: nextTheme, visible: dashboardStatusVisible }).catch(() => {});
   };
-  const applyManagedSessionTheme = async (session: ManagedSession) => {
+  const applyManagedSessionTheme = async (session: ManagedSession, visible = !sidePaneTmuxSessions.includes(session.tmuxSession)) => {
     pinDashboardThemeSession(session);
     const sessionTheme = await loadManagedSessionTheme(session);
     currentTheme = sessionTheme;
@@ -154,15 +155,21 @@ export async function runTui(): Promise<void> {
     syncDashboardChrome(sessionTheme);
     tui.invalidate();
     tui.requestRender();
-    await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: sessionTheme });
+    await configureManagedSessionStatusBar({
+      name: session.tmuxSession,
+      title: session.title,
+      cwd: session.cwd,
+      theme: sessionTheme,
+      visible,
+    });
     const ownPane = process.env.TMUX_PANE;
     if (ownPane && sidePaneTmuxSessions.length) await setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
   };
   syncDashboardChrome(theme);
-  void syncManagedSessionStatusBars().catch(() => {});
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal, false);
   const dashboardShortcuts = await effectiveDashboardShortcuts();
+  const worktreeDefault = await effectiveWorktreeDefault();
   let skillPoolDirs = await effectiveSkillPoolDirs();
   let skillPool = await listSkillPool();
   const mcpCatalog = await loadMcpCatalog();
@@ -218,6 +225,11 @@ export async function runTui(): Promise<void> {
       if (hasSidePanes) await setPaneTitle(ownPane, "");
     }
     if (ownPane) await reconcileSidebarReturnBinding({ desired: hasSidePanes, dashboardSession: DASHBOARD_SESSION, sidebarPane: ownPane });
+    await syncSidePaneSessionFooters(
+      sidePaneTmuxSessions,
+      next,
+      (name, visible) => setSessionStatusBarVisible({ name, visible }),
+    );
     sidePaneTmuxSessions = next;
     sidePaneFocusedSlot = nextFocusedSlot;
     return changed;
@@ -230,6 +242,7 @@ export async function runTui(): Promise<void> {
   const refreshSidePanePresenceSerialized = () => serializeSidePaneOperation(
     () => stopped ? Promise.resolve(false) : refreshSidePanePresence(),
   );
+  void serializeSidePaneOperation(() => syncManagedSessionStatusBars(new Set(sidePaneTmuxSessions))).catch(() => {});
   const shortcutTimers = new Set<NodeJS.Timeout>();
   const pauseSidePanePresenceLoop = () => {
     if (sidePanePresenceDrain) return sidePanePresenceDrain;
@@ -267,6 +280,9 @@ export async function runTui(): Promise<void> {
       .then(() => removeSidebarReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {}));
     if (ownPane) {
       void restoreBindings()
+        .then(async () => {
+          for (const tmuxSession of sidePaneTmuxSessions) await setSessionStatusBarVisible({ name: tmuxSession, visible: true }).catch(() => {});
+        })
         .then(() => closeSidePanes({ ownPane }).catch(() => {}))
         .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
         .then(() => setWindowPaneBorderStatus(ownPane, false).catch(() => {}))
@@ -374,7 +390,7 @@ export async function runTui(): Promise<void> {
           if (stopped) return;
           const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
           const ownPane = process.env.TMUX_PANE;
-          if (session) await applyManagedSessionTheme(session);
+          if (session) await applyManagedSessionTheme(session, true);
           if (stopped) return;
           await removeSidebarReturnBinding({ onlyOwnerPid: process.pid });
           await switchClientWithReturn({
@@ -411,6 +427,11 @@ export async function runTui(): Promise<void> {
       return result;
     },
     sidePaneFocusedSlot: () => sidePaneFocusedSlot,
+    selectionChanged() {
+      void controller.refreshPreview()
+        .then(() => { if (!stopped) tui.requestRender(); })
+        .catch(() => {});
+    },
     restart(sessionId) {
       return mutateRegistry(() => restartManagedSession(sessionId));
     },
@@ -498,6 +519,7 @@ export async function runTui(): Promise<void> {
         sessions: controller.snapshot().registry.sessions,
         selected: controller.selected(),
         historyCwds,
+        worktreeDefault,
       });
     },
     async skills() {
@@ -550,7 +572,7 @@ export async function runTui(): Promise<void> {
       syncDashboardChrome(nextTheme);
       const ownPane = process.env.TMUX_PANE;
       if (ownPane && sidePaneTmuxSessions.length) void setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
-      void syncManagedSessionStatusBars().catch(() => {});
+      void serializeSidePaneOperation(() => syncManagedSessionStatusBars(new Set(sidePaneTmuxSessions))).catch(() => {});
       tui.invalidate();
       tui.requestRender();
     },
@@ -622,6 +644,19 @@ export function startSidePanePresenceRefreshLoop(options: {
     clearInterval(timer);
     await inFlight;
   };
+}
+
+export async function syncSidePaneSessionFooters(
+  previous: readonly string[],
+  next: readonly string[],
+  setVisible: (name: string, visible: boolean) => Promise<void>,
+): Promise<void> {
+  for (const name of previous) {
+    if (!next.includes(name)) await setVisible(name, true).catch(() => {});
+  }
+  for (const name of next) {
+    if (!previous.includes(name)) await setVisible(name, false).catch(() => {});
+  }
 }
 
 function sameStringArrays(a: readonly string[], b: readonly string[]): boolean {

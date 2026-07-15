@@ -5,7 +5,7 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 ## Runtime state
 
 - Global state: `PI_AGENT_HUB_DIR` or `<PI_CODING_AGENT_DIR>/pi-agent-hub` or `~/.pi/agent/pi-agent-hub`
-- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, dashboard theme anchor, dashboard shortcuts)
+- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, `session.worktreeDefault`, dashboard theme anchor, dashboard shortcuts)
 - Registry: `registry.json`
 - Heartbeats: `heartbeats/<session-id>.json`
 - Optional session metadata: `session-metadata/<session-id>.json`
@@ -51,10 +51,10 @@ Display rules:
 
 ### Workflow heartbeat bridge
 
-Hub's extension can also surface workflow-stage state from the optional `workflow-indicator` extension (from the `rules` package). On every heartbeat tick it reads the Pi session branch via `sessionManager.getBranch()` and takes the latest custom entry of this shape:
+Hub's extension can also surface workflow-stage state from the optional `workflow-runtime` extension (from the `rules` package). On every heartbeat tick it reads the Pi session branch via `sessionManager.getBranch()` and takes the latest custom entry of this shape:
 
 ```json
-{ "type": "custom", "customType": "workflow-indicator", "data": { "activeStep": "execute", "ticketId": "auth-003" } }
+{ "type": "custom", "customType": "workflow-runtime", "data": { "activeStep": "execute", "ticketId": "auth-003" } }
 ```
 
 The step vocabulary (`next-feature`, `prime`, `plan-md`, `execute`, `review`, `reflect`, `commit`) is mirrored as `WORKFLOW_STEPS` in `src/extension/index.ts` — that constant is the single sync point of this soft contract. If the entry type or step ids drift, or the Pi version has no `getBranch`, the workflow rail silently disappears; nothing else is affected. The snapshot travels as `workflow` in the heartbeat file and drives the per-session rail and the `v` stage-lane view. Because heartbeats fire on agent start/end and every 15 seconds, a step change can lag in the dashboard by up to ~15 seconds.
@@ -76,7 +76,8 @@ Optional global config lives at `config.json` under the global state directory:
     "catalogPath": "~/.pi/agent/pi-agent-hub/mcp.json"
   },
   "session": {
-    "prelude": "eval \"$(ssh-agent -s)\" >/dev/null"
+    "prelude": "eval \"$(ssh-agent -s)\" >/dev/null",
+    "worktreeDefault": true
   },
   "dashboard": {
     "themeSessionId": "last-entered-session-id",
@@ -98,6 +99,8 @@ Use the CLI for common config changes:
 pi-hub config get
 pi-hub config set session-prelude '<shell snippet>'
 pi-hub config unset session-prelude
+pi-hub config set worktree-default true
+pi-hub config unset worktree-default
 ```
 
 ## Dashboard shortcuts
@@ -123,6 +126,15 @@ pi-hub config unset session-prelude
 Supported key spelling includes plain single characters, `C-x`/`ctrl+x`, and `M-x`/`alt+x`. Built-in dashboard keys and tmux return keys are reserved. `send` must be a single nonblank line; this is not a shell-command or macro facility.
 
 `syncPiNameAfterMs` is a pi-agent-hub-specific post-action for `/session-summary name` workflows: after sending the shortcut, Hub waits that many milliseconds and then syncs the selected dashboard title from Pi's latest `session_info.name`, equivalent to pressing `N` later. `/session-summary name` is not built into Hub; it is provided by the optional [`pi-session-summary`](https://github.com/masta-g3/pi-session-summary) Pi extension.
+
+## New-session worktree default
+
+New-session forms normally open with worktree mode off. Set `session.worktreeDefault` to `true` only to opt into worktree mode for every new form. In the form, focus the Worktree row and press `Space`, or use `Ctrl+T` from any field, to toggle it for an individual session. Omitting, unsetting, or setting the option to `false` preserves the normal-session default.
+
+```bash
+pi-hub config set worktree-default true
+pi-hub config unset worktree-default
+```
 
 ## Session prelude
 
@@ -204,4 +216,4 @@ For the anchored session, a fresh live theme wins. When no fresh live theme is a
 
 While open, the dashboard periodically reloads the effective theme state and updates its ANSI colors when tokens change.
 
-Built-in Pi theme names `light` and `dark` map to compact theme token maps. Missing or invalid custom themes fall back to the built-in dark token map. The dashboard uses `selectedBg` for the selected session row, `accent` for the focused panel border/title and slot cues, and `border` or `dim` for inactive panel borders. Dashboard pane chrome and dashboard/managed-session status bars are refreshed from the same effective theme while the dashboard is running.
+Built-in Pi theme names `light` and `dark` map to compact theme token maps. Missing or invalid custom themes fall back to the built-in dark token map. The dashboard uses `selectedBg` for the selected session row, `accent` for the focused panel border, reverse-color title badge, and slot cues, and `border` or `dim` for inactive panel borders and titles. Dashboard pane chrome and dashboard/managed-session status bars are refreshed from the same effective theme while the dashboard is running.

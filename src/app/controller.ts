@@ -30,9 +30,13 @@ export class SessionsController {
   private sessionMetadata = new Map<string, SessionMetadata>();
   private selectedId: string | undefined;
   private preview = "";
+  private previewRequest = 0;
   private filter: string | undefined;
 
-  constructor(registry: SessionsRegistry = { version: 1, sessions: [] }) {
+  constructor(
+    registry: SessionsRegistry = { version: 1, sessions: [] },
+    private capture: typeof capturePane = capturePane,
+  ) {
     this.registry = registry;
     this.selectedId = visibleSessions(registry.sessions, undefined)[0]?.id;
   }
@@ -77,12 +81,14 @@ export class SessionsController {
   }
 
   async refreshPreview(lines = 160): Promise<void> {
+    const request = ++this.previewRequest;
     const selected = this.selected();
     if (!selected || selected.status === "stopped" || selected.status === "error") {
       this.preview = "";
       return;
     }
-    this.preview = await capturePane(selected.tmuxSession, lines, { preserveStyles: true });
+    const preview = await this.capture(selected.tmuxSession, lines, { preserveStyles: true });
+    if (request === this.previewRequest && this.selectedId === selected.id) this.preview = preview;
   }
 
   snapshot(): SessionsSnapshot {
@@ -101,12 +107,22 @@ export class SessionsController {
     }
     const index = Math.max(0, sessions.findIndex((session) => session.id === this.selectedId));
     const next = (index + delta + sessions.length) % sessions.length;
-    this.selectedId = sessions[next]?.id;
+    const nextId = sessions[next]?.id;
+    if (nextId !== this.selectedId) {
+      this.selectedId = nextId;
+      this.preview = "";
+      this.previewRequest += 1;
+    }
   }
 
   setFilter(filter: string | undefined): void {
+    const previousId = this.selectedId;
     this.filter = filter?.trim() || undefined;
     this.selectedId = keepSelection(this.visibleSessions(), this.selectedId);
+    if (this.selectedId !== previousId) {
+      this.preview = "";
+      this.previewRequest += 1;
+    }
   }
 
   async acknowledgeSelected(now = Date.now()): Promise<void> {
@@ -227,7 +243,11 @@ export class SessionsController {
 
   selectSession(id: string): boolean {
     if (!this.visibleSessions().some((session) => session.id === id)) return false;
-    this.selectedId = id;
+    if (id !== this.selectedId) {
+      this.selectedId = id;
+      this.preview = "";
+      this.previewRequest += 1;
+    }
     return true;
   }
 

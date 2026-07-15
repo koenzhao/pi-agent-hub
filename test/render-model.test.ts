@@ -221,6 +221,12 @@ test("side pane glyphs stay width-safe with workflow rails", () => {
   }
 });
 
+test("wide layout can suppress the built-in preview independently of width", () => {
+  const model = buildRenderModel({ sessions: [session("api", "default", "idle")], width: 120, hidePreview: true });
+  assert.equal(model.showPreview, false);
+  assert.doesNotMatch(renderSessions(model).lines.map(stripAnsi).join("\n"), /── preview/);
+});
+
 test("layout hit map marks only rendered session rows", () => {
   const sessions = [
     session("active", "default", "idle", "active-api"),

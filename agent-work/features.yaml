@@ -394,3 +394,55 @@
   status: pending
   created_at: '2026-07-14'
   plan_file: agent-work/plans/worktree-finish-001.md
+- epic: dashboard-scanability
+  status: done
+  description: Hide managed-session tmux status footers while sessions are shown in
+    dashboard side panels, restoring them for full-session entry, panel removal, dashboard
+    shutdown, and restart reconciliation.
+  priority: 2
+  depends_on:
+  - dashboard-scanability-002
+  discovered_from: dashboard-scanability-002
+  plan_file: agent-work/history/20260714_dashboard-scanability-003_panel_footer_visibility.md
+  id: dashboard-scanability-003
+  created_at: '2026-07-11'
+  completed_at: '2026-07-14'
+- epic: dashboard-scanability
+  status: done
+  description: Make focused pane titles visually distinct from ANSI-rich session content
+    with a reverse-color accent badge, without altering session theme backgrounds.
+  priority: 2
+  depends_on:
+  - dashboard-scanability-002
+  discovered_from: dashboard-scanability-003
+  plan_file: agent-work/history/20260714_dashboard-scanability-004_pane_title_badge.md
+  id: dashboard-scanability-004
+  created_at: '2026-07-11'
+  completed_at: '2026-07-14'
+- epic: dashboard-scanability
+  status: done
+  description: Suppress the built-in dashboard details/preview column whenever dynamic
+    side panels are open, restoring it when the panel set becomes empty.
+  priority: 2
+  depends_on:
+  - split-view-001
+  discovered_from: dashboard-scanability-004
+  plan_file: agent-work/history/20260714_dashboard-scanability-005_suppress_panel_preview.md
+  id: dashboard-scanability-005
+  created_at: '2026-07-12'
+  completed_at: '2026-07-14'
+- epic: dashboard-scanability
+  status: abandoned
+  title: Fade unfocused dashboard panes
+  description: 'User can instantly see which dashboard pane is focused: unfocused
+    panes, including the sidebar, get a subtle theme-derived background recess while
+    the focused pane keeps the crisp terminal background; session themes, colors,
+    and layout stay intact.'
+  steps: []
+  priority: 2
+  depends_on: []
+  discovered_from: null
+  plan_file: agent-work/history/20260712_dashboard-scanability-006_pane_fade_attempt.md
+  references: []
+  created_at: '2026-07-12'
+  id: dashboard-scanability-006

@@ -151,11 +151,17 @@ export async function restartManagedSessionFresh(id: string, titleGenerator = ra
   await startManagedSession(id);
 }
 
-export async function syncManagedSessionStatusBars(): Promise<void> {
+export async function syncManagedSessionStatusBars(hiddenSessions: ReadonlySet<string> = new Set()): Promise<void> {
   const registry = await loadRegistry();
   for (const session of registry.sessions) {
     if (await sessionExists(session.tmuxSession)) {
-      await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await loadManagedSessionTheme(session) });
+      await configureManagedSessionStatusBar({
+        name: session.tmuxSession,
+        title: session.title,
+        cwd: session.cwd,
+        theme: await loadManagedSessionTheme(session),
+        visible: !hiddenSessions.has(session.tmuxSession),
+      });
     }
   }
 }

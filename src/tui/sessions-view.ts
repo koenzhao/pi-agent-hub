@@ -197,6 +197,7 @@ export class SessionsView implements Component {
     const snapshot = this.controller.snapshot();
     const selected = this.controller.selected();
     const now = this.actions.now?.() ?? Date.now();
+    const sidePaneSessionIds = this.actions.sidePaneSessionIds?.();
     const layout = renderSessions(buildRenderModel({
       sessions: snapshot.sessions,
       selectedId: snapshot.selectedId,
@@ -210,10 +211,11 @@ export class SessionsView implements Component {
       selectedSkillCount: selected ? this.actions.skillCount?.(selected.cwd) : undefined,
       viewMode: this.viewMode,
       now,
-      sidePaneSessionIds: this.actions.sidePaneSessionIds?.(),
+      sidePaneSessionIds,
       sidePaneFocusedSlot: this.actions.sidePaneFocusedSlot?.(),
       archiveExpanded: this.archiveExpanded,
       archiveDisclosureSelected: this.archiveDisclosureSelected,
+      hidePreview: Boolean(sidePaneSessionIds?.size),
     }), this.theme);
     this.rowTargets = layout.rowTargets;
     this.listWidth = layout.listWidth;
@@ -232,8 +234,10 @@ export class SessionsView implements Component {
       this.message = `session not found: ${tmuxSession}`;
       return false;
     }
+    const previousId = this.controller.snapshot().selectedId;
     this.controller.setFilter(undefined);
     if (!this.controller.selectSession(target.id)) return false;
+    if (target.id !== previousId) this.actions.selectionChanged?.();
     this.startRenameSessionDialog(tmuxSession);
     return this.dialog?.kind === "form" && this.dialog.purpose === "renameSession";
   }
@@ -427,6 +431,7 @@ export class SessionsView implements Component {
       this.lastMouseClick = undefined;
       return;
     }
+    const previousId = this.controller.snapshot().selectedId;
     if (target.kind === "archive-disclosure") this.archiveDisclosureSelected = true;
     else {
       if (!this.controller.selectSession(target.id)) {
@@ -434,6 +439,7 @@ export class SessionsView implements Component {
         return;
       }
       this.archiveDisclosureSelected = false;
+      if (target.id !== previousId) this.actions.selectionChanged?.();
     }
     const targetKey = target.kind === "session" ? `session:${target.id}` : target.kind;
     const now = this.actions.now?.() ?? Date.now();
@@ -537,16 +543,17 @@ export class SessionsView implements Component {
   private moveSelection(delta: number) {
     const targets = this.visibleListTargets();
     if (!targets.length) return;
-    const selectedId = this.controller.snapshot().selectedId;
+    const previousId = this.controller.snapshot().selectedId;
     const index = Math.max(0, targets.findIndex((target) => target.kind === "archive-disclosure"
       ? this.archiveDisclosureSelected
-      : !this.archiveDisclosureSelected && target.id === selectedId));
+      : !this.archiveDisclosureSelected && target.id === previousId));
     const next = targets[(index + delta + targets.length) % targets.length];
     if (!next) return;
     if (next.kind === "archive-disclosure") this.archiveDisclosureSelected = true;
     else {
       this.archiveDisclosureSelected = false;
       this.controller.selectSession(next.id);
+      if (next.id !== previousId) this.actions.selectionChanged?.();
     }
   }
 
@@ -573,7 +580,7 @@ export class SessionsView implements Component {
     const selectedId = this.controller.snapshot().selectedId;
     if (targets.some((target) => target.kind === "session" && target.id === selectedId)) return;
     const fallback = [...targets].reverse().find((target): target is Extract<SessionListTarget, { kind: "session" }> => target.kind === "session");
-    if (fallback) this.controller.selectSession(fallback.id);
+    if (fallback && this.controller.selectSession(fallback.id) && fallback.id !== selectedId) this.actions.selectionChanged?.();
   }
 
   private toggleArchiveDisclosure() {
@@ -593,14 +600,16 @@ export class SessionsView implements Component {
     this.clearFlash();
     this.message = undefined;
     this.viewMode = this.viewMode === "groups" ? "stages" : "groups";
+    const previousId = this.controller.snapshot().selectedId;
     this.archiveDisclosureSelected = false;
     if (this.viewMode !== "stages") {
       this.normalizeListSelection();
       return;
     }
     const rows = this.stageRows();
-    if (rows.length && !rows.some((row) => row.id === this.controller.snapshot().selectedId)) {
+    if (rows.length && !rows.some((row) => row.id === previousId)) {
       this.controller.selectSession(rows[0]?.id ?? "");
+      if (this.controller.snapshot().selectedId !== previousId) this.actions.selectionChanged?.();
     }
   }
 
@@ -830,7 +839,8 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  Delete choices: d delete/forget     D discard worktree     s close subagents     w finish worktree",
     "",
     heading("New-session form"),
-    "  Tab/↑↓ move     Ctrl+O choose repo     Alt+A add repo     Alt+X remove extra     Ctrl+T worktree",
+    "  Tab/↑↓ move     Space toggles Worktree row     Ctrl+T toggles anywhere     Ctrl+O choose repo",
+    "  Alt+A add repo     Alt+X remove extra",
     "",
     heading("Project state"),
     "  s skills picker     m MCP picker     ←→/Tab switch picker columns",
@@ -842,7 +852,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  Active and Backlog keep project/group headers; Archived is flat and chronological",
     "  Archived shows 5 parent cascades; Enter/double-click reveals older rows",
     "  Archived cascades auto-remove after 7d once every tmux session is gone",
-    "  Stages view lanes active sessions by workflow step (via the workflow-indicator extension);",
+    "  Stages view lanes active sessions by workflow step (via the workflow-runtime extension);",
     "  backlog/archived rows are summarized and K/J reorder is groups-view only",
     "",
     heading("Status legend"),

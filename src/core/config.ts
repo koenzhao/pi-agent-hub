@@ -14,6 +14,7 @@ export interface SessionsConfig {
   };
   session?: {
     prelude?: string;
+    worktreeDefault?: boolean;
   };
   dashboard?: {
     themeSessionId?: string;
@@ -45,6 +46,10 @@ export async function effectiveMcpCatalogPath(env: NodeJS.ProcessEnv = process.e
 export async function effectiveSessionPrelude(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
   const prelude = (await loadSessionsConfig(env)).session?.prelude?.trim();
   return prelude || undefined;
+}
+
+export async function effectiveWorktreeDefault(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  return (await loadSessionsConfig(env)).session?.worktreeDefault ?? false;
 }
 
 export async function effectiveDashboardThemeSessionId(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
@@ -84,6 +89,21 @@ export async function unsetSessionPrelude(env: NodeJS.ProcessEnv = process.env):
   await writeJsonAtomic(configPath(env), next);
 }
 
+export async function setWorktreeDefault(enabled: boolean, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const config = await loadSessionsConfig(env);
+  await writeJsonAtomic(configPath(env), { ...config, session: { ...config.session, worktreeDefault: enabled } });
+}
+
+export async function unsetWorktreeDefault(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const config = await loadSessionsConfig(env);
+  const next: SessionsConfig = { ...config, session: config.session ? { ...config.session } : undefined };
+  if (next.session) {
+    delete next.session.worktreeDefault;
+    if (!Object.keys(next.session).length) delete next.session;
+  }
+  await writeJsonAtomic(configPath(env), next);
+}
+
 export async function setDashboardThemeSessionId(sessionId: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const trimmed = sessionId.trim();
   if (!trimmed) throw new Error("theme session id cannot be blank");
@@ -98,6 +118,7 @@ function validateConfig(config: SessionsConfig): void {
   if (config.mcp?.catalogPath !== undefined && typeof config.mcp.catalogPath !== "string") throw new Error("Invalid mcp.catalogPath in pi-agent-hub config");
   if (config.session !== undefined && !isPlainObject(config.session)) throw new Error("Invalid session config in pi-agent-hub config");
   if (config.session?.prelude !== undefined && typeof config.session.prelude !== "string") throw new Error("Invalid session.prelude in pi-agent-hub config");
+  if (config.session?.worktreeDefault !== undefined && typeof config.session.worktreeDefault !== "boolean") throw new Error("Invalid session.worktreeDefault in pi-agent-hub config");
   if (config.dashboard !== undefined && !isPlainObject(config.dashboard)) throw new Error("Invalid dashboard config in pi-agent-hub config");
   if (config.dashboard?.themeSessionId !== undefined && typeof config.dashboard.themeSessionId !== "string") throw new Error("Invalid dashboard.themeSessionId in pi-agent-hub config");
   validateDashboardShortcuts(config.dashboard?.shortcuts);
