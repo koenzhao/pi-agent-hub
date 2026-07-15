@@ -375,3 +375,22 @@
   - docs/CONFIG.md
   created_at: '2026-07-12'
   id: worktree-setup-001
+- epic: worktree-finish
+  title: Resolve worktree merge conflicts in the existing Pi session
+  description: When finishing a Hub-owned worktree would conflict with its base branch,
+    offer an explicit assisted flow that keeps the managed session alive, reuses its
+    Pi conversation context to resolve conflicts under strict guardrails, validates
+    the result, and only then completes the merge and cleanup.
+  priority: 2
+  depends_on: []
+  discovered_from: archive-ux-001
+  references:
+  - src/app/worktree-session.ts
+  - src/core/worktree.ts
+  - src/extension/index.ts
+  - src/tui/confirm-dialogs.ts
+  - src/app/run-tui.ts
+  id: worktree-finish-001
+  status: pending
+  created_at: '2026-07-14'
+  plan_file: agent-work/plans/worktree-finish-001.md
