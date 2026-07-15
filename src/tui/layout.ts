@@ -292,7 +292,9 @@ function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined
 function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages: boolean, width: number): string {
   const right = stages
     ? (session.kind === "subagent" ? "" : styles.dim(session.group))
-    : session.workflow && !session.archiveExpiresIn ? railCompact(session.workflow, styles) : "";
+    : session.archiveExpiresIn
+      ? styles.dim(session.archiveExpiresIn)
+      : session.workflow ? railCompact(session.workflow, styles) : "";
   return right && width - displayWidth(right) - 1 >= 12 ? right : "";
 }
 
@@ -431,9 +433,8 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, focusedSlot, styles);
   const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
   const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
-  const archiveBadge = session.archiveExpiresIn ? styles.dim(` [exp ${session.archiveExpiresIn}]`) : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
-  const text = `${prefix} ${indent}${symbol} ${sidePaneMarker}${title}${repoBadge}${worktreeBadge}${archiveBadge}`;
+  const text = `${prefix} ${indent}${symbol} ${sidePaneMarker}${title}${repoBadge}${worktreeBadge}`;
   const right = rowRightAdornment(session, styles, stages, width);
   return right ? twoColumn(text, right, width) : truncate(text, width);
 }

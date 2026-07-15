@@ -59,12 +59,12 @@ test("sessions without workflow render no rail", () => {
   assert.doesNotMatch(text, /NX─PR/);
 });
 
-test("archive expiry badge takes priority over the compact rail", () => {
-  const archived = { ...session("a", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
+test("archive expiry uses the compact right adornment instead of an inline badge", () => {
+  const archived = { ...session("a", "default", "stopped", "Sidebar Focus Control Enhancements"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
   const model = buildRenderModel({ sessions: [archived, session("b", "default", "running")], selectedId: "a", width: 110, now: 100 });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
-  assert.match(row ?? "", /\[exp 3d\]/);
-  assert.doesNotMatch(row ?? "", /EX 4\/7/);
+  assert.match(row ?? "", /Sidebar Focus.*\s+3d│/);
+  assert.doesNotMatch(row ?? "", /exp|\[3d\]|EX 4\/7/);
 });
 
 test("workflow rail stays width-safe at narrow and wide sizes", () => {
@@ -358,7 +358,7 @@ test("sectioned model preserves groups inside lifecycle sections", () => {
   assert.match(rendered, /ACTIVE/);
   assert.match(rendered, /BACKLOG/);
   assert.match(rendered, /ARCHIVED/);
-  assert.match(rendered, /\[exp 3d\]/);
+  assert.match(rendered, /\s3d│/);
 });
 
 test("all-active dashboards suppress lifecycle section headers", () => {
