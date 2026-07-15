@@ -25,7 +25,7 @@ Ctrl+Q returns to the dashboard
 | In-session rename | `Alt+R` inside a managed session | Open the dashboard rename dialog for the current session, then return to it after saving. |
 | Direct send | `p` in the dashboard | Paste and submit a one-line message into the selected live session without opening it. |
 | Custom dashboard shortcuts | `dashboard.shortcuts` in config | Bind safe Pi slash-command sends, such as `/session-summary name`, to dashboard keys. |
-| Stable grouping/order | `g`, `G`, `K`, `J` | Keep sessions organized without status/title resorting. |
+| Stable grouping/order | `g`, `G`, `K`, `J` | Manually order Active/Backlog groups while Archived stays chronological. |
 | Multi-repo workspaces | `Alt+A` in the new-session form | Work across repos through a symlink workspace without moving or owning source repos. |
 | Hub-owned worktree sessions | `Ctrl+T` in the new-session form, `w` to finish | Create Git worktrees under hub state for one or more repos and explicitly finish, forget, or discard them. |
 | Project Skills | `s` picker | Attach Pi skills to the selected session's primary repo. |
@@ -60,7 +60,7 @@ Ctrl+Q returns to the dashboard
 | `N` | Sync the selected hub title from Pi's `/name` |
 | `g` | Move the selected session to a group; the dialog pre-fills visible existing groups and `Ctrl+N` / `Ctrl+P` cycles them |
 | `G` | Rename the selected session's group |
-| `K` / `J` | Move the selected session up/down within its group |
+| `K` / `J` | Move the selected Active/Backlog session up/down within its group |
 | `Shift+Up` / `Shift+Down` | Same as `K` / `J` |
 | `s` | Pick project skills |
 | `Alt+E` | Edit the Skill pool path while the `s` picker is open |
@@ -79,7 +79,7 @@ Ctrl+Q returns to the dashboard
 
 Zero counts are hidden in the dashboard summaries, so `◐2 ×1` means only waiting and error sessions are currently visible.
 
-The session list is sectioned as Active, Backlog, then Archived when any non-active rows exist. Group headers remain inside each section, and all-active dashboards omit the Active section header to stay compact.
+The session list is sectioned as Active, Backlog, then Archived when any non-active rows exist. Active and Backlog keep group headers and manual order; Archived is one flat globally newest-first list. It shows the newest five parent cascades by default, keeping all nested subagent rows with their parent. Select `… N older archived` and press `Enter` or double-click to expand; use `⌃ show fewer` to collapse. Filtering reveals all matching archived rows regardless of collapse state. All-active dashboards omit the Active section header to stay compact.
 
 Sessions running the optional `workflow-runtime` extension also show a workflow rail: the compact form `EX 4/7` right-aligned in the list row, and the full rail `NX─PR─PL─▐EX▌─RV─RF─CM · ticket` in the details pane. Pressing `v` switches to the stages view, which lanes active sessions by their current workflow step (with a final `NO WORKFLOW` lane) and shows each row's group name instead of the rail. Backlog and Archived rows are summarized as one dim line in the stages view, subagents stay nested under their parent's lane, and `K`/`J` reordering is groups-view only. Workflow state is remembered for stopped sessions so cards keep their lane.
 
@@ -153,9 +153,9 @@ When worktree mode is enabled, the `branch` field creates the same new local bra
 
 ## Groups and session actions
 
-Groups are simple labels on sessions. Moving a session to a new label creates that group, and renaming a group updates every session currently using that label. Row order is user-controlled within the current group and lifecycle section; reordering is disabled while a filter is active.
+Groups are simple labels on sessions. Moving a session to a new label creates that group, and renaming a group updates every session currently using that label. Active and Backlog row order is user-controlled within the current group; reordering is disabled while a filter is active and unavailable in Archived because archive time determines its order.
 
-Backlog and Archive are dashboard organization states only: they do not stop tmux or Pi. Subagent rows follow their parent session and cannot be moved directly. Archived rows are automatically removed from the dashboard after 72 hours, but only after the archived session and any subagent rows are confirmed missing from tmux; this cleanup removes Hub registry/heartbeat/metadata/workspace state and does not delete Pi conversation files.
+Backlog and Archive are dashboard organization states only: they do not stop tmux or Pi. Subagent rows follow their parent session and cannot be moved directly. Archived rows show compact elapsed ages and become eligible for dashboard cleanup after seven days. Cleanup occurs only after the archived parent and every subagent row are confirmed missing from tmux; it removes Hub registry/heartbeat/metadata/workspace state and does not delete Pi conversation files.
 
 Custom normal-mode dashboard shortcuts can be configured in `config.json`; see [Dashboard shortcuts](CONFIG.md#dashboard-shortcuts). They send one-line text to the selected live session without opening it and are intended for Pi-native commands such as `/session-summary name`, provided by the optional [`pi-session-summary`](https://github.com/masta-g3/pi-session-summary) extension.
 

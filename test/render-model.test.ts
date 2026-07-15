@@ -59,12 +59,36 @@ test("sessions without workflow render no rail", () => {
   assert.doesNotMatch(text, /NX─PR/);
 });
 
-test("archive expiry uses the compact right adornment instead of an inline badge", () => {
-  const archived = { ...session("a", "default", "stopped", "Sidebar Focus Control Enhancements"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
-  const model = buildRenderModel({ sessions: [archived, session("b", "default", "running")], selectedId: "a", width: 110, now: 100 });
+test("archive age takes priority over the compact rail", () => {
+  const day = 24 * 60 * 60 * 1000;
+  const archived = { ...session("a", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
+  const model = buildRenderModel({ sessions: [archived, session("b", "default", "running")], selectedId: "a", width: 110, now: 100 + 2 * day });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
-  assert.match(row ?? "", /Sidebar Focus.*\s+3d│/);
-  assert.doesNotMatch(row ?? "", /exp|\[3d\]|EX 4\/7/);
+  assert.match(row ?? "", /a\s+2d/);
+  assert.doesNotMatch(row ?? "", /\[exp|EX 4\/7/);
+  assert.match(renderSessions(model).lines.map(stripAnsi).join("\n"), /archived 2d ago · cleanup eligible in 5d/);
+});
+
+test("archive labels remain width-safe at sidebar widths and show retention eligibility", () => {
+  const day = 24 * 60 * 60 * 1000;
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, "default", "stopped", `archive-${index}-${"long".repeat(8)}`),
+    bucket: "archived" as const,
+    bucketChangedAt: index === 0 ? 0 : day * (8 - index),
+  }));
+  for (const width of [40, 42]) {
+    const lines = renderSessions(buildRenderModel({ sessions: archived, selectedId: "archive-0", width, now: 8 * day })).lines;
+    assert.match(lines.map(stripAnsi).join("\n"), /… 2 older archived/);
+    assert.doesNotMatch(lines.map(stripAnsi).join("\n"), /\[exp/);
+    for (const line of lines) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
+  }
+  const expired = { ...session("expired", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 0 };
+  const details = renderSessions(buildRenderModel({ sessions: [expired], selectedId: "expired", width: 100, now: 8 * day })).lines.map(stripAnsi).join("\n");
+  assert.match(details, /archived 8d ago · cleanup eligible now/);
+
+  const almostEligible = buildRenderModel({ sessions: [expired], selectedId: "expired", width: 100, now: 7 * day - 30_000 });
+  assert.equal(almostEligible.selected?.archiveRetentionIn, "<1m");
+  assert.match(renderSessions(almostEligible).lines.map(stripAnsi).join("\n"), /cleanup eligible in <1m/);
 });
 
 test("workflow rail stays width-safe at narrow and wide sizes", () => {
@@ -211,28 +235,28 @@ test("layout hit map marks only rendered session rows", () => {
   ];
   const layout = renderSessions(buildRenderModel({ sessions, selectedId: "backlog", width: 70, now: 100 }));
 
-  assert.equal(layout.lines.length, layout.rowSessions.length);
-  for (const [index, id] of layout.rowSessions.entries()) {
+  assert.equal(layout.lines.length, layout.rowTargets.length);
+  for (const [index, target] of layout.rowTargets.entries()) {
     const text = stripAnsi(layout.lines[index] ?? "");
-    if (!id) {
+    if (target?.kind !== "session") {
       assert.doesNotMatch(text, /active-api|backlog-docs|archived-worker/);
       continue;
     }
-    const title = sessions.find((item) => item.id === id)?.title;
-    assert.ok(title, `unknown session id ${id}`);
+    const title = sessions.find((item) => item.id === target.id)?.title;
+    assert.ok(title, `unknown session id ${target.id}`);
     assert.match(text, new RegExp(title));
   }
-  assert.equal(layout.rowSessions[0], undefined);
-  assert.equal(layout.rowSessions.at(-1), undefined);
+  assert.equal(layout.rowTargets[0], undefined);
+  assert.equal(layout.rowTargets.at(-1), undefined);
 });
 
 test("layout hit map handles empty and wide preview layouts", () => {
   const empty = renderSessions(buildRenderModel({ sessions: [], width: 80 }));
-  assert.ok(empty.rowSessions.every((id) => id === undefined));
+  assert.ok(empty.rowTargets.every((target) => target === undefined));
   assert.equal(empty.listWidth, 0);
 
   const wide = renderSessions(buildRenderModel({ sessions: [session("a", "default", "idle")], width: 110 }));
-  assert.equal(wide.lines.length, wide.rowSessions.length);
+  assert.equal(wide.lines.length, wide.rowTargets.length);
   assert.ok(wide.listWidth < 108);
 });
 
@@ -241,15 +265,15 @@ function manySessions(count: number): ManagedSession[] {
 }
 
 function renderedSessionIds(layout: ReturnType<typeof renderSessions>): string[] {
-  return layout.rowSessions.filter((id): id is string => Boolean(id));
+  return layout.rowTargets.flatMap((target) => target?.kind === "session" ? [target.id] : []);
 }
 
 test("height-bounded layout clips long lists to terminal rows", () => {
   const layout = renderSessions(buildRenderModel({ sessions: manySessions(20), selectedId: "s10", width: 80, height: 15 }));
 
   assert.equal(layout.lines.length, 15);
-  assert.equal(layout.rowSessions.length, 15);
-  assert.ok(layout.rowSessions.includes("s10"));
+  assert.equal(layout.rowTargets.length, 15);
+  assert.ok(layout.rowTargets.some((target) => target?.kind === "session" && target.id === "s10"));
   for (const line of layout.lines) assert.ok(visibleWidth(line) <= 80, line);
 });
 
@@ -259,8 +283,8 @@ test("height-bounded empty and no-match states fit terminal rows", () => {
 
   assert.equal(empty.lines.length, 15);
   assert.equal(noMatches.lines.length, 15);
-  assert.equal(empty.rowSessions.length, 15);
-  assert.equal(noMatches.rowSessions.length, 15);
+  assert.equal(empty.rowTargets.length, 15);
+  assert.equal(noMatches.rowTargets.length, 15);
 });
 
 test("height-bounded list shows bottom indicator at the top", () => {
@@ -344,21 +368,61 @@ test("grouping order and status counts", () => {
   assert.doesNotMatch(rendered, /1 waiting · 1 error/);
 });
 
-test("sectioned model preserves groups inside lifecycle sections", () => {
+test("sectioned model preserves Active and Backlog groups but flattens Archived chronologically", () => {
+  const day = 24 * 60 * 60 * 1000;
   const backlog = { ...session("backlog", "default", "idle"), bucket: "backlog" as const, bucketChangedAt: 100 };
-  const archived = { ...session("archived", "work", "stopped"), bucket: "archived" as const, bucketChangedAt: 100 };
-  const model = buildRenderModel({ sessions: [archived, session("active", "default", "idle"), backlog], selectedId: "archived", width: 120, now: 100 });
+  const archiveOld = { ...session("archive-old", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100 };
+  const archiveNew = { ...session("archive-new", "work", "stopped"), bucket: "archived" as const, bucketChangedAt: 100 + day };
+  const model = buildRenderModel({ sessions: [archiveOld, session("active", "default", "idle"), backlog, archiveNew], selectedId: "archive-new", width: 120, now: 100 + 2 * day });
 
   assert.equal(model.showSections, true);
-  assert.deepEqual(model.sections.map((section) => [section.key, section.groups.map((group) => group.name)]), [["active", ["default"]], ["backlog", ["default"]], ["archived", ["work"]]]);
-  assert.equal(model.selected?.archiveExpiresIn, "3d");
+  assert.deepEqual(model.sections.map((section) => [section.key, section.groups.map((group) => group.name)]), [["active", ["default"]], ["backlog", ["default"]], ["archived", [""]]]);
+  assert.deepEqual(model.sections[2]?.groups[0]?.sessions.map((row) => row.id), ["archive-new", "archive-old"]);
+  assert.equal(model.selected?.archivedAge, "1d");
+  assert.equal(model.selected?.archiveRetentionIn, "6d");
   assert.match(model.footer, /U Restore/);
 
-  const rendered = renderSessions(model).lines.join("\n");
+  const rendered = renderSessions(model).lines.map(stripAnsi).join("\n");
   assert.match(rendered, /ACTIVE/);
   assert.match(rendered, /BACKLOG/);
   assert.match(rendered, /ARCHIVED/);
-  assert.match(rendered, /\s3d│/);
+  assert.doesNotMatch(rendered, /\[exp/);
+});
+
+test("Archived collapses after five parent cascades and filtering reveals matches", () => {
+  const archived = Array.from({ length: 7 }, (_, index) => ({
+    ...session(`archive-${index}`, index % 2 ? "work" : "default", "stopped"),
+    bucket: "archived" as const,
+    bucketChangedAt: 700 - index,
+  }));
+  const child = { ...session("child", "default", "stopped"), kind: "subagent" as const, parentId: "archive-0", agentName: "scout" };
+
+  const collapsed = buildRenderModel({ sessions: [...archived, child], width: 80, now: 800 });
+  const archiveSection = collapsed.sections.find((section) => section.key === "archived");
+  assert.equal(archiveSection?.sessionsTotal, 8);
+  assert.equal(archiveSection?.archiveDisclosure?.hiddenParents, 2);
+  assert.deepEqual(archiveSection?.groups[0]?.sessions.map((row) => row.id), ["archive-0", "child", "archive-1", "archive-2", "archive-3", "archive-4"]);
+  assert.match(renderSessions(collapsed).lines.map(stripAnsi).join("\n"), /… 2 older archived/);
+
+  const expanded = buildRenderModel({ sessions: [...archived, child], width: 80, now: 800, archiveExpanded: true, archiveDisclosureSelected: true });
+  assert.equal(expanded.sections.find((section) => section.key === "archived")?.groups[0]?.sessions.length, 8);
+  assert.match(renderSessions(expanded).lines.map(stripAnsi).join("\n"), /▌ ⌃ show fewer/);
+
+  const filtered = buildRenderModel({ sessions: [...archived, child], width: 80, filter: "archive-6", now: 800 });
+  assert.deepEqual(filtered.sections.find((section) => section.key === "archived")?.groups[0]?.sessions.map((row) => row.id), ["archive-6"]);
+  assert.equal(filtered.sections.find((section) => section.key === "archived")?.archiveDisclosure, undefined);
+});
+
+test("late-created descendants inherit Archived presentation and stay out of stages", () => {
+  const parent = { ...session("parent", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100 };
+  const child = { ...session("child", "default", "running"), kind: "subagent" as const, parentId: "parent", agentName: "worker", workflow: WORKFLOW };
+
+  const groups = buildRenderModel({ sessions: [parent, child], width: 100, now: 200 });
+  assert.deepEqual(groups.sections.find((section) => section.key === "archived")?.groups[0]?.sessions.map((row) => [row.id, row.section]), [["parent", "archived"], ["child", "archived"]]);
+
+  const stages = buildRenderModel({ sessions: [parent, child], width: 100, viewMode: "stages", now: 200 });
+  assert.equal(stages.sections.length, 0);
+  assert.equal(stages.hiddenNonActive, 2);
 });
 
 test("all-active dashboards suppress lifecycle section headers", () => {

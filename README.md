@@ -58,7 +58,7 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `N` | Sync the selected hub title from Pi's `/name` |
 | `↑↓` / `j` / `k` | Move selection |
 | `g` / `G` | Move a session to a group (Ctrl+N/P cycles visible groups) or rename its group |
-| `K` / `J` | Move the selected session up/down within its group |
+| `K` / `J` | Move the selected Active/Backlog session up/down within its group |
 | `s` / `m` | Pick project skills or MCP servers; `←→` switches Enabled/Available |
 | Click / double-click | Select a session / open, switch, or restart it |
 
@@ -108,7 +108,7 @@ pi-hub config set worktree-default true
 pi-hub config unset worktree-default
 ```
 
-`add --add-cwd` creates a multi-repo session: `cwd` stays the primary repo, extra paths are symlinked into a per-session workspace, and Pi starts from that workspace. Worktree sessions are created from the TUI new-session form by focusing the Worktree row and pressing `Space`, or with `Ctrl+T`; the branch name is also the session title. New forms normally start with worktrees off. Set `worktree-default` to open them in worktree mode automatically; either toggle can still turn it off per session. `delete` stops the tmux session if it is still alive, removes the registry row, removes the heartbeat file, and removes any owned multi-repo workspace. Dashboard archive/backlog/restore only reorganizes rows and never stops tmux or Pi; archived rows are forgotten after 72 hours only once their tmux sessions are gone. Pi conversation/session files, source repos, and hub-owned worktree directories are kept by normal delete; use dashboard `w` to merge and remove a clean hub-owned worktree, or `d` then `Shift+D` to discard a clean worktree and branch without merging.
+`add --add-cwd` creates a multi-repo session: `cwd` stays the primary repo, extra paths are symlinked into a per-session workspace, and Pi starts from that workspace. Worktree sessions are created from the TUI new-session form by focusing the Worktree row and pressing `Space`, or with `Ctrl+T`; the branch name is also the session title. New forms normally start with worktrees off. Set `worktree-default` to open them in worktree mode automatically; either toggle can still turn it off per session. `delete` stops the tmux session if it is still alive, removes the registry row, removes the heartbeat file, and removes any owned multi-repo workspace. Dashboard archive/backlog/restore only reorganizes rows and never stops tmux or Pi. Archived is a flat newest-first list that shows five parent cascades by default; select the older-items row and press `Enter` or double-click to expand it. Archived cascades become eligible for dashboard cleanup after seven days, but are forgotten only when every tmux session in the cascade is confirmed gone. Pi conversation/session files, source repos, and hub-owned worktree directories are kept by normal delete; use dashboard `w` to merge and remove a clean hub-owned worktree, or `d` then `Shift+D` to discard a clean worktree and branch without merging.
 
 ## Troubleshooting
 

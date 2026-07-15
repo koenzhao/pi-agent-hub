@@ -160,6 +160,7 @@ export class SessionsController {
     const selected = this.selected();
     if (!selected || isSubagentSession(selected)) return;
     const section = sessionSection(selected);
+    if (section === "archived") return;
     const group = orderedSessions(this.registry.sessions).filter((session) => session.group === selected.group && sessionSection(session) === section && !isSubagentSession(session));
     const index = group.findIndex((session) => session.id === selected.id);
     const target = index + delta;

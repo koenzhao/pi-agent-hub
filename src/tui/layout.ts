@@ -3,9 +3,13 @@ import type { WorkflowSnapshot } from "../core/types.js";
 import type { RenderModel, RenderSession, StatusCounts } from "./render-model.js";
 import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, type SessionsTheme } from "./theme.js";
 
+export type SessionListTarget =
+  | { kind: "session"; id: string }
+  | { kind: "archive-disclosure" };
+
 export interface SessionsLayout {
   lines: string[];
-  rowSessions: (string | undefined)[];
+  rowTargets: (SessionListTarget | undefined)[];
   listWidth: number;
   listScrollTop: number;
 }
@@ -15,14 +19,14 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
   const width = Math.max(40, model.width);
   if (model.empty) {
     const lines = box(width, fitBoxBody(emptyLines(width, styles), model.height), styles);
-    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
+    return { lines, rowTargets: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
   }
 
   const bodyWidth = width - 2;
   if (model.noMatches) {
     const body = [renderTopSummary(model, bodyWidth, styles), ...(model.panelStrip ? [renderPanelStrip(model, bodyWidth, styles)] : []), ...noMatchLines(width, model.filter ?? "", styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)];
     const lines = box(width, fitBoxBody(body, model.height), styles);
-    return { lines, rowSessions: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
+    return { lines, rowTargets: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
   }
 
   const split = model.showPreview ? Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38))) : bodyWidth;
@@ -43,9 +47,9 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
   body.push(styles.border("─".repeat(bodyWidth)));
   body.push(truncate(styleFooter(model.footer, styles), bodyWidth));
   const lines = box(width, body, styles);
-  const rowSessions = lines.map(() => undefined as string | undefined);
-  for (let i = 0; i < rows; i += 1) rowSessions[2 + stripLines + i] = windowedLeft.sessions[i];
-  return { lines, rowSessions, listWidth: split, listScrollTop: windowedLeft.top };
+  const rowTargets = lines.map(() => undefined as SessionListTarget | undefined);
+  for (let i = 0; i < rows; i += 1) rowTargets[2 + stripLines + i] = windowedLeft.targets[i];
+  return { lines, rowTargets, listWidth: split, listScrollTop: windowedLeft.top };
 }
 
 // Footer strings stay plain in the render model for testability; keys get
@@ -154,25 +158,25 @@ function renderPanelStrip(model: RenderModel, width: number, styles: LayoutStyle
   return truncate(segments.join("  "), width);
 }
 
-function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): { lines: string[]; sessions: (string | undefined)[]; selectedIndex: number } {
+function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): { lines: string[]; targets: (SessionListTarget | undefined)[]; selectedIndex: number } {
   const stages = model.viewMode === "stages";
   const lines: string[] = [];
-  const sessions: (string | undefined)[] = [];
+  const targets: (SessionListTarget | undefined)[] = [];
   let selectedIndex = -1;
-  const pushLine = (line: string, sessionId?: string) => {
+  const pushLine = (line: string, target?: SessionListTarget) => {
     lines.push(line);
-    sessions.push(sessionId);
+    targets.push(target);
   };
   const pushRow = (session: RenderSession) => {
     if (session.selected) selectedIndex = lines.length;
-    pushLine(renderSessionRow(session, width, styles, stages, model.sidePaneFocusedSlot), session.id);
+    pushLine(renderSessionRow(session, width, styles, stages, model.sidePaneFocusedSlot), { kind: "session", id: session.id });
   };
   if (!model.showSections) {
     for (const group of model.groups) {
       pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
       for (const session of group.sessions) pushRow(session);
     }
-    return { lines, sessions, selectedIndex };
+    return { lines, targets, selectedIndex };
   }
   let firstSection = true;
   for (const section of model.sections) {
@@ -183,23 +187,29 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
       if (group.name) pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
       for (const session of group.sessions) pushRow(session);
     }
+    if (section.archiveDisclosure) {
+      if (section.archiveDisclosure.selected) selectedIndex = lines.length;
+      const label = section.archiveDisclosure.expanded ? "⌃ show fewer" : `… ${section.archiveDisclosure.hiddenParents} older archived`;
+      const prefix = section.archiveDisclosure.selected ? `${styles.accent("▌")} ` : "  ";
+      pushLine(`${prefix}${styles.dim(truncate(label, Math.max(0, width - 2)))}`, { kind: "archive-disclosure" });
+    }
   }
   if (stages && model.hiddenNonActive > 0) {
     pushLine("");
     pushLine(styles.dim(truncate(`+${model.hiddenNonActive} backlog/archived · v groups view`, width)));
   }
-  return { lines, sessions, selectedIndex };
+  return { lines, targets, selectedIndex };
 }
 
 interface ListWindow {
   lines: string[];
-  sessions: (string | undefined)[];
+  targets: (SessionListTarget | undefined)[];
   selectedIndex: number;
   top: number;
 }
 
 function windowList(
-  list: { lines: string[]; sessions: (string | undefined)[]; selectedIndex: number },
+  list: { lines: string[]; targets: (SessionListTarget | undefined)[]; selectedIndex: number },
   capacity: number,
   scrollTop: number,
   styles: LayoutStyles,
@@ -207,29 +217,29 @@ function windowList(
   if (capacity <= 0 || list.lines.length <= capacity) return { ...list, top: 0 };
   const total = list.lines.length;
   const selectedIndex = Math.max(0, list.selectedIndex);
-  const sessionCount = (from: number, to: number) => list.sessions.slice(Math.max(0, from), Math.min(total, to)).filter(Boolean).length;
+  const sessionCount = (from: number, to: number) => list.targets.slice(Math.max(0, from), Math.min(total, to)).filter((target) => target?.kind === "session").length;
   const indicator = (arrow: "↑" | "↓", count: number) => styles.dim(`${arrow} ${count} more`);
-  const slice = (top: number, lines: string[], sessions: (string | undefined)[], selectedOffset = top): ListWindow => ({
+  const slice = (top: number, lines: string[], targets: (SessionListTarget | undefined)[], selectedOffset = top): ListWindow => ({
     lines,
-    sessions,
+    targets,
     selectedIndex: selectedIndex >= selectedOffset && selectedIndex < selectedOffset + lines.length ? selectedIndex - selectedOffset : -1,
     top,
   });
 
   if (capacity === 1) {
-    return slice(selectedIndex, [list.lines[selectedIndex] ?? ""], [list.sessions[selectedIndex]], selectedIndex);
+    return slice(selectedIndex, [list.lines[selectedIndex] ?? ""], [list.targets[selectedIndex]], selectedIndex);
   }
 
   if (selectedIndex < capacity - 1) {
     const visibleEnd = capacity - 1;
-    return slice(0, [...list.lines.slice(0, visibleEnd), indicator("↓", sessionCount(visibleEnd, total))], [...list.sessions.slice(0, visibleEnd), undefined]);
+    return slice(0, [...list.lines.slice(0, visibleEnd), indicator("↓", sessionCount(visibleEnd, total))], [...list.targets.slice(0, visibleEnd), undefined]);
   }
 
   if (selectedIndex >= total - (capacity - 1)) {
     const top = total - (capacity - 1);
     return {
       lines: [indicator("↑", sessionCount(0, top)), ...list.lines.slice(top)],
-      sessions: [undefined, ...list.sessions.slice(top)],
+      targets: [undefined, ...list.targets.slice(top)],
       selectedIndex: selectedIndex - top + 1,
       top,
     };
@@ -238,7 +248,7 @@ function windowList(
   if (capacity === 2) {
     return {
       lines: [indicator("↑", sessionCount(0, selectedIndex)), list.lines[selectedIndex] ?? ""],
-      sessions: [undefined, list.sessions[selectedIndex]],
+      targets: [undefined, list.targets[selectedIndex]],
       selectedIndex: 1,
       top: selectedIndex,
     };
@@ -253,7 +263,7 @@ function windowList(
   const bottomStart = top + capacity - 2;
   return {
     lines: [indicator("↑", sessionCount(0, top)), ...list.lines.slice(top, bottomStart), indicator("↓", sessionCount(bottomStart, total))],
-    sessions: [undefined, ...list.sessions.slice(top, bottomStart), undefined],
+    targets: [undefined, ...list.targets.slice(top, bottomStart), undefined],
     selectedIndex: selectedIndex - top + 1,
     top,
   };
@@ -292,8 +302,7 @@ function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined
 function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages: boolean, width: number): string {
   const right = stages
     ? (session.kind === "subagent" ? "" : styles.dim(session.group))
-    : session.archiveExpiresIn
-      ? styles.dim(session.archiveExpiresIn)
+    : session.archivedAge ? styles.dim(session.archivedAge)
       : session.workflow ? railCompact(session.workflow, styles) : "";
   return right && width - displayWidth(right) - 1 >= 12 ? right : "";
 }
@@ -347,7 +356,8 @@ function expandedDetails(session: RenderSession, width: number, styles: LayoutSt
     `repos     ${session.repoCount}`,
     `group     ${session.group}`,
     session.section !== "active" ? `section   ${session.section}` : undefined,
-    session.archiveExpiresIn ? `expires   ${session.archiveExpiresIn}` : undefined,
+    session.archivedAge ? `archived  ${session.archivedAge === "now" ? "now" : `${session.archivedAge} ago`}` : undefined,
+    session.archiveRetentionIn ? `cleanup   eligible ${session.archiveRetentionIn === "now" ? "now" : `in ${session.archiveRetentionIn}`}` : undefined,
   ].filter((line): line is string => Boolean(line));
   if (session.workflow) lines.splice(1, 0, railLine(session.workflow, width, styles));
   for (const cwd of session.additionalCwds) lines.push(`extra     ${truncatePath(cwd, Math.max(0, width - 10))}`);
@@ -406,7 +416,11 @@ function wrapWords(value: string, firstWidth: number, nextWidth: number): string
 
 function lifecycleLine(session: RenderSession): string | undefined {
   if (session.section === "active") return undefined;
-  if (session.section === "archived" && session.archiveExpiresIn) return `archived · expires in ${session.archiveExpiresIn}`;
+  if (session.section === "archived" && session.archivedAge && session.archiveRetentionIn) {
+    const retention = session.archiveRetentionIn === "now" ? "cleanup eligible now" : `cleanup eligible in ${session.archiveRetentionIn}`;
+    const archived = session.archivedAge === "now" ? "archived now" : `archived ${session.archivedAge} ago`;
+    return `${archived} · ${retention}`;
+  }
   return `${session.section} · U restore`;
 }
 

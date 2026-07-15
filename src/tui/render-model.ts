@@ -1,8 +1,9 @@
-import { archivedExpiresAt, sessionSection, type SessionSection } from "../core/session-bucket.js";
+import { ARCHIVE_PRUNE_AFTER_MS, type SessionSection } from "../core/session-bucket.js";
 import { groupOrder, orderedSessions } from "../core/session-order.js";
 import { orderedSessionRows, sessionDepth } from "../core/session-tree.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { RuntimeSession, SessionStatus, SessionMetadata, WorkflowSnapshot } from "../core/types.js";
+import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
 
 export interface RenderSession {
   id: string;
@@ -14,7 +15,8 @@ export interface RenderSession {
   group: string;
   section: SessionSection;
   bucketChangedAt?: number;
-  archiveExpiresIn?: string;
+  archivedAge?: string;
+  archiveRetentionIn?: string;
   status: SessionStatus;
   displayStatus: "running" | "waiting" | "idle" | "error" | "stopped";
   symbol: string;
@@ -54,12 +56,19 @@ export interface RenderGroup {
   sessions: RenderSession[];
 }
 
+export interface ArchiveDisclosure {
+  expanded: boolean;
+  hiddenParents: number;
+  selected: boolean;
+}
+
 export interface RenderSection {
   key: string;
   title: string;
   statusCounts: StatusCounts;
   sessionsTotal: number;
   groups: RenderGroup[];
+  archiveDisclosure?: ArchiveDisclosure;
 }
 
 export interface RenderSummary {
@@ -111,14 +120,18 @@ export interface BuildRenderModelInput {
   now?: number;
   sidePaneSessionIds?: ReadonlyMap<string, number>;
   sidePaneFocusedSlot?: number;
+  archiveExpanded?: boolean;
+  archiveDisclosureSelected?: boolean;
   hidePreview?: boolean;
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const stages = input.viewMode === "stages";
   const allRows = orderedSessionRows(input.sessions, input.filter);
-  const visible = stages ? stageLaneRows(allRows.filter((session) => sessionSection(session) === "active")).flatMap((lane) => lane.rows) : allRows;
-  const selectedId = pickSelectedId(visible, input.selectedId);
+  const activeRows = allRows.filter((session) => effectiveSessionLifecycle(session, allRows).section === "active");
+  const archive = archiveSectionRows(allRows, { expanded: input.archiveExpanded ?? false, filterActive: input.filter !== undefined });
+  const visible = stages ? stageLaneRows(activeRows).flatMap((lane) => lane.rows) : archive.rows;
+  const selectedId = pickSelectedId(input.archiveDisclosureSelected ? allRows : visible, input.selectedId);
   const sidePaneSessionIds = input.sidePaneSessionIds;
   const occupiedSlots = new Map<number, string>();
   for (const session of input.sessions) {
@@ -128,12 +141,19 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const panelStrip = occupiedSlots.size
     ? ([1, 2, 3, 4] as const).map((slot) => ({ slot, ...(occupiedSlots.has(slot) ? { title: occupiedSlots.get(slot) } : {}) }))
     : undefined;
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId, input.sessions, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id)));
+  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id)));
+  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id)));
   const groups = groupsForSessions(mapped);
-  const sections = stages ? lanesForSessions(mapped) : sectionsForSessions(mapped);
+  const sections = stages
+    ? lanesForSessions(mapped)
+    : sectionsForSessions(mapped, allMapped, archive.showDisclosure ? {
+      expanded: input.archiveExpanded ?? false,
+      hiddenParents: archive.hiddenParents,
+      selected: input.archiveDisclosureSelected ?? false,
+    } : undefined);
 
   const compactFooter = input.width < 90;
-  const selected = mapped.find((session) => session.selected);
+  const selected = allMapped.find((session) => session.id === selectedId);
   const worktreeFooter = selected?.worktreeOwnedByHub ? " · w Finish WT" : "";
   const showLifecycleFooter = selected && selected.kind !== "subagent" && input.width >= 120;
   const lifecycleFooter = showLifecycleFooter ? selected.section === "active" ? " · A Archive · B Backlog" : " · U Restore" : "";
@@ -149,8 +169,8 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     showSections: stages ? mapped.length > 0 : sections.some((section) => section.key !== "active" && section.sessionsTotal > 0),
     summary: {
       total: input.sessions.length,
-      visibleTotal: visible.length,
-      statusCounts: countRenderSessions(mapped),
+      visibleTotal: allRows.length,
+      statusCounts: countRenderSessions(allMapped),
     },
     ...(input.height ? { height: input.height } : {}),
     ...(input.listScrollTop ? { listScrollTop: input.listScrollTop } : {}),
@@ -164,7 +184,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,
     viewMode: stages ? "stages" : "groups",
-    hiddenNonActive: allRows.length - visible.length,
+    hiddenNonActive: stages ? allRows.length - visible.length : 0,
     ...(panelStrip ? { panelStrip } : {}),
     ...(input.sidePaneFocusedSlot !== undefined ? { sidePaneFocusedSlot: input.sidePaneFocusedSlot } : {}),
   };
@@ -251,17 +271,21 @@ function groupsForSessions(sessions: RenderSession[]): RenderGroup[] {
     } satisfies RenderGroup));
 }
 
-function sectionsForSessions(sessions: RenderSession[]): RenderSection[] {
+function sectionsForSessions(sessions: RenderSession[], allSessions: RenderSession[], archiveDisclosure?: ArchiveDisclosure): RenderSection[] {
   const titles: Record<SessionSection, string> = { active: "ACTIVE", backlog: "BACKLOG", archived: "ARCHIVED" };
   return (["active", "backlog", "archived"] as const).flatMap((key) => {
     const sectionSessions = sessions.filter((session) => session.section === key);
-    if (!sectionSessions.length) return [];
+    const allSectionSessions = allSessions.filter((session) => session.section === key);
+    if (!allSectionSessions.length) return [];
     return [{
       key,
       title: titles[key],
-      statusCounts: countRenderSessions(sectionSessions),
-      sessionsTotal: sectionSessions.length,
-      groups: groupsForSessions(sectionSessions),
+      statusCounts: countRenderSessions(allSectionSessions),
+      sessionsTotal: allSectionSessions.length,
+      groups: key === "archived"
+        ? [{ name: "", statusCounts: countRenderSessions(allSectionSessions), sessions: sectionSessions }]
+        : groupsForSessions(sectionSessions),
+      ...(key === "archived" && archiveDisclosure ? { archiveDisclosure } : {}),
     } satisfies RenderSection];
   });
 }
@@ -270,6 +294,8 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
   const displayStatus = displayStatusFor(session.status);
   const worktree = primaryWorktree(session);
   const worktrees = sessionWorktrees(session);
+  const lifecycle = effectiveSessionLifecycle(session, sessions);
+  const archiveTiming = archiveTimingFor(lifecycle.section, lifecycle.bucketChangedAt, now);
   return {
     id: session.id,
     title: session.title,
@@ -278,9 +304,9 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     workspaceCwd: session.workspaceCwd,
     repoCount: 1 + (session.additionalCwds?.length ?? 0),
     group: session.group,
-    section: sessionSection(session),
-    bucketChangedAt: session.bucketChangedAt,
-    archiveExpiresIn: archiveExpiresIn(session, now),
+    section: lifecycle.section,
+    bucketChangedAt: lifecycle.bucketChangedAt,
+    ...archiveTiming,
     status: session.status,
     displayStatus,
     symbol: symbolFor(displayStatus),
@@ -307,11 +333,14 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
   };
 }
 
-function archiveExpiresIn(session: RuntimeSession, now: number | undefined): string | undefined {
-  const expiresAt = archivedExpiresAt(session);
-  if (expiresAt === undefined || now === undefined) return undefined;
-  if (expiresAt <= now) return "now";
-  return ageLabel(expiresAt - now);
+function archiveTimingFor(section: SessionSection, changedAt: number | undefined, now: number | undefined): Pick<RenderSession, "archivedAge" | "archiveRetentionIn"> {
+  if (section !== "archived" || changedAt === undefined || now === undefined) return {};
+  const elapsed = Math.max(0, now - changedAt);
+  const remaining = ARCHIVE_PRUNE_AFTER_MS - elapsed;
+  return {
+    archivedAge: ageLabel(elapsed),
+    archiveRetentionIn: remaining <= 0 ? "now" : remaining < 60_000 ? "<1m" : ageLabel(remaining),
+  };
 }
 
 function metadataUpdatedAge(metadata: SessionMetadata | undefined, now: number | undefined): string | undefined {

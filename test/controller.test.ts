@@ -133,6 +133,22 @@ test("reorderSelected swaps selected session within its group and clamps at bord
   });
 });
 
+test("reorderSelected ignores archived sessions", async () => {
+  await withTempSessionsDir(async () => {
+    const controller = new SessionsController({
+      version: 1,
+      sessions: [
+        session("idle", { id: "new", title: "new", bucket: "archived", bucketChangedAt: 200, order: 1 }),
+        session("idle", { id: "old", title: "old", bucket: "archived", bucketChangedAt: 100, order: 0 }),
+      ],
+    });
+
+    await controller.reorderSelected(1);
+
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => [item.id, item.order]), [["new", 1], ["old", 0]]);
+  });
+});
+
 async function withTempSessionsDir(fn: () => Promise<void>): Promise<void> {
   const oldDir = process.env.PI_AGENT_HUB_DIR;
   process.env.PI_AGENT_HUB_DIR = await mkdtemp(join(tmpdir(), "pi-agent-hub-controller-"));
@@ -266,7 +282,11 @@ test("archive pruning removes expired archived rows only when tmux is missing", 
     await writeFile(sessionMetadataPath("archived"), `${JSON.stringify({ source: "test", status: "old" })}\n`, "utf8");
     const controller = new SessionsController(registry);
 
-    await controller.refresh(1 + 72 * 60 * 60 * 1000);
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    await controller.refresh(1 + sevenDays - 1);
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => item.id), ["active", "backlog", "archived"]);
+
+    await controller.refresh(1 + sevenDays);
 
     assert.deepEqual(controller.snapshot().registry.sessions.map((item) => item.id), ["active", "backlog"]);
     await assertPathMissing(multiRepoWorkspacePath("archived"));

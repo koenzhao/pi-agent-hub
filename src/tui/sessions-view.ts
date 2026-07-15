@@ -1,12 +1,12 @@
 import { Key, matchesKey, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { attachPlan } from "../app/actions.js";
 import type { SessionsController, SyncPiNameResult } from "../app/controller.js";
-import { sessionSection } from "../core/session-bucket.js";
 import { orderedSessionRows } from "../core/session-tree.js";
 import type { ManagedSession } from "../core/types.js";
 import { matchesDashboardShortcut } from "./dashboard-shortcuts.js";
+import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
 import { buildRenderModel, stageLaneRows } from "./render-model.js";
-import { renderSessions } from "./layout.js";
+import { renderSessions, type SessionListTarget } from "./layout.js";
 import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
@@ -28,9 +28,11 @@ export class SessionsView implements Component {
   private viewMode: "groups" | "stages" = "groups";
   private pendingRestart: { sessionId: string } | undefined;
   private pendingFocusSlot = false;
-  private lastMouseClick: { sessionId: string; at: number } | undefined;
+  private lastMouseClick: { target: string; at: number } | undefined;
   private busy = false;
-  private rowSessions: (string | undefined)[] = [];
+  private archiveExpanded = false;
+  private archiveDisclosureSelected = false;
+  private rowTargets: (SessionListTarget | undefined)[] = [];
   private listWidth = 0;
   private listScrollTop = 0;
 
@@ -104,12 +106,26 @@ export class SessionsView implements Component {
       return;
     }
 
+    const focusSlot = focusedSidePaneSlot(data);
+    if (this.archiveDisclosureSelected) {
+      if (matchesKey(data, Key.down) || data === "j") this.moveSelection(1);
+      else if (matchesKey(data, Key.up) || data === "k") this.moveSelection(-1);
+      else if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") this.toggleArchiveDisclosure();
+      else if (matchesKey(data, Key.slash)) this.startFilter();
+      else if (data === "n") this.startNewDialog();
+      else if (data === "i") this.detailsExpanded = !this.detailsExpanded;
+      else if (focusSlot) this.focusSidePane(focusSlot);
+      else if (data === "v") this.toggleViewMode();
+      else if (data === "?") this.dialog = { kind: "help" };
+      else if (data === "q") this.stop();
+      return;
+    }
+
     const panelSlot = sidePaneSlot(data);
     if (panelSlot) {
       this.openSelectedSidePane(panelSlot);
       return;
     }
-    const focusSlot = focusedSidePaneSlot(data);
     if (focusSlot) {
       this.focusSidePane(focusSlot);
       return;
@@ -167,7 +183,7 @@ export class SessionsView implements Component {
     this.clearExpiredFlash();
     const height = this.actions.terminalRows?.() ?? process.stdout.rows;
     if (width < MIN_RENDER_WIDTH) {
-      this.rowSessions = [];
+      this.rowTargets = [];
       this.listWidth = 0;
       return narrowNotice(width);
     }
@@ -177,6 +193,7 @@ export class SessionsView implements Component {
     if (this.dialog?.kind === "form") return limitRows(renderFormDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
     if (this.dialog?.kind === "confirm") return limitRows(renderConfirmDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
     if (this.pendingRestart) return limitRows(renderRestartDialog(width, this.dialogContext()), height, width, this.theme);
+    this.normalizeListSelection();
     const snapshot = this.controller.snapshot();
     const selected = this.controller.selected();
     const now = this.actions.now?.() ?? Date.now();
@@ -196,9 +213,11 @@ export class SessionsView implements Component {
       now,
       sidePaneSessionIds,
       sidePaneFocusedSlot: this.actions.sidePaneFocusedSlot?.(),
+      archiveExpanded: this.archiveExpanded,
+      archiveDisclosureSelected: this.archiveDisclosureSelected,
       hidePreview: Boolean(sidePaneSessionIds?.size),
     }), this.theme);
-    this.rowSessions = layout.rowSessions;
+    this.rowTargets = layout.rowTargets;
     this.listWidth = layout.listWidth;
     this.listScrollTop = layout.listScrollTop;
     const footer = this.dialog?.kind === "prompt" ? promptFooter(this.dialog, this.dialogContext()) : undefined;
@@ -407,18 +426,30 @@ export class SessionsView implements Component {
       return;
     }
     const inList = event.x >= 2 && event.x <= 1 + this.listWidth;
-    const id = inList ? this.rowSessions[event.y - 1] : undefined;
-    const previousId = this.controller.snapshot().selectedId;
-    if (!id || !this.controller.selectSession(id)) {
+    const target = inList ? this.rowTargets[event.y - 1] : undefined;
+    if (!target) {
       this.lastMouseClick = undefined;
       return;
     }
-    if (id !== previousId) this.actions.selectionChanged?.();
+    const previousId = this.controller.snapshot().selectedId;
+    if (target.kind === "archive-disclosure") this.archiveDisclosureSelected = true;
+    else {
+      if (!this.controller.selectSession(target.id)) {
+        this.lastMouseClick = undefined;
+        return;
+      }
+      this.archiveDisclosureSelected = false;
+      if (target.id !== previousId) this.actions.selectionChanged?.();
+    }
+    const targetKey = target.kind === "session" ? `session:${target.id}` : target.kind;
     const now = this.actions.now?.() ?? Date.now();
     const elapsed = this.lastMouseClick ? now - this.lastMouseClick.at : undefined;
-    const doubleClick = this.lastMouseClick?.sessionId === id && elapsed !== undefined && elapsed >= 0 && elapsed <= DOUBLE_CLICK_MS;
-    this.lastMouseClick = doubleClick ? undefined : { sessionId: id, at: now };
-    if (doubleClick) this.attachSelected();
+    const doubleClick = this.lastMouseClick?.target === targetKey && elapsed !== undefined && elapsed >= 0 && elapsed <= DOUBLE_CLICK_MS;
+    this.lastMouseClick = doubleClick ? undefined : { target: targetKey, at: now };
+    if (doubleClick) {
+      if (target.kind === "archive-disclosure") this.toggleArchiveDisclosure();
+      else this.attachSelected();
+    }
   }
 
   private startPicker(mode: "skills" | "mcp") {
@@ -510,22 +541,57 @@ export class SessionsView implements Component {
   }
 
   private moveSelection(delta: number) {
+    const targets = this.visibleListTargets();
+    if (!targets.length) return;
     const previousId = this.controller.snapshot().selectedId;
-    if (this.viewMode !== "stages") {
-      this.controller.move(delta);
-    } else {
-      const rows = this.stageRows();
-      if (!rows.length) return;
-      const index = Math.max(0, rows.findIndex((row) => row.id === previousId));
-      const next = rows[(index + delta + rows.length) % rows.length];
-      if (next) this.controller.selectSession(next.id);
+    const index = Math.max(0, targets.findIndex((target) => target.kind === "archive-disclosure"
+      ? this.archiveDisclosureSelected
+      : !this.archiveDisclosureSelected && target.id === previousId));
+    const next = targets[(index + delta + targets.length) % targets.length];
+    if (!next) return;
+    if (next.kind === "archive-disclosure") this.archiveDisclosureSelected = true;
+    else {
+      this.archiveDisclosureSelected = false;
+      this.controller.selectSession(next.id);
+      if (next.id !== previousId) this.actions.selectionChanged?.();
     }
-    if (this.controller.snapshot().selectedId !== previousId) this.actions.selectionChanged?.();
+  }
+
+  private visibleListTargets(): SessionListTarget[] {
+    if (this.viewMode === "stages") return this.stageRows().map((row) => ({ kind: "session", id: row.id }));
+    const snapshot = this.controller.snapshot();
+    const allRows = orderedSessionRows(snapshot.sessions, snapshot.filter);
+    const archive = archiveSectionRows(allRows, { expanded: this.archiveExpanded, filterActive: snapshot.filter !== undefined });
+    const targets: SessionListTarget[] = archive.rows.map((row) => ({ kind: "session", id: row.id }));
+    if (archive.showDisclosure) targets.push({ kind: "archive-disclosure" });
+    return targets;
+  }
+
+  private normalizeListSelection() {
+    const targets = this.visibleListTargets();
+    if (!targets.length) {
+      this.archiveDisclosureSelected = false;
+      return;
+    }
+    if (this.archiveDisclosureSelected) {
+      if (targets.some((target) => target.kind === "archive-disclosure")) return;
+      this.archiveDisclosureSelected = false;
+    }
+    const selectedId = this.controller.snapshot().selectedId;
+    if (targets.some((target) => target.kind === "session" && target.id === selectedId)) return;
+    const fallback = [...targets].reverse().find((target): target is Extract<SessionListTarget, { kind: "session" }> => target.kind === "session");
+    if (fallback && this.controller.selectSession(fallback.id) && fallback.id !== selectedId) this.actions.selectionChanged?.();
+  }
+
+  private toggleArchiveDisclosure() {
+    this.archiveExpanded = !this.archiveExpanded;
+    this.normalizeListSelection();
   }
 
   private stageRows() {
     const snapshot = this.controller.snapshot();
-    const active = orderedSessionRows(snapshot.sessions, snapshot.filter).filter((session) => sessionSection(session) === "active");
+    const rows = orderedSessionRows(snapshot.sessions, snapshot.filter);
+    const active = rows.filter((session) => effectiveSessionLifecycle(session, rows).section === "active");
     return stageLaneRows(active).flatMap((lane) => lane.rows);
   }
 
@@ -534,8 +600,12 @@ export class SessionsView implements Component {
     this.clearFlash();
     this.message = undefined;
     this.viewMode = this.viewMode === "groups" ? "stages" : "groups";
-    if (this.viewMode !== "stages") return;
     const previousId = this.controller.snapshot().selectedId;
+    this.archiveDisclosureSelected = false;
+    if (this.viewMode !== "stages") {
+      this.normalizeListSelection();
+      return;
+    }
     const rows = this.stageRows();
     if (rows.length && !rows.some((row) => row.id === previousId)) {
       this.controller.selectSession(rows[0]?.id ?? "");
@@ -557,6 +627,10 @@ export class SessionsView implements Component {
     }
     if (this.controller.selected()?.kind === "subagent") {
       this.message = "subagent rows follow their parent order";
+      return;
+    }
+    if (this.controller.selected()?.bucket === "archived") {
+      this.message = "Archived is sorted by archive time";
       return;
     }
     const reorder = this.actions.reorderSelected;
@@ -775,8 +849,9 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  Ctrl+Q return to dashboard/sidebar     Alt+R rename current session",
     "",
     heading("Sections and views"),
-    "  Active · Backlog · Archived keep project/group headers inside each section",
-    "  Archived rows auto-remove after 72h once their tmux session is gone",
+    "  Active and Backlog keep project/group headers; Archived is flat and chronological",
+    "  Archived shows 5 parent cascades; Enter/double-click reveals older rows",
+    "  Archived cascades auto-remove after 7d once every tmux session is gone",
     "  Stages view lanes active sessions by workflow step (via the workflow-runtime extension);",
     "  backlog/archived rows are summarized and K/J reorder is groups-view only",
     "",
