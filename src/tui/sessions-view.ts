@@ -180,6 +180,7 @@ export class SessionsView implements Component {
     const snapshot = this.controller.snapshot();
     const selected = this.controller.selected();
     const now = this.actions.now?.() ?? Date.now();
+    const sidePaneSessionIds = this.actions.sidePaneSessionIds?.();
     const layout = renderSessions(buildRenderModel({
       sessions: snapshot.sessions,
       selectedId: snapshot.selectedId,
@@ -193,8 +194,9 @@ export class SessionsView implements Component {
       selectedSkillCount: selected ? this.actions.skillCount?.(selected.cwd) : undefined,
       viewMode: this.viewMode,
       now,
-      sidePaneSessionIds: this.actions.sidePaneSessionIds?.(),
+      sidePaneSessionIds,
       sidePaneFocusedSlot: this.actions.sidePaneFocusedSlot?.(),
+      hidePreview: Boolean(sidePaneSessionIds?.size),
     }), this.theme);
     this.rowSessions = layout.rowSessions;
     this.listWidth = layout.listWidth;

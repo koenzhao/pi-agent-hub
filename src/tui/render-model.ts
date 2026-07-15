@@ -111,6 +111,7 @@ export interface BuildRenderModelInput {
   now?: number;
   sidePaneSessionIds?: ReadonlyMap<string, number>;
   sidePaneFocusedSlot?: number;
+  hidePreview?: boolean;
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
@@ -141,7 +142,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     width: input.width,
     empty: input.sessions.length === 0,
     noMatches: input.sessions.length > 0 && allRows.length === 0,
-    showPreview: input.width >= 80,
+    showPreview: input.width >= 80 && !input.hidePreview,
     compactFooter,
     groups,
     sections,

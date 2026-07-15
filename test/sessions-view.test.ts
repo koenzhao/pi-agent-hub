@@ -351,6 +351,7 @@ test("side pane presence snapshots render numbered slot glyphs", () => {
   const rendered = stripAnsi(view.render(100).join("\n"));
   assert.match(rendered, /○ ◫2 api/);
   assert.match(rendered, /○ ◫1 docs/);
+  assert.doesNotMatch(rendered, /── preview/);
 });
 
 test("side pane presence snapshots update without registry mutation", () => {
@@ -358,9 +359,13 @@ test("side pane presence snapshots update without registry mutation", () => {
   let sidePaneSessionIds = new Map<string, number>();
   const view = new SessionsView(controller, () => {}, { sidePaneSessionIds: () => sidePaneSessionIds });
 
-  assert.doesNotMatch(stripAnsi(view.render(100).join("\n")), /◫/);
+  const withoutPanels = stripAnsi(view.render(100).join("\n"));
+  assert.doesNotMatch(withoutPanels, /◫/);
+  assert.match(withoutPanels, /── preview/);
   sidePaneSessionIds = new Map([["api", 1]]);
-  assert.match(stripAnsi(view.render(100).join("\n")), /○ ◫1 api/);
+  const withPanel = stripAnsi(view.render(100).join("\n"));
+  assert.match(withPanel, /○ ◫1 api/);
+  assert.doesNotMatch(withPanel, /── preview/);
 });
 
 test("number keys assign the selected live session to matching panel slots", () => {

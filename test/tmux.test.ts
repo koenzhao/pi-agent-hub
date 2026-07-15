@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { darkTmuxChrome } from "../src/core/chrome.js";
-import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, clientSize, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSidebarReturnBinding, inspectSwitchReturnBinding, installSidebarReturnBinding, killPane, listWindowPanes, presizeSessionWindow, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resetSessionWindowSize, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setDashboardStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, shellQuote, splitPaneAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, clientSize, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSidebarReturnBinding, inspectSwitchReturnBinding, installSidebarReturnBinding, killPane, listWindowPanes, presizeSessionWindow, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resetSessionWindowSize, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setSessionStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, shellQuote, splitPaneAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -184,6 +184,17 @@ test("configureManagedSessionStatusBar sets a Pi-native right footer", async () 
   ]]);
 });
 
+test("configureManagedSessionStatusBar keeps chrome configured while hidden in a panel", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await configureManagedSessionStatusBar({ name: "pi-agent-hub-api", title: "package", cwd: "/repo/example-service", visible: false }, exec);
+
+  const args = exec.calls[0]?.args ?? [];
+  assert.deepEqual(args.slice(0, 5), ["set-option", "-t", "pi-agent-hub-api", "status", "off"]);
+  assert.ok(args.includes("status-right"));
+  assert.ok(args.includes("window-status-current-format"));
+});
+
 test("configureManagedSessionStatusBar applies theme-derived chrome", async () => {
   const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
 
@@ -247,11 +258,11 @@ test("configureDashboardStatusBar can keep dashboard chrome configured while sta
   assert.ok(args.includes("window-status-current-format"));
 });
 
-test("setDashboardStatusBarVisible toggles only the dashboard status option", async () => {
+test("setSessionStatusBarVisible toggles only the target session status option", async () => {
   const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
 
-  await setDashboardStatusBarVisible({ name: "pi-agent-hub-dashboard", visible: false }, exec);
-  await setDashboardStatusBarVisible({ name: "pi-agent-hub-dashboard", visible: true }, exec);
+  await setSessionStatusBarVisible({ name: "pi-agent-hub-dashboard", visible: false }, exec);
+  await setSessionStatusBarVisible({ name: "pi-agent-hub-dashboard", visible: true }, exec);
 
   assert.deepEqual(exec.calls, [
     { command: "tmux", args: ["set-option", "-t", "pi-agent-hub-dashboard", "status", "off"] },
