@@ -40,9 +40,36 @@ test("workflow rail renders compact in the list row and full in details", () => 
 
   const lines = renderSessions(model).lines.map(stripAnsi);
   const row = lines.find((line) => /^│▌/.test(line));
-  assert.match(row ?? "", /● a\s+EX 4\/7/);
+  assert.match(row ?? "", /● a\s+EX/);
+  assert.doesNotMatch(row ?? "", /4\/7/);
   assert.match(lines.join("\n"), /NX─PR─PL─▐EX▌─RV─RF─CM · auth-003/);
   for (const line of renderSessions(model).lines) assert.ok(visibleWidth(line) <= 110, line);
+});
+
+test("active and backlog rows use fixed stage and activity slots", () => {
+  const now = 1_000_000;
+  const sessions = [
+    { ...session("running", "default", "running"), workflow: WORKFLOW, lastActivityAt: now - 14 * 60_000 },
+    { ...session("waiting", "default", "waiting"), workflow: WORKFLOW, lastActivityAt: now - 14 * 60_000 },
+    { ...session("idle", "default", "idle"), lastActivityAt: now - 14 * 60_000 },
+    { ...session("backlog", "default", "waiting"), bucket: "backlog" as const, workflow: WORKFLOW, lastActivityAt: now - 14 * 60_000 },
+  ];
+  const lines = renderSessions(buildRenderModel({ sessions, selectedId: "running", width: 110, now })).lines.map(stripAnsi);
+  const running = lines.find((line) => /^│▌ ● running/.test(line)) ?? "";
+  const waiting = lines.find((line) => /^│  ◐ waiting/.test(line)) ?? "";
+  const idle = lines.find((line) => /^│  ○ idle/.test(line)) ?? "";
+  const backlog = lines.find((line) => /^│  ◐ backlog/.test(line)) ?? "";
+
+  assert.match(running, /EX/);
+  assert.doesNotMatch(running, /14m/);
+  assert.match(waiting, /EX 14m/);
+  assert.doesNotMatch(waiting.split("│")[1] ?? "", /·/);
+  assert.equal(running.indexOf("EX"), waiting.indexOf("EX"));
+  assert.match(idle, /14m/);
+  assert.doesNotMatch(idle, /EX/);
+  assert.equal(waiting.indexOf("14m"), idle.indexOf("14m"));
+  assert.match(backlog, /EX 14m/);
+  assert.equal(waiting.indexOf("EX"), backlog.indexOf("EX"));
 });
 
 test("expanded details include the full workflow rail", () => {
@@ -61,11 +88,11 @@ test("sessions without workflow render no rail", () => {
 
 test("archive age takes priority over the compact rail", () => {
   const day = 24 * 60 * 60 * 1000;
-  const archived = { ...session("a", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100, workflow: WORKFLOW };
+  const archived = { ...session("a", "default", "stopped"), bucket: "archived" as const, bucketChangedAt: 100, lastActivityAt: 100 + day, workflow: WORKFLOW };
   const model = buildRenderModel({ sessions: [archived, session("b", "default", "running")], selectedId: "a", width: 110, now: 100 + 2 * day });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /a\s+2d/);
-  assert.doesNotMatch(row ?? "", /\[exp|EX 4\/7/);
+  assert.doesNotMatch(row ?? "", /\[exp|EX/);
   assert.match(renderSessions(model).lines.map(stripAnsi).join("\n"), /archived 2d ago · cleanup eligible in 5d/);
 });
 
@@ -125,7 +152,7 @@ test("stages view rows show the group name instead of the rail", () => {
   const model = buildRenderModel({ sessions: [{ ...session("p", "agents", "running"), workflow: WORKFLOW }], viewMode: "stages", width: 120 });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /● p\s+agents/);
-  assert.doesNotMatch(row ?? "", /EX 4\/7/);
+  assert.doesNotMatch(row ?? "", /EX|4\/7/);
 });
 
 test("render model records side pane slots by session id", () => {
@@ -180,8 +207,8 @@ test("side pane glyphs do not crowd compact workflow rails", () => {
     sidePaneSessionIds: new Map([["api", 1]]),
   });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
-  assert.match(row ?? "", /● ◫1 api\s+EX 4\/7/);
-  assert.doesNotMatch(row ?? "", /EX 4\/7 ◫1/);
+  assert.match(row ?? "", /● ◫1 api\s+EX/);
+  assert.doesNotMatch(row ?? "", /4\/7|EX ◫1/);
 });
 
 test("side pane glyphs remain left-visible at narrow widths", () => {
@@ -194,7 +221,8 @@ test("side pane glyphs remain left-visible at narrow widths", () => {
   });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│▌/.test(line));
   assert.match(row ?? "", /● ◫1 long-t/);
-  assert.match(row ?? "", /EXECUTE-LONG-LABEL 4\/7/);
+  assert.match(row ?? "", /EXECUTE-LONG-LABEL/);
+  assert.doesNotMatch(row ?? "", /4\/7/);
 });
 
 test("stages view keeps side pane glyphs separate from group adornments", () => {

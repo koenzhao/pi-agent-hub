@@ -17,6 +17,7 @@ export interface RenderSession {
   bucketChangedAt?: number;
   archivedAge?: string;
   archiveRetentionIn?: string;
+  activityAge?: string;
   status: SessionStatus;
   displayStatus: "running" | "waiting" | "idle" | "error" | "stopped";
   symbol: string;
@@ -307,6 +308,7 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     section: lifecycle.section,
     bucketChangedAt: lifecycle.bucketChangedAt,
     ...archiveTiming,
+    activityAge: activityAge(session.lastActivityAt, now),
     status: session.status,
     displayStatus,
     symbol: symbolFor(displayStatus),
@@ -341,6 +343,11 @@ function archiveTimingFor(section: SessionSection, changedAt: number | undefined
     archivedAge: ageLabel(elapsed),
     archiveRetentionIn: remaining <= 0 ? "now" : remaining < 60_000 ? "<1m" : ageLabel(remaining),
   };
+}
+
+function activityAge(lastActivityAt: number | undefined, now: number | undefined): string | undefined {
+  if (lastActivityAt === undefined || now === undefined) return undefined;
+  return ageLabel(Math.max(0, now - lastActivityAt));
 }
 
 function metadataUpdatedAge(metadata: SessionMetadata | undefined, now: number | undefined): string | undefined {

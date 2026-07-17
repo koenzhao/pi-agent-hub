@@ -291,7 +291,7 @@ function titleStatusRow(session: RenderSession, width: number, styles: LayoutSty
 function railCompact(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
   const step = workflow.steps[workflow.activeIndex];
   if (!step) return "";
-  return `${styles.accent(step.short)} ${styles.dim(`${workflow.activeIndex + 1}/${workflow.steps.length}`)}`;
+  return styles.accent(step.short);
 }
 
 function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined, styles: LayoutStyles): string {
@@ -300,10 +300,14 @@ function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined
 }
 
 function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages: boolean, width: number): string {
+  const stage = session.workflow?.steps[session.workflow.activeIndex]?.short ?? "";
+  const activity = session.displayStatus === "running" ? "" : session.activityAge ?? "";
+  const stageSlot = `${stage}${" ".repeat(Math.max(0, 2 - displayWidth(stage)))}`;
+  const activitySlot = `${" ".repeat(Math.max(0, 3 - displayWidth(activity)))}${activity}`;
+  const active = `${stage ? styles.muted(stageSlot) : stageSlot} ${activity ? styles.dim(activitySlot) : activitySlot}`;
   const right = stages
     ? (session.kind === "subagent" ? "" : styles.dim(session.group))
-    : session.archivedAge ? styles.dim(session.archivedAge)
-      : session.workflow ? railCompact(session.workflow, styles) : "";
+    : session.archivedAge ? styles.dim(session.archivedAge) : active;
   return right && width - displayWidth(right) - 1 >= 12 ? right : "";
 }
 

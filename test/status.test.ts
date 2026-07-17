@@ -78,6 +78,14 @@ test("apply computed status persists Pi session metadata from heartbeat", () => 
   assert.equal(updated.piSessionId, "abc123");
 });
 
+test("apply computed status preserves the latest heartbeat activity time", () => {
+  const fresh = applyComputedStatus(session({ lastActivityAt: now - 2_000 }), { status: "waiting" }, now, heartbeat({ stateSince: now - 1_000 }));
+  assert.equal(fresh.lastActivityAt, now - 1_000);
+
+  const older = applyComputedStatus(session({ lastActivityAt: now - 500 }), { status: "waiting" }, now, heartbeat({ stateSince: now - 1_000 }));
+  assert.equal(older.lastActivityAt, now - 500);
+});
+
 test("apply computed status keeps fresh active theme and drops stale theme", () => {
   const activeTheme = { name: "solarized-dark", sourcePath: "/themes/solarized-dark.json" };
   const fresh = applyComputedStatus(session(), { status: "waiting" }, now, heartbeat({ activeTheme }));

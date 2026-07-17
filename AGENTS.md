@@ -21,7 +21,7 @@
 
 ## TUI Rules
 
-- Keep rendering pure/testable and ANSI width-safe through theme/layout helpers; reserve width for right-side badges/counts in left/right columns. Archived collapse/disclosure stays ephemeral TUI state and must remain a synthetic non-session target so session actions cannot reach a stale real selection. Keep dashboard footer rendering in `src/tui/render-model.ts` distinct from managed-session tmux chrome in `src/core/tmux.ts`.
+- Keep rendering pure/testable and ANSI width-safe through theme/layout helpers; reserve width for right-side badges/counts in left/right columns. In groups view, keep fixed Active/Backlog slots for a muted workflow stage and right-aligned activity age, with the age blank while running; Archived remains age-only. Archived collapse/disclosure stays ephemeral TUI state and must remain a synthetic non-session target so session actions cannot reach a stale real selection. Keep dashboard footer rendering in `src/tui/render-model.ts` distinct from managed-session tmux chrome in `src/core/tmux.ts`.
 - Route dialogs through `SessionDialog` in `src/tui/dialog.ts` and the small `src/tui/*-dialog.ts` modules. Use `src/tui/text-input.ts` and `src/tui/form.ts`/`renderForm()` for editable inputs instead of one-off state.
 - For themed footers, prefer Pi `statusLineBg` before `border` so Catppuccin border/accent colors do not become unreadable full-bar backgrounds.
 

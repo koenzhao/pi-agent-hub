@@ -53,6 +53,7 @@ export function applyComputedStatus(session: ManagedSession, computed: ComputedS
     error: computed.error,
     sessionFile: heartbeat?.piSessionFile ?? session.sessionFile,
     piSessionId: heartbeat?.piSessionId ?? session.piSessionId,
+    lastActivityAt: latestActivityAt(session.lastActivityAt, heartbeat?.stateSince),
     kind: heartbeat?.kind ?? session.kind,
     parentId: heartbeat?.parentId ?? session.parentId,
     agentName: heartbeat?.agentName ?? session.agentName,
@@ -66,6 +67,11 @@ export function applyComputedStatus(session: ManagedSession, computed: ComputedS
 
 export function markAcknowledged(session: ManagedSession, now = Date.now()): ManagedSession {
   return { ...session, acknowledgedAt: now, status: session.status === "waiting" ? "idle" : session.status, updatedAt: now };
+}
+
+function latestActivityAt(current: number | undefined, heartbeatStateSince: number | undefined): number | undefined {
+  if (heartbeatStateSince === undefined) return current;
+  return Math.max(current ?? heartbeatStateSince, heartbeatStateSince);
 }
 
 function freshHeartbeat(heartbeat: Heartbeat | undefined, now: number): heartbeat is Heartbeat {

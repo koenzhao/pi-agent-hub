@@ -46,6 +46,7 @@ export interface ManagedSession {
   sessionFile?: string;
   piSessionId?: string;
   acknowledgedAt?: number;
+  lastActivityAt?: number;
   order?: number;
   bucket?: SessionBucket;
   bucketChangedAt?: number;

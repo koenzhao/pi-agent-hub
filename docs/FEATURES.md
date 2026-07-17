@@ -31,7 +31,7 @@ Ctrl+Q returns to the dashboard
 | Project Skills | `s` picker | Attach Pi skills to the selected session's primary repo. |
 | Project MCP servers | `m` picker | Enable MCP tools for the selected session's primary repo. |
 | Subagent rows | Automatic when `pi-tmux-subagents` reports them | See child agent work nested under the parent session. |
-| Workflow rail + stages view | Automatic when the `workflow-runtime` extension reports steps; `v` toggles views | See each session's workflow stage in the row (`EX 4/7`) and details rail, or lane all active sessions by stage. |
+| Workflow rail + stages view | Automatic when the `workflow-runtime` extension reports steps; `v` toggles views | See each session's workflow stage in the row (`EX`) and details rail, or lane all active sessions by stage. |
 
 ## Dashboard keys
 
@@ -81,7 +81,7 @@ Zero counts are hidden in the dashboard summaries, so `◐2 ×1` means only wait
 
 The session list is sectioned as Active, Backlog, then Archived when any non-active rows exist. Active and Backlog keep group headers and manual order; Archived is one flat globally newest-first list. It shows the newest five parent cascades by default, keeping all nested subagent rows with their parent. Select `… N older archived` and press `Enter` or double-click to expand; use `⌃ show fewer` to collapse. Filtering reveals all matching archived rows regardless of collapse state. All-active dashboards omit the Active section header to stay compact.
 
-Sessions running the optional `workflow-runtime` extension also show a workflow rail: the compact form `EX 4/7` right-aligned in the list row, and the full rail `NX─PR─PL─▐EX▌─RV─RF─CM · ticket` in the details pane. Pressing `v` switches to the stages view, which lanes active sessions by their current workflow step (with a final `NO WORKFLOW` lane) and shows each row's group name instead of the rail. Backlog and Archived rows are summarized as one dim line in the stages view, subagents stay nested under their parent's lane, and `K`/`J` reordering is groups-view only. Workflow state is remembered for stopped sessions so cards keep their lane.
+Sessions running the optional `workflow-runtime` extension also show a workflow rail: the compact stage label `EX` in the list row, and the full rail `NX─PR─PL─▐EX▌─RV─RF─CM · ticket` in the details pane. In groups view, Active and Backlog rows use fixed stage-and-age slots (`EX 14m`) so workflow and recency stay column-aligned; running rows leave the redundant age slot blank, and rows without a workflow leave the stage slot blank. Archived rows keep their existing right-aligned time-since-archive label instead. Pressing `v` switches to the stages view, which lanes active sessions by their current workflow step (with a final `NO WORKFLOW` lane) and shows each row's group name instead of the rail. Backlog and Archived rows are summarized as one dim line in the stages view, subagents stay nested under their parent's lane, and `K`/`J` reordering is groups-view only. Workflow state is remembered for stopped sessions so cards keep their lane.
 
 The dashboard top line summarizes visible sessions and nonzero status counts in fixed order. Press `?` for the full help/legend and `i` to toggle compact vs full selected-session metadata. The details pane can also show extension-provided session metadata; see [Configuration](CONFIG.md#session-metadata).
 
