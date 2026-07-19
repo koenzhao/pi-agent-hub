@@ -177,10 +177,10 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     ...(input.listScrollTop ? { listScrollTop: input.listScrollTop } : {}),
     selected,
     footer: compactFooter
-      ? "1-4 Set · ⇧1-4 Focus · o Reset · ? Help"
+      ? "1-4 Set · x# Close · F# Focus · ? Help"
       : input.width < 120
-        ? "Enter Open · 1-4 Panels · ⇧1-4/F# Focus · o Reset · / Filter · i Info · ? Help"
-        : `Enter Open · 1-4 Panels · ⇧1-4/F# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  v View · ? Help`,
+        ? "Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · / Filter · i Info · ? Help"
+        : `Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  v View · ? Help`,
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,

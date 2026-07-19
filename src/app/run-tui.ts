@@ -15,7 +15,7 @@ import { tmuxChromeFromTheme } from "../core/chrome.js";
 import { sessionSection } from "../core/session-bucket.js";
 import { loadRepoHistory, mergeRepoCwds, rankedRepoCwds } from "../core/repo-history.js";
 import { attachSessionCommand, configureDashboardStatusBar, configureManagedSessionStatusBar, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resizePaneWidth, restoreSwitchReturnBinding, sendTextToSession, setDashboardMouse, setSessionStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, switchClientWithReturn } from "../core/tmux.js";
-import { closeSidePaneShowing, closeSidePanes, focusSidePaneSlot as focusPanel, resetSidePane, sidebarRepairWidth, sidePaneStatus, toggleSidePaneSlot, type SidePaneResult } from "./side-pane.js";
+import { assignSidePaneSlot, closeSidePaneShowing, closeSidePanes, closeSidePaneSlot as closePanel, focusSidePaneSlot as focusPanel, resetSidePane, sidebarRepairWidth, sidePaneStatus, type SidePaneResult } from "./side-pane.js";
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
@@ -147,7 +147,7 @@ export async function runTui(): Promise<void> {
     if (!process.env.TMUX) return;
     void configureDashboardStatusBar({ name: DASHBOARD_SESSION, cwd, theme: nextTheme, visible: dashboardStatusVisible }).catch(() => {});
   };
-  const applyManagedSessionTheme = async (session: ManagedSession, visible = !sidePaneTmuxSessions.includes(session.tmuxSession)) => {
+  const applyManagedSessionTheme = async (session: ManagedSession, visible = !sidePaneSlots.includes(session.tmuxSession)) => {
     pinDashboardThemeSession(session);
     const sessionTheme = await loadManagedSessionTheme(session);
     currentTheme = sessionTheme;
@@ -163,7 +163,7 @@ export async function runTui(): Promise<void> {
       visible,
     });
     const ownPane = process.env.TMUX_PANE;
-    if (ownPane && sidePaneTmuxSessions.length) await setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
+    if (ownPane && sidePaneSlots.some(Boolean)) await setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
   };
   syncDashboardChrome(theme);
   const terminal = new ProcessTerminal();
@@ -195,30 +195,30 @@ export async function runTui(): Promise<void> {
   let stopSidePanePresenceLoop: (() => Promise<void>) | undefined;
   let sidePanePresenceDrain: Promise<void> | undefined;
   let sidePaneTail = Promise.resolve();
-  let sidePaneTmuxSessions: string[] = [];
+  let sidePaneSlots: (string | undefined)[] = [undefined, undefined, undefined, undefined];
   let sidePaneFocusedSlot: number | undefined;
   let stopped = false;
   const titleForTmuxSession = (tmuxSession: string) => controller.snapshot().registry.sessions.find((session) => session.tmuxSession === tmuxSession)?.title;
   const refreshSidePanePresence = async () => {
     const ownPane = process.env.TMUX_PANE;
-    let next: string[] = [];
+    let next: (string | undefined)[] = [undefined, undefined, undefined, undefined];
     let nextFocusedSlot: number | undefined;
     if (ownPane) {
       const status = await sidePaneStatus({ ownPane });
-      next = status.sessions;
+      next = status.slots;
       nextFocusedSlot = status.activeSlot;
-      if (status.sessions.length && status.ownWidth !== undefined && status.windowWidth !== undefined) {
+      if (status.slots.some(Boolean) && status.ownWidth !== undefined && status.windowWidth !== undefined) {
         const repairWidth = sidebarRepairWidth(status.ownWidth, status.windowWidth);
         if (repairWidth !== undefined) await resizePaneWidth(ownPane, repairWidth);
       }
       for (const [index, paneId] of status.paneIds.entries()) {
-        const tmuxSession = status.sessions[index];
-        if (tmuxSession) await setPaneTitle(paneId, `[${index + 1}] ${titleForTmuxSession(tmuxSession) ?? tmuxSession}`);
+        const tmuxSession = status.slots[index];
+        if (tmuxSession && paneId) await setPaneTitle(paneId, `[${index + 1}] ${titleForTmuxSession(tmuxSession) ?? tmuxSession}`);
       }
     }
-    const changed = !sameStringArrays(sidePaneTmuxSessions, next) || sidePaneFocusedSlot !== nextFocusedSlot;
-    const hadSidePanes = sidePaneTmuxSessions.length > 0;
-    const hasSidePanes = next.length > 0;
+    const changed = !sameStringArrays(sidePaneSlots, next) || sidePaneFocusedSlot !== nextFocusedSlot;
+    const hadSidePanes = sidePaneSlots.some(Boolean);
+    const hasSidePanes = next.some(Boolean);
     if (ownPane && hadSidePanes !== hasSidePanes) {
       await applyDashboardStatusVisibility(!hasSidePanes);
       await setWindowPaneBorderStatus(ownPane, hasSidePanes, hasSidePanes ? tmuxChromeFromTheme(currentTheme) : undefined);
@@ -226,11 +226,11 @@ export async function runTui(): Promise<void> {
     }
     if (ownPane) await reconcileSidebarReturnBinding({ desired: hasSidePanes, dashboardSession: DASHBOARD_SESSION, sidebarPane: ownPane });
     await syncSidePaneSessionFooters(
-      sidePaneTmuxSessions,
-      next,
+      sidePaneSlots.filter((session): session is string => Boolean(session)),
+      next.filter((session): session is string => Boolean(session)),
       (name, visible) => setSessionStatusBarVisible({ name, visible }),
     );
-    sidePaneTmuxSessions = next;
+    sidePaneSlots = next;
     sidePaneFocusedSlot = nextFocusedSlot;
     return changed;
   };
@@ -242,7 +242,7 @@ export async function runTui(): Promise<void> {
   const refreshSidePanePresenceSerialized = () => serializeSidePaneOperation(
     () => stopped ? Promise.resolve(false) : refreshSidePanePresence(),
   );
-  void serializeSidePaneOperation(() => syncManagedSessionStatusBars(new Set(sidePaneTmuxSessions))).catch(() => {});
+  void serializeSidePaneOperation(() => syncManagedSessionStatusBars(new Set(sidePaneSlots.filter((session): session is string => Boolean(session))))).catch(() => {});
   const shortcutTimers = new Set<NodeJS.Timeout>();
   const pauseSidePanePresenceLoop = () => {
     if (sidePanePresenceDrain) return sidePanePresenceDrain;
@@ -281,7 +281,7 @@ export async function runTui(): Promise<void> {
     if (ownPane) {
       void restoreBindings()
         .then(async () => {
-          for (const tmuxSession of sidePaneTmuxSessions) await setSessionStatusBarVisible({ name: tmuxSession, visible: true }).catch(() => {});
+          for (const tmuxSession of sidePaneSlots) if (tmuxSession) await setSessionStatusBarVisible({ name: tmuxSession, visible: true }).catch(() => {});
         })
         .then(() => closeSidePanes({ ownPane }).catch(() => {}))
         .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
@@ -339,7 +339,7 @@ export async function runTui(): Promise<void> {
         const ownPane = process.env.TMUX_PANE;
         if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
         if (session.status === "waiting") await mutateRegistry(() => controller.acknowledgeSession(session.id));
-        const openingFirstPanel = sidePaneTmuxSessions.length === 0;
+        const openingFirstPanel = !sidePaneSlots.some(Boolean);
         if (openingFirstPanel) {
           await applyDashboardStatusVisibility(false);
           await setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme));
@@ -351,8 +351,8 @@ export async function runTui(): Promise<void> {
         } catch (error) {
           if (openingFirstPanel) {
             const status = await sidePaneStatus({ ownPane }).catch(() => undefined);
-            if (status?.sessions.length) {
-              sidePaneTmuxSessions = status.sessions;
+            if (status?.slots.some(Boolean)) {
+              sidePaneSlots = status.slots;
               await reconcileSidebarReturnBinding({ desired: true, dashboardSession: DASHBOARD_SESSION, sidebarPane: ownPane }).catch(() => {});
             } else {
               await applyDashboardStatusVisibility(true).catch(() => {});
@@ -368,7 +368,7 @@ export async function runTui(): Promise<void> {
         const changed = await refreshSidePanePresence();
         if (stopped) return result;
         if (changed) tui.requestRender();
-        if (result.kind === "opened" || result.kind === "retargeted") await applyManagedSessionTheme(session);
+        if (result.kind === "opened" || result.kind === "retargeted" || result.kind === "moved") await applyManagedSessionTheme(session);
         return result;
       });
     } finally {
@@ -404,8 +404,22 @@ export async function runTui(): Promise<void> {
         resumeSidePanePresenceLoop();
       }
     },
-    toggleSidePaneSlot(sessionId, slot) {
-      return updateSidePane(sessionId, (target, ownPane) => toggleSidePaneSlot({ target, ownPane, slot, titleFor: titleForTmuxSession }));
+    assignSidePaneSlot(sessionId, slot) {
+      return updateSidePane(sessionId, (target, ownPane) => assignSidePaneSlot({ target, ownPane, slot, titleFor: titleForTmuxSession }));
+    },
+    async closeSidePaneSlot(slot) {
+      await pauseSidePanePresenceLoop();
+      try {
+        return await serializeSidePaneOperation(async () => {
+          const ownPane = process.env.TMUX_PANE;
+          if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
+          const result = await closePanel({ ownPane, slot, titleFor: titleForTmuxSession });
+          if (await refreshSidePanePresence()) tui.requestRender();
+          return result;
+        });
+      } finally {
+        resumeSidePanePresenceLoop();
+      }
     },
     resetSidePane(sessionId) {
       return updateSidePane(sessionId, (target, ownPane) => resetSidePane({ target, ownPane, titleFor: titleForTmuxSession }));
@@ -419,12 +433,7 @@ export async function runTui(): Promise<void> {
       });
     },
     sidePaneSessionIds() {
-      const result = new Map<string, number>();
-      for (const [index, tmuxSession] of sidePaneTmuxSessions.entries()) {
-        const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
-        if (session) result.set(session.id, index + 1);
-      }
-      return result;
+      return mapSidePaneSessionIds(sidePaneSlots, controller.snapshot().registry.sessions);
     },
     sidePaneFocusedSlot: () => sidePaneFocusedSlot,
     selectionChanged() {
@@ -571,8 +580,8 @@ export async function runTui(): Promise<void> {
       view.setTheme(nextTheme);
       syncDashboardChrome(nextTheme);
       const ownPane = process.env.TMUX_PANE;
-      if (ownPane && sidePaneTmuxSessions.length) void setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
-      void serializeSidePaneOperation(() => syncManagedSessionStatusBars(new Set(sidePaneTmuxSessions))).catch(() => {});
+      if (ownPane && sidePaneSlots.some(Boolean)) void setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
+      void serializeSidePaneOperation(() => syncManagedSessionStatusBars(new Set(sidePaneSlots.filter((session): session is string => Boolean(session))))).catch(() => {});
       tui.invalidate();
       tui.requestRender();
     },
@@ -646,6 +655,15 @@ export function startSidePanePresenceRefreshLoop(options: {
   };
 }
 
+export function mapSidePaneSessionIds(slots: readonly (string | undefined)[], sessions: readonly ManagedSession[]): Map<string, number> {
+  const ids = new Map<string, number>();
+  for (const [index, tmuxSession] of slots.entries()) {
+    const session = tmuxSession ? sessions.find((item) => item.tmuxSession === tmuxSession) : undefined;
+    if (session) ids.set(session.id, index + 1);
+  }
+  return ids;
+}
+
 export async function syncSidePaneSessionFooters(
   previous: readonly string[],
   next: readonly string[],
@@ -659,7 +677,7 @@ export async function syncSidePaneSessionFooters(
   }
 }
 
-function sameStringArrays(a: readonly string[], b: readonly string[]): boolean {
+function sameStringArrays(a: readonly (string | undefined)[], b: readonly (string | undefined)[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 

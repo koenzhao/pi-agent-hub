@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, resolveDashboardThemeSessionId, restartAllTargets, startSidePanePresenceRefreshLoop, syncSidePaneSessionFooters } from "../src/app/run-tui.js";
+import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, mapSidePaneSessionIds, resolveDashboardThemeSessionId, restartAllTargets, startSidePanePresenceRefreshLoop, syncSidePaneSessionFooters } from "../src/app/run-tui.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function deferred<T = void>() {
@@ -110,6 +110,14 @@ test("registry mutator resumes and propagates action failures", async () => {
   }), /boom/);
 
   assert.deepEqual(events, ["pause", "action", "resume"]);
+});
+
+test("side pane session ids preserve sparse quadrant numbers", () => {
+  const api = session("api", "/repo/api", "one");
+  const docs = session("docs", "/repo/docs", "one");
+  assert.deepEqual([...mapSidePaneSessionIds([api.tmuxSession, undefined, undefined, docs.tmuxSession], [api, docs])], [
+    ["api", 1], ["docs", 4],
+  ]);
 });
 
 test("side pane footer sync tolerates a session disappearing during refresh", async () => {

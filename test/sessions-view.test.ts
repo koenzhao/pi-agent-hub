@@ -93,8 +93,9 @@ test("help overlay opens and closes", () => {
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
   assert.match(help, /zero counts are hidden/);
-  assert.match(help, /1-4 assign\/toggle panels/);
-  assert.match(help, /Shift\+1-4 or F then 1-4 focus panel/);
+  assert.match(help, /1-4 assign panels/);
+  assert.match(help, /x then 1-4 close panel/);
+  assert.match(help, /F then 1-4 or Alt\+1-4 focus panel/);
   assert.match(help, /o reset to one panel/);
   assert.match(help, /mouse click select · double-click open\/switch/);
   assert.match(help, /v toggle groups\/stages view/);
@@ -387,7 +388,7 @@ test("number keys assign the selected live session to matching panel slots", () 
   const opened: { id: string; slot: number }[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
   const view = new SessionsView(controller, () => {}, {
-    toggleSidePaneSlot: (sessionId, slot) => {
+    assignSidePaneSlot: (sessionId, slot) => {
       opened.push({ id: sessionId, slot });
       return { kind: "opened", slot };
     },
@@ -399,7 +400,7 @@ test("number keys assign the selected live session to matching panel slots", () 
   assert.match(stripAnsi(view.render(100).join("\n")), /panel 4: api/);
 });
 
-test("shift-number keys focus matching panel slots", () => {
+test("shift-number keys no longer focus panel slots", () => {
   const focused: number[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
@@ -411,7 +412,7 @@ test("shift-number keys focus matching panel slots", () => {
 
   for (const key of ["!", "@", "#", "$"]) view.handleInput(key);
 
-  assert.deepEqual(focused, [1, 2, 3, 4]);
+  assert.deepEqual(focused, []);
 });
 
 test("F then a digit focuses the matching panel instead of toggling it", () => {
@@ -423,7 +424,7 @@ test("F then a digit focuses the matching panel instead of toggling it", () => {
       focused.push(slot);
       return { kind: "focused" };
     },
-    toggleSidePaneSlot: (_sessionId, slot) => {
+    assignSidePaneSlot: (_sessionId, slot) => {
       toggled.push(slot);
       return { kind: "opened", slot };
     },
@@ -446,7 +447,7 @@ test("the F focus chord cancels on non-digits and dialog or mouse input", () => 
       focused.push(slot);
       return { kind: "focused" };
     },
-    toggleSidePaneSlot: (_sessionId, slot) => {
+    assignSidePaneSlot: (_sessionId, slot) => {
       toggled.push(slot);
       return { kind: "opened", slot };
     },
@@ -470,15 +471,38 @@ test("the F focus chord cancels on non-digits and dialog or mouse input", () => 
   assert.deepEqual(toggled, [2, 3, 4]);
 });
 
-test("shift-number reports an unavailable panel", () => {
+test("x then a digit closes that panel and reports unavailable slots", () => {
+  const closed: number[] = [];
+  const results = [{ kind: "closed" as const }, { kind: "unavailable" as const }];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    focusSidePaneSlot: () => ({ kind: "unavailable" }),
+    closeSidePaneSlot: (slot) => {
+      closed.push(slot);
+      return results.shift()!;
+    },
   });
 
-  view.handleInput("@");
+  view.handleInput("x");
+  assert.match(stripAnsi(view.render(100).join("\n")), /close panel: press 1-4/);
+  view.handleInput("2");
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 2 closed/);
+  view.handleInput("x");
+  view.handleInput("3");
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 3 is not open/);
+  assert.deepEqual(closed, [2, 3]);
+});
 
-  assert.match(stripAnsi(view.render(100).join("\n")), /panel 2 is not open/);
+test("x close chord disarms on other input and falls through", () => {
+  const closed: number[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    closeSidePaneSlot: (slot) => { closed.push(slot); return { kind: "closed" }; },
+  });
+  view.handleInput("x");
+  view.handleInput("j");
+  view.handleInput("2");
+  assert.deepEqual(closed, []);
+  assert.equal(controller.snapshot().selectedId, "api");
 });
 
 test("number keys override configured dashboard shortcuts", () => {
@@ -488,7 +512,7 @@ test("number keys override configured dashboard shortcuts", () => {
   const view = new SessionsView(controller, () => {}, {
     dashboardShortcuts: [{ key: "1", send: "legacy" }, { key: "!", send: "legacy focus" }],
     runDashboardShortcut: (_id, shortcut) => { sent.push(shortcut.send); },
-    toggleSidePaneSlot: (_sessionId, slot) => {
+    assignSidePaneSlot: (_sessionId, slot) => {
       panelSlots.push(slot);
       return { kind: "opened", slot };
     },
@@ -499,7 +523,7 @@ test("number keys override configured dashboard shortcuts", () => {
   view.handleInput("!");
 
   assert.deepEqual(panelSlots, [1]);
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, ["legacy focus"]);
 });
 
 test("o resets side panels to the selected session", async () => {
@@ -519,23 +543,23 @@ test("o resets side panels to the selected session", async () => {
   assert.match(stripAnsi(view.render(100).join("\n")), /panel: api/);
 });
 
-test("panel shortcuts flash the actual appended slot", () => {
-  const results = [{ kind: "closed" as const }, { kind: "opened" as const, slot: 2 as const }];
+test("panel shortcuts flash focused and assigned fixed slots", () => {
+  const results = [{ kind: "focused" as const, slot: 1 as const }, { kind: "opened" as const, slot: 3 as const }];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    toggleSidePaneSlot: () => results.shift() ?? { kind: "opened", slot: 1 },
+    assignSidePaneSlot: () => results.shift() ?? { kind: "opened", slot: 1 },
   });
 
   view.handleInput("1");
-  assert.match(stripAnsi(view.render(100).join("\n")), /panel 1 closed/);
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 1 focused/);
   view.handleInput("3");
-  assert.match(stripAnsi(view.render(100).join("\n")), /panel 2: api/);
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 3: api/);
 });
 
 test("panel shortcuts explain narrow-window refusals", () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    toggleSidePaneSlot: () => ({ kind: "too-narrow", panels: 3 }),
+    assignSidePaneSlot: () => ({ kind: "too-narrow", panels: 3 }),
   });
 
   view.handleInput("3");
@@ -550,7 +574,7 @@ test("panel shortcuts block stopped and error sessions", () => {
     { ...session("error", "error"), status: "error" },
   ] });
   const view = new SessionsView(controller, () => {}, {
-    toggleSidePaneSlot: (sessionId) => {
+    assignSidePaneSlot: (sessionId) => {
       opened.push(sessionId);
       return { kind: "opened", slot: 1 };
     },
@@ -575,7 +599,7 @@ test("panel shortcuts allow live subagent rows", () => {
     { ...session("child", "child"), kind: "subagent" as const, parentId: "parent", agentName: "scout" },
   ] });
   const view = new SessionsView(controller, () => {}, {
-    toggleSidePaneSlot: (sessionId, slot) => {
+    assignSidePaneSlot: (sessionId, slot) => {
       opened.push({ id: sessionId, slot });
       return { kind: "opened", slot };
     },
@@ -590,7 +614,7 @@ test("panel shortcuts allow live subagent rows", () => {
 test("panel shortcuts flash tmux guidance from the action", async () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    toggleSidePaneSlot: async () => { throw new Error("side pane needs tmux — run pi-hub"); },
+    assignSidePaneSlot: async () => { throw new Error("side pane needs tmux — run pi-hub"); },
   });
 
   view.handleInput("1");
@@ -603,7 +627,7 @@ test("panel shortcuts are swallowed while a dialog is open", () => {
   const opened: string[] = [];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
-    toggleSidePaneSlot: (sessionId) => {
+    assignSidePaneSlot: (sessionId) => {
       opened.push(sessionId);
       return { kind: "opened", slot: 1 };
     },
@@ -700,7 +724,7 @@ test("archive disclosure toggles with keyboard and blocks stale session actions"
   const view = new SessionsView(controller, () => {}, {
     archiveSession: (id) => { events.push(`archive:${id}`); },
     reorderSelected: () => { events.push("reorder"); },
-    toggleSidePaneSlot: (id) => { events.push(`panel:${id}`); return { kind: "opened", slot: 1 }; },
+    assignSidePaneSlot: (id) => { events.push(`panel:${id}`); return { kind: "opened", slot: 1 }; },
     restart: (id) => { events.push(`restart:${id}`); },
   });
 
@@ -739,7 +763,7 @@ test("every session-dependent route is inert while archive disclosure is selecte
       archiveSession: () => { events.push("archive"); },
       backlogSession: () => { events.push("backlog"); },
       restoreSession: () => { events.push("restore"); },
-      toggleSidePaneSlot: () => { events.push("panel"); return { kind: "opened", slot: 1 }; },
+      assignSidePaneSlot: () => { events.push("panel"); return { kind: "opened", slot: 1 }; },
       resetSidePane: () => { events.push("reset"); return { kind: "opened", slot: 1 }; },
       reorderSelected: () => { events.push("reorder"); },
     });
@@ -997,7 +1021,7 @@ test("sidebar dashboard renders readable primary controls", () => {
   const view = new SessionsView(controller, () => {}, { terminalRows: () => 15, sidePaneSessionIds: () => new Map([["s0", 1]]) });
   const rendered = view.render(42).map(stripAnsi);
 
-  assert.match(rendered.at(-2) ?? "", /1-4 Set · ⇧1-4 Focus · o Reset · \? Help/);
+  assert.match(rendered.at(-2) ?? "", /1-4 Set · x# Close · F# Focus · \? Help/);
   assert.doesNotMatch(rendered.at(-2) ?? "", /…/);
 });
 

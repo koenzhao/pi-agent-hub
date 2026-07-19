@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { darkTmuxChrome } from "../src/core/chrome.js";
-import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, clientSize, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSidebarReturnBinding, inspectSwitchReturnBinding, installSidebarReturnBinding, killPane, listWindowPanes, presizeSessionWindow, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resetSessionWindowSize, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setSessionStatusBarVisible, setPaneTitle, setWindowPaneBorderStatus, shellQuote, splitPaneAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, clientSize, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSidebarReturnBinding, inspectSwitchReturnBinding, installSidebarReturnBinding, killPane, listWindowPanes, presizeSessionWindow, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resetSessionWindowSize, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setSessionStatusBarVisible, setPaneSlot, setPaneTitle, setWindowPaneBorderStatus, shellQuote, splitPaneAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -52,13 +52,13 @@ test("shellQuote uses POSIX single quote escaping", () => {
 });
 
 test("listWindowPanes parses pane geometry for the current window", async () => {
-  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1 0 0 42 60 160 60\n%2 /dev/ttys002 0 43 12 117 48 160 60\n%3 /dev/ttys003 0 nope 10 40 20 160 60\n%4 /dev/ttys004 0 20 20 nope 20 160 60\n", stderr: "" }));
+  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1 0 0 42 60 160 60 \n%2 /dev/ttys002 0 43 12 117 48 160 60 4\n%3 /dev/ttys003 0 nope 10 40 20 160 60 2\n%4 /dev/ttys004 0 20 20 nope 20 160 60 3\n", stderr: "" }));
 
   assert.deepEqual(await listWindowPanes("%1", exec), [
     { id: "%1", tty: "/dev/ttys001", active: true, left: 0, top: 0, width: 42, height: 60, windowWidth: 160, windowHeight: 60 },
-    { id: "%2", tty: "/dev/ttys002", active: false, left: 43, top: 12, width: 117, height: 48, windowWidth: 160, windowHeight: 60 },
+    { id: "%2", tty: "/dev/ttys002", active: false, left: 43, top: 12, width: 117, height: 48, windowWidth: 160, windowHeight: 60, slot: 4 },
   ]);
-  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height}"] }]);
+  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height} #{@pi_hub_slot}"] }]);
 });
 
 test("splitWindowAttach creates a detached side pane at its final size", async () => {
@@ -110,6 +110,7 @@ test("pane helpers target pane ids and window-local border chrome", async () => 
   await selectPane("%2", exec);
   await resizePaneWidth("%0", 42, exec);
   await setPaneTitle("%2", "[1] API", exec);
+  await setPaneSlot("%2", 1, exec);
   await setWindowPaneBorderStatus("%0", true, undefined, exec);
   await setWindowPaneBorderStatus("%0", false, undefined, exec);
 
@@ -118,6 +119,7 @@ test("pane helpers target pane ids and window-local border chrome", async () => 
     { command: "tmux", args: ["select-pane", "-t", "%2"] },
     { command: "tmux", args: ["resize-pane", "-t", "%0", "-x", "42"] },
     { command: "tmux", args: ["select-pane", "-t", "%2", "-T", "[1] API"] },
+    { command: "tmux", args: ["set-option", "-p", "-t", "%2", "@pi_hub_slot", "1"] },
     { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-format", " #{pane_title} "] },
     { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-status", "top"] },
     { command: "tmux", args: ["set-option", "-w", "-t", "%0", "pane-border-status", "off"] },
@@ -331,28 +333,54 @@ test("sendTextToSession surfaces tmux errors", async () => {
   await assert.rejects(() => sendTextToSession("pi-agent-hub-api", "hello", exec), /paste failed/);
 });
 
-test("sidebar return binding installs a dashboard guard and restores the previous binding", async () => {
+test("sidebar return binding installs guarded return and quadrant jumps then restores all previous bindings", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-agent-hub-sidebar-return-"));
   const exec = fakeTmux((call) => {
-    if (call.args[0] === "list-keys") return { stdout: "bind-key -T root C-q send-prefix\n", stderr: "" };
+    if (call.args[0] === "list-keys") return { stdout: `bind-key -T root ${call.args.at(-1)} send-prefix\n`, stderr: "" };
     return { stdout: "", stderr: "" };
   });
 
   await installSidebarReturnBinding({ dashboardSession: "pi-agent-hub", sidebarPane: "%1", stateDir }, exec);
 
-  const bind = exec.calls.find((call) => call.args[0] === "bind-key");
-  assert.deepEqual(bind?.args.slice(0, 4), ["bind-key", "-n", "C-q", "run-shell"]);
-  assert.match(bind?.args[4] ?? "", /display-message -p '#\{session_name\}'/);
-  assert.match(bind?.args[4] ?? "", /\[ "\$S" = 'pi-agent-hub' \]/);
-  assert.match(bind?.args[4] ?? "", /select-pane -t '%1'/);
-  assert.equal((await inspectSidebarReturnBinding({ stateDir })).active, true);
+  const binds = exec.calls.filter((call) => call.args[0] === "bind-key");
+  assert.deepEqual(binds.map((call) => call.args[2]), ["C-q", "M-1", "M-2", "M-3", "M-4"]);
+  assert.match(binds[0]?.args[4] ?? "", /select-pane -t '%1'/);
+  assert.deepEqual(binds[1]?.args.slice(3, 6), ["if-shell", "-F", "#{==:#{session_name},pi-agent-hub}"]);
+  assert.match(binds[1]?.args[6] ?? "", /@pi_hub_slot/);
+  assert.match(binds[1]?.args[6] ?? "", /awk -v s=1/);
+  assert.equal(binds[1]?.args[7], "send-keys Escape 1");
+  const status = await inspectSidebarReturnBinding({ stateDir });
+  assert.deepEqual(status.active && status.keys, ["C-q", "M-1", "M-2", "M-3", "M-4"]);
+  assert.match(await readFile(join(stateDir, "previous.tmux"), "utf8"), /M-4/);
 
   await removeSidebarReturnBinding({ stateDir }, exec);
 
-  assert.deepEqual(exec.calls.map((call) => call.args).slice(-2), [
-    ["unbind-key", "-T", "root", "C-q"],
-    ["source-file", join(stateDir, "previous.tmux")],
-  ]);
+  assert.deepEqual(exec.calls.filter((call) => call.args[0] === "unbind-key").map((call) => call.args.at(-1)), ["C-q", "M-1", "M-2", "M-3", "M-4"]);
+  assert.deepEqual(exec.calls.at(-1)?.args, ["source-file", join(stateDir, "previous.tmux")]);
+  assert.deepEqual(await inspectSidebarReturnBinding({ stateDir }), { active: false });
+});
+
+test("sidebar return cleanup supports legacy state without keys", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-agent-hub-sidebar-return-"));
+  const restorePath = join(stateDir, "previous.tmux");
+  await writeFile(restorePath, "");
+  await writeFile(join(stateDir, "active.json"), JSON.stringify({
+    ownerPid: process.pid, dashboardSession: "pi-agent-hub", sidebarPane: "%1", returnKey: "C-q", restorePath,
+  }));
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+  await removeSidebarReturnBinding({ stateDir }, exec);
+  assert.deepEqual(exec.calls.map((call) => call.args), [["unbind-key", "-T", "root", "C-q"]]);
+});
+
+test("sidebar binding install failure rolls back the whole binding set", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-agent-hub-sidebar-return-"));
+  const exec = fakeTmux((call) => {
+    if (call.args[0] === "list-keys") return { stdout: "", stderr: "" };
+    if (call.args[0] === "bind-key" && call.args[2] === "M-2") throw new Error("bind failed");
+    return { stdout: "", stderr: "" };
+  });
+  await assert.rejects(() => installSidebarReturnBinding({ dashboardSession: "pi-agent-hub", sidebarPane: "%1", stateDir }, exec), /bind failed/);
+  assert.deepEqual(exec.calls.filter((call) => call.args[0] === "unbind-key").map((call) => call.args.at(-1)), ["C-q", "M-1", "M-2", "M-3", "M-4"]);
   assert.deepEqual(await inspectSidebarReturnBinding({ stateDir }), { active: false });
 });
 

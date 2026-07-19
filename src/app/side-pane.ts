@@ -1,4 +1,4 @@
-import { clientSessionsByTty, killPane, listWindowPanes, presizeSessionWindow, realTmuxExec, resetSessionWindowSize, selectPane, setPaneTitle, splitPaneAttach, splitWindowAttach, switchClientTo, type TmuxExec, type WindowPane } from "../core/tmux.js";
+import { clientSessionsByTty, killPane, listWindowPanes, presizeSessionWindow, realTmuxExec, resetSessionWindowSize, selectPane, setPaneSlot, setPaneTitle, splitPaneAttach, splitWindowAttach, switchClientTo, type TmuxExec, type WindowPane } from "../core/tmux.js";
 import { MANAGED_SESSION_PREFIX } from "../core/names.js";
 
 export const SIDEBAR_WIDTH = 42;
@@ -7,10 +7,10 @@ const MIN_CONTENT_WIDTH = 40;
 
 export type SidePaneSlot = 1 | 2 | 3 | 4;
 export type SidePaneResult =
-  | { kind: "opened"; slot: SidePaneSlot }
-  | { kind: "retargeted"; slot: SidePaneSlot }
+  | { kind: "opened" | "retargeted" | "moved" | "focused"; slot: SidePaneSlot }
   | { kind: "closed" }
   | { kind: "too-narrow"; panels: number };
+export type CloseSidePaneResult = { kind: "closed" } | { kind: "unavailable" };
 export type FocusSidePaneResult = { kind: "focused" } | { kind: "unavailable" };
 
 interface ContentPane {
@@ -19,8 +19,8 @@ interface ContentPane {
 }
 
 export interface SidePaneStatus {
-  sessions: string[];
-  paneIds: string[];
+  slots: (string | undefined)[];
+  paneIds: (string | undefined)[];
   activeSlot?: SidePaneSlot;
   ownWidth?: number;
   windowWidth?: number;
@@ -28,8 +28,15 @@ export interface SidePaneStatus {
 
 interface SidePaneWindow {
   own?: WindowPane;
-  content: ContentPane[];
+  slots: Map<SidePaneSlot, ContentPane>;
 }
+
+export interface PanelGeometry {
+  width: number;
+  height: number;
+}
+
+const ALL_SLOTS: readonly SidePaneSlot[] = [1, 2, 3, 4];
 
 export function sidebarRepairWidth(ownWidth: number, windowWidth: number): number | undefined {
   if (ownWidth >= MIN_SIDEBAR_WIDTH) return undefined;
@@ -37,37 +44,32 @@ export function sidebarRepairWidth(ownWidth: number, windowWidth: number): numbe
   return desired >= MIN_SIDEBAR_WIDTH ? desired : undefined;
 }
 
-export async function toggleSidePaneSlot(options: {
+export async function assignSidePaneSlot(options: {
   target: string;
   ownPane: string;
   slot: SidePaneSlot;
   titleFor?: (tmuxSession: string) => string | undefined;
 }, exec: TmuxExec = realTmuxExec): Promise<SidePaneResult> {
   const inspected = await inspectSidePaneWindow(options.ownPane, exec);
-  const sessions = inspected.content.map((content) => content.session);
-  const existingIndex = sessions.indexOf(options.target);
-  const maxIndex = existingIndex >= 0 ? sessions.length - 1 : sessions.length;
-  const index = Math.min(options.slot - 1, maxIndex);
-  const slot = (index + 1) as SidePaneSlot;
+  const existing = findSessionSlot(inspected.slots, options.target);
+  const occupied = inspected.slots.get(options.slot);
 
-  if (sessions[index] === options.target) {
-    if (index === options.slot - 1) {
-      sessions.splice(index, 1);
-      await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
-      return { kind: "closed" };
-    }
-    await selectPane(inspected.content[index]!.pane.id, exec);
-    return { kind: "retargeted", slot };
+  if (existing === options.slot && occupied) {
+    await selectPane(occupied.pane.id, exec);
+    return { kind: "focused", slot: options.slot };
   }
 
-  if (existingIndex >= 0) {
-    [sessions[index], sessions[existingIndex]] = [sessions[existingIndex]!, sessions[index]!];
+  if (existing !== undefined) {
+    const sessions = sessionSlots(inspected.slots);
+    if (occupied) sessions.set(existing, occupied.session);
+    else sessions.delete(existing);
+    sessions.set(options.slot, options.target);
+    if (!occupied && !panelsFit(inspected, new Set(sessions.keys()))) return { kind: "too-narrow", panels: sessions.size };
     const panes = await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
-    await selectPane(panes[index]!, exec);
-    return { kind: "retargeted", slot };
+    await selectPane(panes.get(options.slot)!, exec);
+    return { kind: "moved", slot: options.slot };
   }
 
-  const occupied = inspected.content[index];
   if (occupied) {
     let presized = false;
     try {
@@ -81,24 +83,38 @@ export async function toggleSidePaneSlot(options: {
     } finally {
       if (presized) await resetSessionWindowSize(options.target, exec).catch(() => {});
     }
-    await setSidePaneTitle(occupied.pane.id, options.target, slot, options.titleFor, exec);
+    await setPaneSlot(occupied.pane.id, options.slot, exec);
+    await setSidePaneTitle(occupied.pane.id, options.target, options.slot, options.titleFor, exec);
     await selectPane(occupied.pane.id, exec);
-    return { kind: "retargeted", slot };
+    return { kind: "retargeted", slot: options.slot };
   }
 
-  const panelCount = sessions.length + 1;
-  if (!panelsFit(inspected, panelCount)) return { kind: "too-narrow", panels: panelCount };
-  sessions.push(options.target);
+  const sessions = sessionSlots(inspected.slots);
+  sessions.set(options.slot, options.target);
+  if (!panelsFit(inspected, new Set(sessions.keys()))) return { kind: "too-narrow", panels: sessions.size };
   const panes = await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
-  await selectPane(panes[index]!, exec);
-  return { kind: "opened", slot };
+  await selectPane(panes.get(options.slot)!, exec);
+  return { kind: "opened", slot: options.slot };
+}
+
+export async function closeSidePaneSlot(options: {
+  ownPane: string;
+  slot: SidePaneSlot;
+  titleFor?: (tmuxSession: string) => string | undefined;
+}, exec: TmuxExec = realTmuxExec): Promise<CloseSidePaneResult> {
+  const inspected = await inspectSidePaneWindow(options.ownPane, exec);
+  if (!inspected.slots.has(options.slot)) return { kind: "unavailable" };
+  const sessions = sessionSlots(inspected.slots);
+  sessions.delete(options.slot);
+  await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
+  return { kind: "closed" };
 }
 
 export async function focusSidePaneSlot(options: {
   ownPane: string;
   slot: SidePaneSlot;
 }, exec: TmuxExec = realTmuxExec): Promise<FocusSidePaneResult> {
-  const content = (await inspectSidePaneWindow(options.ownPane, exec)).content[options.slot - 1];
+  const content = (await inspectSidePaneWindow(options.ownPane, exec)).slots.get(options.slot);
   if (!content) return { kind: "unavailable" };
   await selectPane(content.pane.id, exec);
   return { kind: "focused" };
@@ -110,13 +126,14 @@ export async function resetSidePane(options: {
   titleFor?: (tmuxSession: string) => string | undefined;
 }, exec: TmuxExec = realTmuxExec): Promise<SidePaneResult> {
   const inspected = await inspectSidePaneWindow(options.ownPane, exec);
-  if (inspected.content.length === 1 && inspected.content[0]?.session === options.target) {
-    await killPane(inspected.content[0].pane.id, exec);
+  const only = inspected.slots.size === 1 ? [...inspected.slots.values()][0] : undefined;
+  if (only?.session === options.target) {
+    await killPane(only.pane.id, exec);
     return { kind: "closed" };
   }
-  const kind = inspected.content.length ? "retargeted" : "opened";
-  if (!inspected.content.length && !panelsFit(inspected, 1)) return { kind: "too-narrow", panels: 1 };
-  await rebuildSidePanes(options.ownPane, inspected, [options.target], exec, options.titleFor);
+  if (!inspected.slots.size && !panelsFit(inspected, new Set([1]))) return { kind: "too-narrow", panels: 1 };
+  const kind = inspected.slots.size ? "retargeted" : "opened";
+  await rebuildSidePanes(options.ownPane, inspected, new Map([[1, options.target]]), exec, options.titleFor);
   return { kind, slot: 1 };
 }
 
@@ -124,14 +141,14 @@ export async function closeSidePaneShowing(options: {
   target: string;
   ownPane: string;
 }, exec: TmuxExec = realTmuxExec): Promise<boolean> {
-  const content = (await inspectSidePaneWindow(options.ownPane, exec)).content.find((pane) => pane.session === options.target);
+  const content = [...(await inspectSidePaneWindow(options.ownPane, exec)).slots.values()].find((pane) => pane.session === options.target);
   if (!content) return false;
   await killPane(content.pane.id, exec);
   return true;
 }
 
 export async function closeSidePanes(options: { ownPane: string }, exec: TmuxExec = realTmuxExec): Promise<void> {
-  for (const content of (await inspectSidePaneWindow(options.ownPane, exec)).content) {
+  for (const content of (await inspectSidePaneWindow(options.ownPane, exec)).slots.values()) {
     try {
       await killPane(content.pane.id, exec);
     } catch {
@@ -142,83 +159,79 @@ export async function closeSidePanes(options: { ownPane: string }, exec: TmuxExe
 
 export async function sidePaneStatus(options: { ownPane: string }, exec: TmuxExec = realTmuxExec): Promise<SidePaneStatus> {
   const inspected = await inspectSidePaneWindow(options.ownPane, exec);
-  const activeIndex = inspected.content.findIndex((pane) => pane.pane.active);
+  const slots = ALL_SLOTS.map((slot) => inspected.slots.get(slot)?.session);
+  const paneIds = ALL_SLOTS.map((slot) => inspected.slots.get(slot)?.pane.id);
+  const activeSlot = ALL_SLOTS.find((slot) => inspected.slots.get(slot)?.pane.active);
   return {
-    sessions: inspected.content.map((pane) => pane.session),
-    paneIds: inspected.content.map((pane) => pane.pane.id),
-    ...(activeIndex >= 0 ? { activeSlot: (activeIndex + 1) as SidePaneSlot } : {}),
+    slots,
+    paneIds,
+    ...(activeSlot ? { activeSlot } : {}),
     ownWidth: inspected.own?.width,
     windowWidth: inspected.own?.windowWidth,
   };
 }
 
-export interface PanelGeometry {
-  width: number;
-  height: number;
-}
-
-export function panelGeometry(count: 1 | 2 | 3 | 4, contentWidth: number, windowHeight: number, borderRows: number): PanelGeometry[] {
+export function quadrantGeometry(
+  occupied: ReadonlySet<SidePaneSlot>,
+  contentWidth: number,
+  windowHeight: number,
+  borderRows: number,
+): Map<SidePaneSlot, PanelGeometry> {
   const availableHeight = windowHeight - borderRows;
   const bottomHeight = Math.floor((availableHeight - 1) / 2);
   const topHeight = availableHeight - 1 - bottomHeight;
-  const rightWidth = Math.floor((contentWidth - 1) / 2);
-  const leftWidth = contentWidth - 1 - rightWidth;
-  if (count === 1) return [{ width: contentWidth, height: availableHeight }];
-  if (count === 2) return [
-    { width: contentWidth, height: topHeight },
-    { width: contentWidth, height: bottomHeight },
-  ];
-  if (count === 3) return [
-    { width: leftWidth, height: availableHeight },
-    { width: rightWidth, height: topHeight },
-    { width: rightWidth, height: bottomHeight },
-  ];
-  return [
-    { width: leftWidth, height: topHeight },
-    { width: rightWidth, height: topHeight },
-    { width: leftWidth, height: bottomHeight },
-    { width: rightWidth, height: bottomHeight },
-  ];
+  const left = occupied.has(1) || occupied.has(3);
+  const right = occupied.has(2) || occupied.has(4);
+  const rightWidth = left && right ? Math.floor((contentWidth - 1) / 2) : contentWidth;
+  const leftWidth = left && right ? contentWidth - 1 - rightWidth : contentWidth;
+  const geometry = new Map<SidePaneSlot, PanelGeometry>();
+  for (const [top, bottom, width] of [[1, 3, leftWidth], [2, 4, rightWidth]] as const) {
+    const hasTop = occupied.has(top);
+    const hasBottom = occupied.has(bottom);
+    if (hasTop) geometry.set(top, { width, height: hasBottom ? topHeight : availableHeight });
+    if (hasBottom) geometry.set(bottom, { width, height: hasTop ? bottomHeight : availableHeight });
+  }
+  return geometry;
 }
 
-function panelFitWidth(windowWidth: number, sidebarWidth: number, count: number): number {
-  const contentWidth = windowWidth - sidebarWidth - 1;
-  return count <= 2 ? contentWidth : Math.floor((contentWidth - 1) / 2);
-}
-
-function panelsFit(inspected: SidePaneWindow, count: number): boolean {
+function panelsFit(inspected: SidePaneWindow, occupied: ReadonlySet<SidePaneSlot>): boolean {
   if (!inspected.own) return true;
-  const sidebarWidth = inspected.content.length && inspected.own.width >= MIN_SIDEBAR_WIDTH
+  const sidebarWidth = inspected.slots.size && inspected.own.width >= MIN_SIDEBAR_WIDTH
     ? inspected.own.width
     : SIDEBAR_WIDTH;
-  return panelFitWidth(inspected.own.windowWidth, sidebarWidth, count) >= MIN_CONTENT_WIDTH;
+  const contentWidth = inspected.own.windowWidth - sidebarWidth - 1;
+  const left = occupied.has(1) || occupied.has(3);
+  const right = occupied.has(2) || occupied.has(4);
+  const panelWidth = left && right ? Math.floor((contentWidth - 1) / 2) : contentWidth;
+  return panelWidth >= MIN_CONTENT_WIDTH;
 }
 
 async function rebuildSidePanes(
   ownPane: string,
   inspected: SidePaneWindow,
-  sessions: string[],
+  sessions: ReadonlyMap<SidePaneSlot, string>,
   exec: TmuxExec,
   titleFor?: (tmuxSession: string) => string | undefined,
-): Promise<string[]> {
-  const sidebarWidth = inspected.content.length && (inspected.own?.width ?? 0) >= MIN_SIDEBAR_WIDTH
+): Promise<Map<SidePaneSlot, string>> {
+  const sidebarWidth = inspected.slots.size && (inspected.own?.width ?? 0) >= MIN_SIDEBAR_WIDTH
     ? inspected.own!.width
     : SIDEBAR_WIDTH;
-  for (const content of inspected.content) {
+  for (const content of inspected.slots.values()) {
     try {
       await killPane(content.pane.id, exec);
     } catch (error) {
       if (!String(error).includes("can't find pane")) throw error;
     }
   }
-  if (!sessions.length) return [];
+  if (!sessions.size) return new Map();
 
   const own = inspected.own;
   if (!own) throw new Error("dashboard pane geometry is unavailable");
   const contentWidth = own.windowWidth - sidebarWidth - 1;
-  const geometry = panelGeometry(sessions.length as 1 | 2 | 3 | 4, contentWidth, own.windowHeight, 1);
-  for (const [index, session] of sessions.entries()) {
-    const panel = geometry[index]!;
+  const occupied = new Set(sessions.keys());
+  const geometry = quadrantGeometry(occupied, contentWidth, own.windowHeight, 1);
+  for (const [slot, session] of sessions) {
+    const panel = geometry.get(slot)!;
     try {
       await presizeSessionWindow({ target: session, width: panel.width, height: panel.height - 1 }, exec);
     } catch {
@@ -226,39 +239,42 @@ async function rebuildSidePanes(
     }
   }
 
-  const panes: string[] = [];
+  const left = ([1, 3] as SidePaneSlot[]).filter((slot) => sessions.has(slot));
+  const right = ([2, 4] as SidePaneSlot[]).filter((slot) => sessions.has(slot));
+  const firstColumn = left.length ? left : right;
+  const panes = new Map<SidePaneSlot, string>();
   let layoutError: unknown;
   try {
-    const first = await splitWindowAttach({ pane: ownPane, target: sessions[0]!, size: contentWidth }, exec);
-    panes[0] = first;
-    await setSidePaneTitle(first, sessions[0]!, 1, titleFor, exec);
-    if (sessions.length === 2) {
-      const second = await splitPaneAttach({ pane: first, target: sessions[1]!, direction: "vertical", size: geometry[1]!.height }, exec);
-      panes[1] = second;
-      await setSidePaneTitle(second, sessions[1]!, 2, titleFor, exec);
-    } else if (sessions.length === 3) {
-      const second = await splitPaneAttach({ pane: first, target: sessions[1]!, direction: "horizontal", size: geometry[1]!.width }, exec);
-      panes[1] = second;
-      await setSidePaneTitle(second, sessions[1]!, 2, titleFor, exec);
-      const third = await splitPaneAttach({ pane: second, target: sessions[2]!, direction: "vertical", size: geometry[2]!.height }, exec);
-      panes[2] = third;
-      await setSidePaneTitle(third, sessions[2]!, 3, titleFor, exec);
-    } else if (sessions.length === 4) {
-      const third = await splitPaneAttach({ pane: first, target: sessions[2]!, direction: "vertical", size: geometry[2]!.height }, exec);
-      panes[2] = third;
-      await setSidePaneTitle(third, sessions[2]!, 3, titleFor, exec);
-      const second = await splitPaneAttach({ pane: first, target: sessions[1]!, direction: "horizontal", size: geometry[1]!.width }, exec);
-      panes[1] = second;
-      await setSidePaneTitle(second, sessions[1]!, 2, titleFor, exec);
-      const fourth = await splitPaneAttach({ pane: third, target: sessions[3]!, direction: "horizontal", size: geometry[3]!.width }, exec);
-      panes[3] = fourth;
-      await setSidePaneTitle(fourth, sessions[3]!, 4, titleFor, exec);
+    const firstSlot = firstColumn[0]!;
+    const first = await splitWindowAttach({ pane: ownPane, target: sessions.get(firstSlot)!, size: contentWidth }, exec);
+    await configurePane(first, firstSlot, sessions.get(firstSlot)!, titleFor, exec);
+    panes.set(firstSlot, first);
+
+    let rightFirst: string | undefined;
+    if (left.length && right.length) {
+      const rightSlot = right[0]!;
+      rightFirst = await splitPaneAttach({ pane: first, target: sessions.get(rightSlot)!, direction: "horizontal", size: geometry.get(rightSlot)!.width }, exec);
+      await configurePane(rightFirst, rightSlot, sessions.get(rightSlot)!, titleFor, exec);
+      panes.set(rightSlot, rightFirst);
+    }
+    if (firstColumn[1]) {
+      const bottomSlot = firstColumn[1];
+      const bottom = await splitPaneAttach({ pane: first, target: sessions.get(bottomSlot)!, direction: "vertical", size: geometry.get(bottomSlot)!.height }, exec);
+      await configurePane(bottom, bottomSlot, sessions.get(bottomSlot)!, titleFor, exec);
+      panes.set(bottomSlot, bottom);
+    }
+    if (left.length && right[1] && rightFirst) {
+      const bottomSlot = right[1];
+      const bottom = await splitPaneAttach({ pane: rightFirst, target: sessions.get(bottomSlot)!, direction: "vertical", size: geometry.get(bottomSlot)!.height }, exec);
+      await configurePane(bottom, bottomSlot, sessions.get(bottomSlot)!, titleFor, exec);
+      panes.set(bottomSlot, bottom);
     }
   } catch (error) {
     layoutError = error;
   }
+
   let resetError: unknown;
-  for (const session of sessions) {
+  for (const session of sessions.values()) {
     try {
       await resetSessionWindowSize(session, exec);
     } catch (error) {
@@ -270,6 +286,17 @@ async function rebuildSidePanes(
   return panes;
 }
 
+async function configurePane(
+  paneId: string,
+  slot: SidePaneSlot,
+  session: string,
+  titleFor: ((tmuxSession: string) => string | undefined) | undefined,
+  exec: TmuxExec,
+): Promise<void> {
+  await setPaneSlot(paneId, slot, exec);
+  await setSidePaneTitle(paneId, session, slot, titleFor, exec);
+}
+
 async function setSidePaneTitle(
   paneId: string,
   tmuxSession: string,
@@ -277,20 +304,41 @@ async function setSidePaneTitle(
   titleFor: ((tmuxSession: string) => string | undefined) | undefined,
   exec: TmuxExec,
 ): Promise<void> {
-  if (!titleFor) return;
-  await setPaneTitle(paneId, `[${slot}] ${titleFor(tmuxSession) ?? tmuxSession}`, exec);
+  if (titleFor) await setPaneTitle(paneId, `[${slot}] ${titleFor(tmuxSession) ?? tmuxSession}`, exec);
 }
 
 async function inspectSidePaneWindow(ownPane: string, exec: TmuxExec): Promise<SidePaneWindow> {
   const panes = await listWindowPanes(ownPane, exec);
   const own = panes.find((pane) => pane.id === ownPane);
   const candidates = panes.filter((pane) => pane.id !== ownPane);
-  if (!candidates.length) return { own, content: [] };
+  if (!candidates.length) return { own, slots: new Map() };
   const clients = await clientSessionsByTty(exec);
   const content = candidates.flatMap((pane) => {
     const session = clients.get(pane.tty);
     return session?.startsWith(MANAGED_SESSION_PREFIX) ? [{ pane, session }] : [];
-  });
-  content.sort((a, b) => a.pane.top - b.pane.top || a.pane.left - b.pane.left);
-  return { own, content };
+  }).sort((a, b) => a.pane.top - b.pane.top || a.pane.left - b.pane.left);
+
+  const slots = new Map<SidePaneSlot, ContentPane>();
+  const repair: ContentPane[] = [];
+  for (const item of content) {
+    const slot = item.pane.slot as SidePaneSlot | undefined;
+    if (slot && !slots.has(slot)) slots.set(slot, item);
+    else repair.push(item);
+  }
+  for (const item of repair) {
+    const slot = ALL_SLOTS.find((candidate) => !slots.has(candidate));
+    if (!slot) break;
+    slots.set(slot, item);
+    await setPaneSlot(item.pane.id, slot, exec);
+  }
+  return { own, slots };
+}
+
+function sessionSlots(slots: ReadonlyMap<SidePaneSlot, ContentPane>): Map<SidePaneSlot, string> {
+  return new Map([...slots].map(([slot, content]) => [slot, content.session]));
+}
+
+function findSessionSlot(slots: ReadonlyMap<SidePaneSlot, ContentPane>, session: string): SidePaneSlot | undefined {
+  for (const [slot, content] of slots) if (content.session === session) return slot;
+  return undefined;
 }

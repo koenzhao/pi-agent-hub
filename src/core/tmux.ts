@@ -91,18 +91,22 @@ export interface WindowPane {
   height: number;
   windowWidth: number;
   windowHeight: number;
+  slot?: number;
 }
 
 export async function listWindowPanes(pane: string, exec: TmuxExec = realTmuxExec): Promise<WindowPane[]> {
-  const format = "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height}";
+  const format = "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height} #{@pi_hub_slot}";
   const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", format]);
   return result.stdout.split(/\r?\n/).flatMap((line) => {
     if (!line.trim()) return [];
-    const [id, tty, active, ...geometryText] = line.split(" ");
+    const fields = line.split(" ");
+    const [id, tty, active, ...rest] = fields;
+    const geometryText = rest.slice(0, 6);
     const geometry = geometryText.map(Number);
     if (!id || !tty || geometry.length !== 6 || geometry.some((value) => !Number.isFinite(value))) return [];
     const [left, top, width, height, windowWidth, windowHeight] = geometry as [number, number, number, number, number, number];
-    return [{ id, tty, active: active === "1", left, top, width, height, windowWidth, windowHeight }];
+    const slot = Number(rest[6]);
+    return [{ id, tty, active: active === "1", left, top, width, height, windowWidth, windowHeight, ...(Number.isInteger(slot) && slot >= 1 && slot <= 4 ? { slot } : {}) }];
   });
 }
 
@@ -153,6 +157,10 @@ export async function selectPane(paneId: string, exec: TmuxExec = realTmuxExec):
 
 export async function setPaneTitle(paneId: string, title: string, exec: TmuxExec = realTmuxExec): Promise<void> {
   await exec.exec("tmux", ["select-pane", "-t", paneId, "-T", title]);
+}
+
+export async function setPaneSlot(paneId: string, slot: number, exec: TmuxExec = realTmuxExec): Promise<void> {
+  await exec.exec("tmux", ["set-option", "-p", "-t", paneId, "@pi_hub_slot", String(slot)]);
 }
 
 export async function setWindowPaneBorderStatus(paneId: string, visible: boolean, chrome?: TmuxChrome, exec: TmuxExec = realTmuxExec): Promise<void> {
@@ -429,6 +437,7 @@ interface ActiveSidebarReturnBinding {
   dashboardSession: string;
   sidebarPane: string;
   returnKey: string;
+  keys?: string[];
   restorePath: string;
 }
 
@@ -440,7 +449,7 @@ export async function inspectSidebarReturnBinding(options: { stateDir?: string }
   const stateDir = options.stateDir ?? join(sessionsStateDir(), "sidebar-return");
   try {
     const active = JSON.parse(await readFile(join(stateDir, "active.json"), "utf8")) as ActiveSidebarReturnBinding;
-    return { ...active, active: true, stale: !isProcessAlive(active.ownerPid) };
+    return { ...active, keys: active.keys ?? [active.returnKey], active: true, stale: !isProcessAlive(active.ownerPid) };
   } catch (error) {
     if (isErrno(error, "ENOENT")) return { active: false };
     throw error;
@@ -458,19 +467,31 @@ export async function installSidebarReturnBinding(options: {
   await withFileLock(activePath, async () => {
     const restorePath = join(stateDir, "previous.tmux");
     const returnKey = options.returnKey ?? "C-q";
+    const keys = [returnKey, "M-1", "M-2", "M-3", "M-4"];
     await removeSidebarReturnBindingUnlocked({ stateDir, refuseLiveForeignOwner: true }, exec);
-    await writeFile(restorePath, await currentKeyBinding(returnKey, exec), "utf8");
+    const previous = await Promise.all(keys.map((key) => currentKeyBinding(key, exec)));
+    await writeFile(restorePath, previous.filter(Boolean).join("\n"), "utf8");
     await writeJsonAtomic(activePath, {
       ownerPid: process.pid,
       dashboardSession: options.dashboardSession,
       sidebarPane: options.sidebarPane,
       returnKey,
+      keys,
       restorePath,
     } satisfies ActiveSidebarReturnBinding);
 
-    const script = `S=$(tmux display-message -p '#{session_name}'); [ "$S" = ${shellQuote(options.dashboardSession)} ] && tmux select-pane -t ${shellQuote(options.sidebarPane)}`;
+    const returnScript = `S=$(tmux display-message -p '#{session_name}'); [ "$S" = ${shellQuote(options.dashboardSession)} ] && tmux select-pane -t ${shellQuote(options.sidebarPane)}`;
     try {
-      await exec.exec("tmux", ["bind-key", "-n", returnKey, "run-shell", script]);
+      await exec.exec("tmux", ["bind-key", "-n", returnKey, "run-shell", returnScript]);
+      for (const slot of [1, 2, 3, 4]) {
+        const script = `P=$(tmux list-panes -t ${shellQuote(options.dashboardSession)} -F '#{pane_id} #{@pi_hub_slot}' | awk -v s=${slot} '$2==s{print $1; exit}'); [ -n "$P" ] && tmux select-pane -t "$P"`;
+        await exec.exec("tmux", [
+          "bind-key", "-n", `M-${slot}`,
+          "if-shell", "-F", `#{==:#{session_name},${options.dashboardSession}}`,
+          `run-shell ${shellQuote(script)}`,
+          `send-keys Escape ${slot}`,
+        ]);
+      }
     } catch (error) {
       await removeSidebarReturnBindingUnlocked({ stateDir, onlyOwnerPid: process.pid }, exec);
       throw error;
@@ -502,10 +523,12 @@ async function removeSidebarReturnBindingUnlocked(
   if (options.refuseLiveForeignOwner && active.ownerPid !== process.pid && isProcessAlive(active.ownerPid)) {
     throw new Error(`tmux sidebar return binding is already active for pid ${active.ownerPid}`);
   }
-  try {
-    await exec.exec("tmux", ["unbind-key", "-T", "root", active.returnKey]);
-  } catch (error) {
-    if (!errorMessage(error).includes("unknown key")) throw error;
+  for (const key of active.keys ?? [active.returnKey]) {
+    try {
+      await exec.exec("tmux", ["unbind-key", "-T", "root", key]);
+    } catch (error) {
+      if (!errorMessage(error).includes("unknown key")) throw error;
+    }
   }
   let previous = "";
   try {

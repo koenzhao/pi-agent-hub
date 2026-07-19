@@ -10,7 +10,7 @@ import { renderSessions, type SessionListTarget } from "./layout.js";
 import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
-import { errorMessage, isPromise, type DialogContext, type FocusSidePaneResult, type SessionDialog, type SessionsViewActions, type SidePaneActionResult } from "./dialog.js";
+import { errorMessage, isPromise, type CloseSidePaneResult, type DialogContext, type FocusSidePaneResult, type SessionDialog, type SessionsViewActions, type SidePaneActionResult } from "./dialog.js";
 import { handlePromptInput, openFilterPrompt, openRenamePrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
 import { handleFormDialogInput, openForkDialog, openMoveGroupDialog, openRenameGroupDialog, openRenameSessionForm, renderFormDialog } from "./form-dialogs.js";
 import { handleConfirmInput, openDeleteDialog, openFinishDialog, renderConfirmDialog, renderRestartDialog } from "./confirm-dialogs.js";
@@ -28,6 +28,7 @@ export class SessionsView implements Component {
   private viewMode: "groups" | "stages" = "groups";
   private pendingRestart: { sessionId: string } | undefined;
   private pendingFocusSlot = false;
+  private pendingCloseSlot = false;
   private lastMouseClick: { target: string; at: number } | undefined;
   private busy = false;
   private archiveExpanded = false;
@@ -97,6 +98,15 @@ export class SessionsView implements Component {
         return;
       }
     }
+    if (this.pendingCloseSlot) {
+      this.pendingCloseSlot = false;
+      this.clearFlash();
+      const slot = sidePaneSlot(data);
+      if (slot) {
+        this.closeSidePane(slot);
+        return;
+      }
+    }
     if (data === "F") {
       this.clearPendingRestart();
       this.clearFlash();
@@ -105,8 +115,15 @@ export class SessionsView implements Component {
       this.flashMessage("focus panel: press 1-4");
       return;
     }
+    if (data === "x") {
+      this.clearPendingRestart();
+      this.clearFlash();
+      this.message = undefined;
+      this.pendingCloseSlot = true;
+      this.flashMessage("close panel: press 1-4");
+      return;
+    }
 
-    const focusSlot = focusedSidePaneSlot(data);
     if (this.archiveDisclosureSelected) {
       if (matchesKey(data, Key.down) || data === "j") this.moveSelection(1);
       else if (matchesKey(data, Key.up) || data === "k") this.moveSelection(-1);
@@ -114,7 +131,6 @@ export class SessionsView implements Component {
       else if (matchesKey(data, Key.slash)) this.startFilter();
       else if (data === "n") this.startNewDialog();
       else if (data === "i") this.detailsExpanded = !this.detailsExpanded;
-      else if (focusSlot) this.focusSidePane(focusSlot);
       else if (data === "v") this.toggleViewMode();
       else if (data === "?") this.dialog = { kind: "help" };
       else if (data === "q") this.stop();
@@ -124,10 +140,6 @@ export class SessionsView implements Component {
     const panelSlot = sidePaneSlot(data);
     if (panelSlot) {
       this.openSelectedSidePane(panelSlot);
-      return;
-    }
-    if (focusSlot) {
-      this.focusSidePane(focusSlot);
       return;
     }
     if (this.runConfiguredShortcut(data)) return;
@@ -341,14 +353,15 @@ export class SessionsView implements Component {
       this.flashMessage("session not running");
       return;
     }
-    const action = slot ? this.actions.toggleSidePaneSlot : this.actions.resetSidePane;
+    const action = slot ? this.actions.assignSidePaneSlot : this.actions.resetSidePane;
     if (!action) {
       this.message = "side pane unavailable";
       return;
     }
     const apply = (result: SidePaneActionResult) => {
       if (result.kind === "too-narrow") this.flashMessage(`window too narrow for ${result.panels} panels`);
-      else if (result.kind === "closed") this.flashMessage(slot ? `panel ${slot} closed` : "panel closed");
+      else if (result.kind === "closed") this.flashMessage("panel closed");
+      else if (result.kind === "focused") this.flashMessage(`panel ${result.slot} focused`);
       else this.flashMessage(slot ? `panel ${result.slot}: ${selected.title}` : `panel: ${selected.title}`);
     };
     const applyError = (error: unknown) => {
@@ -359,7 +372,7 @@ export class SessionsView implements Component {
     const pending = slot ? `opening panel ${slot}...` : "resetting panels...";
     try {
       const result = slot
-        ? this.actions.toggleSidePaneSlot!(selected.id, slot)
+        ? this.actions.assignSidePaneSlot!(selected.id, slot)
         : this.actions.resetSidePane!(selected.id);
       if (isPromise<SidePaneActionResult>(result)) {
         this.busy = true;
@@ -378,6 +391,39 @@ export class SessionsView implements Component {
       apply(result);
     } catch (error) {
       applyError(error);
+    }
+  }
+
+  private closeSidePane(slot: 1 | 2 | 3 | 4) {
+    this.clearPendingRestart();
+    this.clearFlash();
+    this.message = undefined;
+    const close = this.actions.closeSidePaneSlot;
+    if (!close) {
+      this.message = "side pane unavailable";
+      return;
+    }
+    const apply = (result: CloseSidePaneResult) => {
+      this.flashMessage(result.kind === "closed" ? `panel ${slot} closed` : `panel ${slot} is not open`);
+    };
+    try {
+      const result = close(slot);
+      if (isPromise<CloseSidePaneResult>(result)) {
+        this.busy = true;
+        this.message = `closing panel ${slot}...`;
+        void result.then((closeResult) => {
+          this.busy = false;
+          apply(closeResult);
+          if (this.message === `closing panel ${slot}...`) this.message = undefined;
+        }).catch((error: unknown) => {
+          this.busy = false;
+          this.message = errorMessage(error);
+        });
+        return;
+      }
+      apply(result);
+    } catch (error) {
+      this.message = errorMessage(error);
     }
   }
 
@@ -752,8 +798,9 @@ export class SessionsView implements Component {
   }
 
   private clearPendingFocusSlot() {
-    if (!this.pendingFocusSlot) return;
+    if (!this.pendingFocusSlot && !this.pendingCloseSlot) return;
     this.pendingFocusSlot = false;
+    this.pendingCloseSlot = false;
     this.clearFlash();
   }
 
@@ -801,15 +848,6 @@ function sidePaneSlot(data: string): 1 | 2 | 3 | 4 | undefined {
   return undefined;
 }
 
-function focusedSidePaneSlot(data: string): 1 | 2 | 3 | 4 | undefined {
-  const legacyIndex = ["!", "@", "#", "$"].indexOf(data);
-  if (legacyIndex >= 0) return (legacyIndex + 1) as 1 | 2 | 3 | 4;
-  const shiftedNumbers = [Key.shift("1"), Key.shift("2"), Key.shift("3"), Key.shift("4")];
-  const kittyIndex = shiftedNumbers.findIndex((key) => matchesKey(data, key));
-  if (kittyIndex >= 0) return (kittyIndex + 1) as 1 | 2 | 3 | 4;
-  return undefined;
-}
-
 function syncPiNameMessage(result: SyncPiNameResult): string {
   switch (result.status) {
     case "synced": return `renamed from Pi name: ${result.name}`;
@@ -825,8 +863,8 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "",
     heading("Navigation"),
     "  ↑↓/j/k move selection     Enter open/switch     / filter",
-    "  1-4 assign/toggle panels  o reset to one panel",
-    "  Shift+1-4 or F then 1-4 focus panel",
+    "  1-4 assign panels         x then 1-4 close panel",
+    "  F then 1-4 or Alt+1-4 focus panel     o reset to one panel",
     "  q quit                     Esc cancel/clear",
     "  K/J reorder in group      v toggle groups/stages view",
     "  mouse click select · double-click open/switch · wheel move",

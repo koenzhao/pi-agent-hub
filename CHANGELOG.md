@@ -8,8 +8,11 @@ Use this section while developing. Move entries into a versioned section before 
 
 ### Added
 
+- Add explicit `x` then `1`–`4` panel close commands and guarded `Alt+1`–`Alt+4` focus jumps from anywhere in the dashboard tmux session.
+
 ### Changed
 
+- Make side-panel numbers stable screen quadrants with occupancy-derived row/column layouts and non-destructive assignment keys; remove `Shift+1`–`Shift+4` panel focus aliases.
 - Removed unused public exports `McpTool`, `PiToolDefinition`, and `buildPiCommand`; moved `cliTuiCommand` into `core/tmux` and deleted the shallow `core/cli-command` module.
 
 ### Fixed

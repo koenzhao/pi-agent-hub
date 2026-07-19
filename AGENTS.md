@@ -35,6 +35,7 @@
 
 - Clipboard is optional best-effort; attach/switch flows must always display the exact tmux command.
 - Keep inside-tmux attach tmux-native with `src/core/tmux.ts`; do not stop/restart the TUI or add PTY attach unless outside-tmux return semantics are explicitly requested.
+- Root `bind-key -n` shortcuts are server-global; preserve the passthrough and restore rules in `docs/STRUCTURE.md`.
 - Sidebar workspace panes are stateless nested tmux attaches; manage only panes whose tty maps to `pi-agent-hub-*`, serialize live inspection/mutation/focus through the side-pane queue, and close Hub-owned side panes before stopping the dashboard TUI. Pre-size session windows before panel/full-screen attach, split at final geometry, and always restore `window-size latest` afterward.
 - Preserve `dashboardEnv()` for any tmux return path that can recreate the dashboard so custom `PI_*` dirs survive.
 - `Alt+R` rename-from-session intentionally round-trips through the dashboard action handoff and explicit rename dialog; do not add a parallel in-session rename UI to hide the flash.

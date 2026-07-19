@@ -19,16 +19,17 @@ export interface SessionDialogInput {
 }
 
 export type SidePaneActionResult =
-  | { kind: "opened"; slot: 1 | 2 | 3 | 4 }
-  | { kind: "retargeted"; slot: 1 | 2 | 3 | 4 }
+  | { kind: "opened" | "retargeted" | "moved" | "focused"; slot: 1 | 2 | 3 | 4 }
   | { kind: "closed" }
   | { kind: "too-narrow"; panels: number };
+export type CloseSidePaneResult = { kind: "closed" } | { kind: "unavailable" };
 export type FocusSidePaneResult = { kind: "focused" } | { kind: "unavailable" };
 
 export interface SessionsViewActions {
   attachOutsideTmux?: (tmuxSession: string) => void | Promise<void>;
   switchInsideTmux?: (tmuxSession: string) => void | Promise<void>;
-  toggleSidePaneSlot?: (sessionId: string, slot: 1 | 2 | 3 | 4) => SidePaneActionResult | Promise<SidePaneActionResult>;
+  assignSidePaneSlot?: (sessionId: string, slot: 1 | 2 | 3 | 4) => SidePaneActionResult | Promise<SidePaneActionResult>;
+  closeSidePaneSlot?: (slot: 1 | 2 | 3 | 4) => CloseSidePaneResult | Promise<CloseSidePaneResult>;
   resetSidePane?: (sessionId: string) => SidePaneActionResult | Promise<SidePaneActionResult>;
   focusSidePaneSlot?: (slot: 1 | 2 | 3 | 4) => FocusSidePaneResult | Promise<FocusSidePaneResult>;
   sidePaneSessionIds?: () => ReadonlyMap<string, number>;
