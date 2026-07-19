@@ -484,7 +484,7 @@ export async function installSidebarReturnBinding(options: {
     try {
       await exec.exec("tmux", ["bind-key", "-n", returnKey, "run-shell", returnScript]);
       for (const slot of [1, 2, 3, 4]) {
-        const script = `P=$(tmux list-panes -t ${shellQuote(options.dashboardSession)} -F '#{pane_id} #{@pi_hub_slot}' | awk -v s=${slot} '$2==s{print $1; exit}'); [ -n "$P" ] && tmux select-pane -t "$P"`;
+        const script = `P=$(tmux list-panes -t ${shellQuote(options.dashboardSession)} -F '##{pane_id} ##{@pi_hub_slot}' | awk -v s=${slot} '$2==s{print $1; exit}'); if [ -n "$P" ]; then tmux select-pane -t "$P"; fi`;
         await exec.exec("tmux", [
           "bind-key", "-n", `M-${slot}`,
           "if-shell", "-F", `#{==:#{session_name},${options.dashboardSession}}`,

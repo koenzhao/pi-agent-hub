@@ -346,8 +346,9 @@ test("sidebar return binding installs guarded return and quadrant jumps then res
   assert.deepEqual(binds.map((call) => call.args[2]), ["C-q", "M-1", "M-2", "M-3", "M-4"]);
   assert.match(binds[0]?.args[4] ?? "", /select-pane -t '%1'/);
   assert.deepEqual(binds[1]?.args.slice(3, 6), ["if-shell", "-F", "#{==:#{session_name},pi-agent-hub}"]);
-  assert.match(binds[1]?.args[6] ?? "", /@pi_hub_slot/);
+  assert.match(binds[1]?.args[6] ?? "", /##\{pane_id\} ##\{@pi_hub_slot\}/);
   assert.match(binds[1]?.args[6] ?? "", /awk -v s=1/);
+  assert.match(binds[1]?.args[6] ?? "", /if \[ -n "\$P" \]; then tmux select-pane/);
   assert.equal(binds[1]?.args[7], "send-keys Escape 1");
   const status = await inspectSidebarReturnBinding({ stateDir });
   assert.deepEqual(status.active && status.keys, ["C-q", "M-1", "M-2", "M-3", "M-4"]);
