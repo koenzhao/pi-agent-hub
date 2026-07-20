@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { buildRenderModel, retainSelectionAfterRefresh } from "../src/tui/render-model.js";
 import { renderSessions } from "../src/tui/layout.js";
-import { stripAnsi } from "../src/tui/theme.js";
+import { darkTheme, stripAnsi } from "../src/tui/theme.js";
 import type { ManagedSession, SessionStatus } from "../src/core/types.js";
 
 function session(id: string, group: string, status: SessionStatus, title = id): ManagedSession {
@@ -44,6 +44,15 @@ test("workflow rail renders compact in the list row and full in details", () => 
   assert.doesNotMatch(row ?? "", /4\/7/);
   assert.match(lines.join("\n"), /NX─PR─PL─▐EX▌─RV─RF─CM · auth-003/);
   for (const line of renderSessions(model).lines) assert.ok(visibleWidth(line) <= 110, line);
+});
+
+test("sidebar workflow stages use the theme accent color", () => {
+  const theme = { ...darkTheme, accent: "#010203", muted: "#040506" };
+  const model = buildRenderModel({ sessions: [{ ...session("a", "default", "running"), workflow: WORKFLOW }], selectedId: "a", width: 70 });
+  const row = renderSessions(model, theme).lines.find((line) => /^│▌/.test(stripAnsi(line))) ?? "";
+
+  assert.match(row, /\u001b\[38;2;1;2;3mEX/);
+  assert.doesNotMatch(row, /\u001b\[38;2;4;5;6mEX/);
 });
 
 test("active and backlog rows use fixed stage and activity slots", () => {

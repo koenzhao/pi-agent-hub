@@ -304,7 +304,7 @@ function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages:
   const activity = session.displayStatus === "running" ? "" : session.activityAge ?? "";
   const stageSlot = `${stage}${" ".repeat(Math.max(0, 2 - displayWidth(stage)))}`;
   const activitySlot = `${" ".repeat(Math.max(0, 3 - displayWidth(activity)))}${activity}`;
-  const active = `${stage ? styles.muted(stageSlot) : stageSlot} ${activity ? styles.dim(activitySlot) : activitySlot}`;
+  const active = `${stage ? styles.accent(stageSlot) : stageSlot} ${activity ? styles.dim(activitySlot) : activitySlot}`;
   const right = stages
     ? (session.kind === "subagent" ? "" : styles.dim(session.group))
     : session.archivedAge ? styles.dim(session.archivedAge) : active;
