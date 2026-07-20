@@ -161,6 +161,12 @@ test("dashboard shortcut config rejects conflicts and invalid send values", asyn
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
+    dashboard: { shortcuts: [{ key: "M-q", send: "/session-summary name" }] },
+  }), "utf8");
+  await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
+
+  await writeFile(configPath(env), JSON.stringify({
+    version: 1,
     dashboard: { shortcuts: [{ key: "C-m", send: "/session-summary name" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);

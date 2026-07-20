@@ -88,6 +88,7 @@ test("help overlay opens and closes", () => {
   const help = view.render(80).join("\n");
   assert.match(help, /pi agent hub help/);
   assert.match(help, /Status legend/);
+  assert.match(help, /Alt\+Q/);
   assert.match(help, /Ctrl\+Q/);
   assert.match(help, /Alt\+R/);
   assert.match(help, /i toggle/);

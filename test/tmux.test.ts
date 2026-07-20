@@ -343,20 +343,21 @@ test("sidebar return binding installs guarded return and quadrant jumps then res
   await installSidebarReturnBinding({ dashboardSession: "pi-agent-hub", sidebarPane: "%1", stateDir }, exec);
 
   const binds = exec.calls.filter((call) => call.args[0] === "bind-key");
-  assert.deepEqual(binds.map((call) => call.args[2]), ["C-q", "M-1", "M-2", "M-3", "M-4"]);
-  assert.match(binds[0]?.args[4] ?? "", /select-pane -t '%1'/);
-  assert.deepEqual(binds[1]?.args.slice(3, 6), ["if-shell", "-F", "#{==:#{session_name},pi-agent-hub}"]);
-  assert.match(binds[1]?.args[6] ?? "", /##\{pane_id\} ##\{@pi_hub_slot\}/);
-  assert.match(binds[1]?.args[6] ?? "", /awk -v s=1/);
-  assert.match(binds[1]?.args[6] ?? "", /if \[ -n "\$P" \]; then tmux select-pane/);
-  assert.equal(binds[1]?.args[7], "send-keys Escape 1");
+  assert.deepEqual(binds.map((call) => call.args[2]), ["C-q", "M-q", "M-1", "M-2", "M-3", "M-4"]);
+  assert.deepEqual(binds[0]?.args.slice(3), ["if-shell", "-F", "#{==:#{session_name},pi-agent-hub}", "select-pane -t '%1'", "send-keys C-q"]);
+  assert.deepEqual(binds[1]?.args.slice(3), ["if-shell", "-F", "#{==:#{session_name},pi-agent-hub}", "select-pane -t '%1'", "send-keys Escape q"]);
+  assert.deepEqual(binds[2]?.args.slice(3, 6), ["if-shell", "-F", "#{==:#{session_name},pi-agent-hub}"]);
+  assert.match(binds[2]?.args[6] ?? "", /##\{pane_id\} ##\{@pi_hub_slot\}/);
+  assert.match(binds[2]?.args[6] ?? "", /awk -v s=1/);
+  assert.match(binds[2]?.args[6] ?? "", /if \[ -n "\$P" \]; then tmux select-pane/);
+  assert.equal(binds[2]?.args[7], "send-keys Escape 1");
   const status = await inspectSidebarReturnBinding({ stateDir });
-  assert.deepEqual(status.active && status.keys, ["C-q", "M-1", "M-2", "M-3", "M-4"]);
+  assert.deepEqual(status.active && status.keys, ["C-q", "M-q", "M-1", "M-2", "M-3", "M-4"]);
   assert.match(await readFile(join(stateDir, "previous.tmux"), "utf8"), /M-4/);
 
   await removeSidebarReturnBinding({ stateDir }, exec);
 
-  assert.deepEqual(exec.calls.filter((call) => call.args[0] === "unbind-key").map((call) => call.args.at(-1)), ["C-q", "M-1", "M-2", "M-3", "M-4"]);
+  assert.deepEqual(exec.calls.filter((call) => call.args[0] === "unbind-key").map((call) => call.args.at(-1)), ["C-q", "M-q", "M-1", "M-2", "M-3", "M-4"]);
   assert.deepEqual(exec.calls.at(-1)?.args, ["source-file", join(stateDir, "previous.tmux")]);
   assert.deepEqual(await inspectSidebarReturnBinding({ stateDir }), { active: false });
 });
@@ -381,7 +382,7 @@ test("sidebar binding install failure rolls back the whole binding set", async (
     return { stdout: "", stderr: "" };
   });
   await assert.rejects(() => installSidebarReturnBinding({ dashboardSession: "pi-agent-hub", sidebarPane: "%1", stateDir }, exec), /bind failed/);
-  assert.deepEqual(exec.calls.filter((call) => call.args[0] === "unbind-key").map((call) => call.args.at(-1)), ["C-q", "M-1", "M-2", "M-3", "M-4"]);
+  assert.deepEqual(exec.calls.filter((call) => call.args[0] === "unbind-key").map((call) => call.args.at(-1)), ["C-q", "M-q", "M-1", "M-2", "M-3", "M-4"]);
   assert.deepEqual(await inspectSidebarReturnBinding({ stateDir }), { active: false });
 });
 

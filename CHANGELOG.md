@@ -8,7 +8,7 @@ Use this section while developing. Move entries into a versioned section before 
 
 ### Added
 
-- Add explicit `x` then `1`–`4` panel close commands and guarded `Alt+1`–`Alt+4` focus jumps from anywhere in the dashboard tmux session.
+- Add explicit `x` then `1`–`4` panel close commands, guarded `Alt+1`–`Alt+4` focus jumps, and `Alt+Q` sidebar return from anywhere in the dashboard tmux session.
 
 ### Changed
 
@@ -16,6 +16,8 @@ Use this section while developing. Move entries into a versioned section before 
 - Removed unused public exports `McpTool`, `PiToolDefinition`, and `buildPiCommand`; moved `cliTuiCommand` into `core/tmux` and deleted the shallow `core/cli-command` module.
 
 ### Fixed
+
+- Fix `Alt+1`–`Alt+4` pane lookup so tmux resolves live slot metadata at keypress time and empty slots remain silent no-ops.
 
 ## 1.2.0 - 2026-05-26
 

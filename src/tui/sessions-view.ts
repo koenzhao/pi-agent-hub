@@ -884,7 +884,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  s skills picker     m MCP picker     ←→/Tab switch picker columns",
     "",
     heading("Return from managed sessions and panels"),
-    "  Ctrl+Q return to dashboard/sidebar     Alt+R rename current session",
+    "  Alt+Q panel to sidebar     Ctrl+Q return fallback     Alt+R rename session",
     "",
     heading("Sections and views"),
     "  Active and Backlog keep project/group headers; Archived is flat and chronological",

@@ -39,8 +39,10 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | --- | --- |
 | `n` | Create a new Pi session |
 | `Enter` | Open/switch to the selected live session, or restart a stopped/error session |
-| `1`–`4` | Target a side-panel slot; requests past the next available slot append there |
-| `Shift+1`–`Shift+4` or `F`, then `1`–`4` | Focus the corresponding open panel |
+| `1`–`4` | Assign, replace, move, swap, or focus a fixed quadrant panel |
+| `x`, then `1`–`4` | Close the corresponding panel |
+| `F`, then `1`–`4`, or `Alt+1`–`Alt+4` | Focus the corresponding open panel |
+| `Alt+Q` / `Ctrl+Q` | Return from a panel to the sidebar |
 | `o` | Reset side panels to the selected session, or close it when it is the only panel |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
