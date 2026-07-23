@@ -60,6 +60,8 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
   let mcpCleanup: (() => Promise<void>) | undefined;
 
   async function heartbeat(state: Heartbeat["state"], ctx: PiContext, message?: string) {
+    // pi-tmux-subagents child bootstrap owns its richer Agent Hub heartbeat.
+    if (process.env.PI_TMUX_SUBAGENTS_JOB_ID) return;
     const id = process.env[SESSION_ID_ENV];
     if (!id) return;
     if (state !== currentState) {

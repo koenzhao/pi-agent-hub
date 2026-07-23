@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import piAgentHubExtension from "../src/extension/index.js";
 import { SESSION_ID_ENV, STATE_ENV } from "../src/core/names.js";
 import { heartbeatPath } from "../src/core/paths.js";
@@ -34,6 +34,44 @@ test("piAgentHubExtension registers handlers once per active process", async () 
     "session_start", "agent_start", "agent_end", "session_shutdown",
   ]);
   delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+});
+
+test("piAgentHubExtension leaves tmux subagent heartbeats to child bootstrap", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  const previousSubagentJobId = process.env.PI_TMUX_SUBAGENTS_JOB_ID;
+  process.env[SESSION_ID_ENV] = "subagent-1";
+  process.env[STATE_ENV] = root;
+  process.env.PI_TMUX_SUBAGENTS_JOB_ID = "subagent-1";
+  const file = heartbeatPath("subagent-1", { PI_AGENT_HUB_DIR: root });
+  const childHeartbeat = `${JSON.stringify({ owner: "child-bootstrap" })}\n`;
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, childHeartbeat, "utf8");
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) {
+      handlers.set(name, handler);
+    },
+    registerTool() {},
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await handlers.get("session_start")?.({}, { cwd: root, hasUI: false });
+
+    assert.equal(await readFile(file, "utf8"), childHeartbeat);
+  } finally {
+    await handlers.get("session_shutdown")?.({}, { cwd: root, hasUI: false });
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    if (previousSubagentJobId === undefined) delete process.env.PI_TMUX_SUBAGENTS_JOB_ID;
+    else process.env.PI_TMUX_SUBAGENTS_JOB_ID = previousSubagentJobId;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
 });
 
 test("piAgentHubExtension refreshes active theme shortly after session start", async () => {
