@@ -16,7 +16,7 @@
 
 - Groups are implicit session labels: `g` moves the selected session, `G` renames its current group globally, and no empty-group lifecycle should be added unless the model changes.
 - Active/Backlog/Archived are optional per-session buckets: `A`/`B`/`U` only reorganize rows and must not stop tmux/Pi; subagent rows follow their parent.
-- Active/Backlog row order is user-controlled via `src/core/session-order.ts`; Archived is globally newest-first by archive time and cannot be reordered with `K`/`J`. Do not reintroduce status/title sorting or a separate stopped section.
+- Active/Backlog groups and rows use `src/core/session-order.ts`: errors first, starting/running next, waiting and idle mixed by newest `lastActivityAt`, and stopped last. Groups in the waiting/idle tier are ordered by their newest member activity; existing group order breaks remaining ties. Persisted user order breaks exact priority/activity ties, and `K`/`J` reorder only inside such a tie. Archived is globally newest-first by archive time and cannot be reordered. Do not sort by title or add a separate stopped section.
 - Do not repurpose established shortcuts: `r` restart choices, `R` rename, `N` sync from Pi `/name`, plus hidden compatibility aliases `e` for rename and `Alt+N` for sync.
 
 ## TUI Rules

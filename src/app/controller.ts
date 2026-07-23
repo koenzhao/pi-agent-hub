@@ -4,7 +4,7 @@ import { removeMultiRepoWorkspace } from "../core/multi-repo.js";
 import { heartbeatPath, sessionMetadataPath } from "../core/paths.js";
 import { loadRegistry, normalizeGroup, renameGroup as renameRegistryGroup, saveRegistry, updateRegistry } from "../core/registry.js";
 import { ARCHIVE_PRUNE_AFTER_MS, moveToBucket, restoreBucket, sessionSection } from "../core/session-bucket.js";
-import { assignGroupOrder, nextOrderInGroup, orderedSessions } from "../core/session-order.js";
+import { assignGroupOrder, compareSessionPriority, nextOrderInGroup, orderedSessions } from "../core/session-order.js";
 import { orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../core/session-tree.js";
 import { readPiSessionName } from "../core/pi-session-name.js";
 import { readSessionMetadata } from "../core/session-metadata.js";
@@ -162,11 +162,14 @@ export class SessionsController {
     const section = sessionSection(selected);
     if (section === "archived") return;
     const group = orderedSessions(this.registry.sessions).filter((session) => session.group === selected.group && sessionSection(session) === section && !isSubagentSession(session));
-    const index = group.findIndex((session) => session.id === selected.id);
-    const target = index + delta;
-    if (index < 0 || target < 0 || target >= group.length) return;
+    const cohort = group.filter((session) => compareSessionPriority(session, selected) === 0);
+    const cohortIndex = cohort.findIndex((session) => session.id === selected.id);
+    const target = cohort[cohortIndex + delta];
+    if (cohortIndex < 0 || !target) return;
     const ids = group.map((session) => session.id);
-    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
+    const index = ids.indexOf(selected.id);
+    const targetIndex = ids.indexOf(target.id);
+    [ids[index], ids[targetIndex]] = [ids[targetIndex]!, ids[index]!];
     this.registry = { ...this.registry, sessions: assignGroupOrder(this.registry.sessions, ids, selected.group, section) };
     await saveRegistry(this.registry);
   }

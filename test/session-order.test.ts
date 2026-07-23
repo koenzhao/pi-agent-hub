@@ -3,17 +3,18 @@ import assert from "node:assert/strict";
 import { assignGroupOrder, nextOrderInGroup, orderedSessions } from "../src/core/session-order.js";
 import type { ManagedSession } from "../src/core/types.js";
 
-function session(id: string, group = "default", order?: number): ManagedSession {
+function session(id: string, group = "default", order?: number, status: ManagedSession["status"] = "idle", lastActivityAt?: number): ManagedSession {
   return {
     id,
     title: id,
     cwd: `/tmp/${id}`,
     group,
     tmuxSession: `pi-agent-hub-${id}`,
-    status: "idle",
+    status,
     createdAt: 1,
     updatedAt: 1,
     ...(order === undefined ? {} : { order }),
+    ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
   };
 }
 
@@ -25,6 +26,35 @@ test("orderedSessions preserves registry order for unordered rows and uses persi
 test("duplicate persisted orders keep registry order", () => {
   const sessions = [session("b", "default", 0), session("a", "default", 0), session("c", "default", 1)];
   assert.deepEqual(orderedSessions(sessions).map((item) => item.id), ["b", "a", "c"]);
+});
+
+test("active and backlog groups mix waiting and idle sessions by recent activity", () => {
+  const sessions = [
+    session("idle-recent", "default", 0, "idle", 300),
+    session("running", "default", 1, "running"),
+    session("waiting", "default", 2, "waiting", 200),
+    session("error", "default", 3, "error"),
+    session("starting", "default", 4, "starting"),
+    session("stopped", "default", 5, "stopped"),
+    { ...session("backlog-idle", "default", 0, "idle", 100), bucket: "backlog" as const },
+    { ...session("backlog-waiting", "default", 1, "waiting", 200), bucket: "backlog" as const },
+  ];
+
+  assert.deepEqual(orderedSessions(sessions).map((item) => item.id), [
+    "error", "running", "starting", "idle-recent", "waiting", "stopped", "backlog-waiting", "backlog-idle",
+  ]);
+});
+
+test("groups are ordered by their newest waiting or idle member", () => {
+  const sessions = [
+    session("default-idle", "default", 0, "idle", 100),
+    session("work-idle", "work", 0, "idle", 200),
+    session("work-waiting", "work", 1, "waiting", 300),
+    session("z-waiting", "z", 0, "waiting", 400),
+    session("z-idle", "z", 1, "idle", 50),
+  ];
+
+  assert.deepEqual(orderedSessions(sessions).map((item) => item.id), ["z-waiting", "z-idle", "work-waiting", "work-idle", "default-idle"]);
 });
 
 test("nextOrderInGroup appends after unordered siblings", () => {

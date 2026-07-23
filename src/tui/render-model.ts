@@ -1,5 +1,5 @@
 import { ARCHIVE_PRUNE_AFTER_MS, type SessionSection } from "../core/session-bucket.js";
-import { groupOrder, orderedSessions } from "../core/session-order.js";
+import { compareGroupPriority, groupOrder, orderedSessions } from "../core/session-order.js";
 import { orderedSessionRows, sessionDepth } from "../core/session-tree.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { RuntimeSession, SessionStatus, SessionMetadata, WorkflowSnapshot } from "../core/types.js";
@@ -17,6 +17,7 @@ export interface RenderSession {
   bucketChangedAt?: number;
   archivedAge?: string;
   archiveRetentionIn?: string;
+  lastActivityAt?: number;
   activityAge?: string;
   status: SessionStatus;
   displayStatus: "running" | "waiting" | "idle" | "error" | "stopped";
@@ -264,7 +265,7 @@ function groupsForSessions(sessions: RenderSession[]): RenderGroup[] {
     groupsByName.set(session.group, group);
   }
   return [...groupsByName.entries()]
-    .sort(([a], [b]) => groupOrder(a, b))
+    .sort(([a, aSessions], [b, bSessions]) => compareGroupPriority(aSessions, bSessions) || groupOrder(a, b))
     .map(([name, groupSessions]) => ({
       name,
       statusCounts: countRenderSessions(groupSessions),
@@ -308,6 +309,7 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     section: lifecycle.section,
     bucketChangedAt: lifecycle.bucketChangedAt,
     ...archiveTiming,
+    lastActivityAt: session.lastActivityAt,
     activityAge: activityAge(session.lastActivityAt, now),
     status: session.status,
     displayStatus,

@@ -52,7 +52,7 @@ test("selection changes clear stale preview and ignore late captures", async () 
   assert.equal(controller.snapshot().preview, "");
 });
 
-test("movement follows stable registry order within groups", () => {
+test("movement keeps errors ahead of the activity-sorted tier", () => {
   const controller = new SessionsController({
     version: 1,
     sessions: [
@@ -62,13 +62,53 @@ test("movement follows stable registry order within groups", () => {
     ],
   });
 
-  assert.equal(controller.snapshot().selectedId, "b");
-  controller.move(1);
   assert.equal(controller.snapshot().selectedId, "a");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "b");
   controller.move(1);
   assert.equal(controller.snapshot().selectedId, "work");
   controller.move(-1);
-  assert.equal(controller.snapshot().selectedId, "a");
+  assert.equal(controller.snapshot().selectedId, "b");
+});
+
+test("movement follows newest waiting or idle activity across groups", () => {
+  const controller = new SessionsController({
+    version: 1,
+    sessions: [
+      session("idle", { id: "default", title: "default", group: "default", lastActivityAt: 100 }),
+      session("idle", { id: "work-idle", title: "work-idle", group: "work", lastActivityAt: 200 }),
+      session("waiting", { id: "work-waiting", title: "work-waiting", group: "work", lastActivityAt: 300 }),
+      session("waiting", { id: "z-waiting", title: "z-waiting", group: "z", lastActivityAt: 400 }),
+      session("idle", { id: "z-idle", title: "z-idle", group: "z", lastActivityAt: 50 }),
+    ],
+  });
+
+  assert.equal(controller.snapshot().selectedId, "z-waiting");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "z-idle");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "work-waiting");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "work-idle");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "default");
+});
+
+test("group priority includes nested subagent status", () => {
+  const controller = new SessionsController({
+    version: 1,
+    sessions: [
+      session("idle", { id: "default", title: "default", group: "default" }),
+      session("idle", { id: "work", title: "work", group: "work" }),
+      session("error", { id: "worker", title: "worker", group: "work", kind: "subagent", parentId: "work" }),
+    ],
+  });
+
+  assert.equal(controller.snapshot().selectedId, "work");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "worker");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "default");
 });
 
 test("filter matches additional repo basenames", () => {
@@ -130,6 +170,25 @@ test("reorderSelected swaps selected session within its group and clamps at bord
     await controller.reorderSelected(1);
     assert.deepEqual(controller.snapshot().registry.sessions.filter((item) => item.group === "default").map((item) => [item.id, item.order]), [["a", 0], ["b", 2], ["c", 1]]);
     assert.deepEqual(controller.snapshot().registry.sessions.filter((item) => item.group === "work").map((item) => [item.id, item.order]), [["work", 0]]);
+  });
+});
+
+test("reorderSelected stays within the selected priority and activity tie", async () => {
+  await withTempSessionsDir(async () => {
+    const controller = new SessionsController({
+      version: 1,
+      sessions: [
+        session("error", { id: "error", title: "error", order: 0 }),
+        session("idle", { id: "idle-a", title: "idle-a", order: 1, lastActivityAt: 200 }),
+        session("waiting", { id: "idle-b", title: "idle-b", order: 2, lastActivityAt: 100 }),
+      ],
+    });
+
+    controller.move(1);
+    assert.equal(controller.snapshot().selectedId, "idle-a");
+    await controller.reorderSelected(-1);
+    await controller.reorderSelected(1);
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => [item.id, item.order]), [["error", 0], ["idle-a", 1], ["idle-b", 2]]);
   });
 });
 

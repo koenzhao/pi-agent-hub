@@ -3,6 +3,7 @@ import { MANAGED_SESSION_PREFIX } from "../core/names.js";
 
 export const SIDEBAR_WIDTH = 42;
 const MIN_SIDEBAR_WIDTH = 40;
+const MAX_SIDEBAR_WIDTH = 60;
 const MIN_CONTENT_WIDTH = 40;
 
 export type SidePaneSlot = 1 | 2 | 3 | 4;
@@ -39,9 +40,10 @@ export interface PanelGeometry {
 const ALL_SLOTS: readonly SidePaneSlot[] = [1, 2, 3, 4];
 
 export function sidebarRepairWidth(ownWidth: number, windowWidth: number): number | undefined {
-  if (ownWidth >= MIN_SIDEBAR_WIDTH) return undefined;
-  const desired = Math.min(SIDEBAR_WIDTH, windowWidth - MIN_CONTENT_WIDTH - 1);
-  return desired >= MIN_SIDEBAR_WIDTH ? desired : undefined;
+  const available = Math.min(MAX_SIDEBAR_WIDTH, windowWidth - MIN_CONTENT_WIDTH - 1);
+  if (available < MIN_SIDEBAR_WIDTH) return undefined;
+  const desired = ownWidth < MIN_SIDEBAR_WIDTH ? Math.min(SIDEBAR_WIDTH, available) : available;
+  return ownWidth > desired || ownWidth < MIN_SIDEBAR_WIDTH ? desired : undefined;
 }
 
 export async function assignSidePaneSlot(options: {

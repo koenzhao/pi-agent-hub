@@ -405,6 +405,21 @@ test("grouping order and status counts", () => {
   assert.doesNotMatch(rendered, /1 waiting · 1 error/);
 });
 
+test("groups are rendered by newest waiting or idle activity", () => {
+  const model = buildRenderModel({
+    sessions: [
+      { ...session("default-idle", "default", "idle"), lastActivityAt: 100 },
+      { ...session("work-idle", "work", "idle"), lastActivityAt: 200 },
+      { ...session("work-waiting", "work", "waiting"), lastActivityAt: 300 },
+      { ...session("z-waiting", "z", "waiting"), lastActivityAt: 400 },
+      { ...session("z-idle", "z", "idle"), lastActivityAt: 50 },
+    ],
+    width: 120,
+  });
+
+  assert.deepEqual(model.groups.map((group) => group.name), ["z", "work", "default"]);
+});
+
 test("sectioned model preserves Active and Backlog groups but flattens Archived chronologically", () => {
   const day = 24 * 60 * 60 * 1000;
   const backlog = { ...session("backlog", "default", "idle"), bucket: "backlog" as const, bucketChangedAt: 100 };
@@ -468,16 +483,16 @@ test("all-active dashboards suppress lifecycle section headers", () => {
   assert.doesNotMatch(renderSessions(model).lines.join("\n"), /ACTIVE/);
 });
 
-test("session order is stable and ignores status and title", () => {
+test("session order mixes waiting and idle by activity and ignores title", () => {
   const model = buildRenderModel({
     sessions: [
-      session("worker", "default", "idle", "zzz"),
+      { ...session("worker", "default", "idle", "zzz"), lastActivityAt: 200 },
       session("api", "default", "error", "aaa"),
-      session("docs", "default", "waiting", "mmm"),
+      { ...session("docs", "default", "waiting", "mmm"), lastActivityAt: 100 },
     ],
     width: 120,
   });
-  assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["worker", "api", "docs"]);
+  assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["api", "worker", "docs"]);
 });
 
 test("narrow layout hides preview and uses readable compact footer", () => {
@@ -550,10 +565,10 @@ test("error reason appears in selected metadata", () => {
   assert.match(lines.join("\n"), /error\s+MCP failed/);
 });
 
-test("selected and stopped rows have distinct treatments without moving stopped rows", () => {
+test("selected and stopped rows have distinct treatments with stopped rows last", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "stopped", "api"), session("b", "default", "idle", "docs")], selectedId: "b", width: 100 });
   const lines = renderSessions(model).lines.join("\n");
-  assert.match(lines, /· - api[\s\S]*▌ ○ docs/);
+  assert.match(lines, /▌ ○ docs[\s\S]*· - api/);
   assert.doesNotMatch(lines, /Stopped/);
 });
 

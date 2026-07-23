@@ -183,6 +183,9 @@ test("sidebar repair and cleanup helpers retain their contracts", async () => {
   assert.equal(sidebarRepairWidth(12, 160), 42);
   assert.equal(sidebarRepairWidth(12, 80), undefined);
   assert.equal(sidebarRepairWidth(40, 160), undefined);
+  assert.equal(sidebarRepairWidth(55, 160), undefined);
+  assert.equal(sidebarRepairWidth(72, 160), 60);
+  assert.equal(sidebarRepairWidth(72, 100), 59);
   const showing = sidePaneExec(pair12, sessions12);
   assert.equal(await closeSidePaneShowing({ target: "pi-agent-hub-docs", ownPane: "%1" }, showing), true);
   assert.deepEqual(showing.calls.at(-1)?.args, ["kill-pane", "-t", "%3"]);
