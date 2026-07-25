@@ -5,7 +5,7 @@ import type { DialogContext } from "./dialog.js";
 
 export interface PromptDialog {
   kind: "prompt";
-  purpose: "filter" | "rename" | "send";
+  purpose: "filter" | "send";
   draft: TextInputState;
   error?: string;
   targetId?: string;
@@ -16,16 +16,6 @@ export function openFilterPrompt(ctx: DialogContext): PromptDialog | undefined {
   const draft = createTextInput(ctx.controller.snapshot().filter ?? "");
   setFilter(ctx, draft.value);
   return { kind: "prompt", purpose: "filter", draft };
-}
-
-export function openRenamePrompt(ctx: DialogContext): PromptDialog | undefined {
-  const selected = ctx.controller.selected();
-  if (!selected) return undefined;
-  if (selected.kind === "subagent") {
-    ctx.setMessage("subagent rows cannot be renamed");
-    return undefined;
-  }
-  return { kind: "prompt", purpose: "rename", draft: createTextInput(selected.title) };
 }
 
 export function openSendPrompt(ctx: DialogContext): PromptDialog | undefined {
@@ -49,7 +39,6 @@ export function openSendPrompt(ctx: DialogContext): PromptDialog | undefined {
 export function handlePromptInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
   switch (dialog.purpose) {
     case "filter": return handleFilterInput(dialog, data, ctx);
-    case "rename": return handleRenameInput(dialog, data, ctx);
     case "send": return handleSendInput(dialog, data, ctx);
   }
 }
@@ -62,7 +51,6 @@ export function promptFooter(dialog: PromptDialog, ctx: DialogContext): string {
   const now = ctx.now();
   switch (dialog.purpose) {
     case "filter": return filterFooter(dialog.draft, now, ctx.theme);
-    case "rename": return renameFooter(dialog.draft, renameTargetTitle(ctx), dialog.error, now, ctx.theme);
     case "send": return sendFooter(dialog.draft, sendTargetTitle(dialog, ctx), dialog.error, now, ctx.theme);
   }
 }
@@ -88,28 +76,6 @@ function setFilter(ctx: DialogContext, value: string | undefined): void {
   if (ctx.controller.snapshot().selectedId !== previousId) ctx.actions.selectionChanged?.();
 }
 
-function handleRenameInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
-  if (matchesKey(data, Key.escape)) {
-    ctx.setMessage(undefined);
-    return undefined;
-  }
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
-    const selected = ctx.controller.selected();
-    if (!selected) return undefined;
-    const title = dialog.draft.value.trim();
-    if (!title) return { ...dialog, error: "title is required" };
-    ctx.runAction(
-      () => ctx.actions.renameSession ? ctx.actions.renameSession(selected.id, title) : ctx.controller.renameSession(selected.id, title),
-      "renaming session...",
-    );
-    return undefined;
-  }
-  const edited = editTextInput(data, dialog.draft);
-  if (!edited) return dialog;
-  ctx.setMessage(undefined);
-  return { ...dialog, draft: edited, error: undefined };
-}
-
 function handleSendInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
   if (matchesKey(data, Key.escape)) {
     ctx.setMessage(undefined);
@@ -133,10 +99,6 @@ function handleSendInput(dialog: PromptDialog, data: string, ctx: DialogContext)
   return { ...dialog, draft: edited, error: undefined };
 }
 
-function renameTargetTitle(ctx: DialogContext): string {
-  return ctx.controller.selected()?.title ?? "session";
-}
-
 function sendTargetTitle(dialog: PromptDialog, ctx: DialogContext): string {
   return ctx.controller.snapshot().registry.sessions.find((session) => session.id === dialog.targetId)?.title ?? "session";
 }
@@ -144,13 +106,6 @@ function sendTargetTitle(dialog: PromptDialog, ctx: DialogContext): string {
 function filterFooter(input: TextInputState, now: number, theme?: SessionsTheme): string {
   const text = `filter: ${renderInlineInput(input, footerCursor(now))}  • ←→ edit • esc clear • enter done`;
   return theme ? styleToken(theme, "dim", text) : text;
-}
-
-function renameFooter(input: TextInputState, target: string, error: string | undefined, now: number, theme?: SessionsTheme): string {
-  const text = error
-    ? `rename ${target}: ${renderInlineInput(input, footerCursor(now))}  • ${error}`
-    : `rename ${target}: ${renderInlineInput(input, footerCursor(now))}  • ←→ edit • esc cancel • enter rename`;
-  return theme ? styleToken(theme, error ? "error" : "dim", text) : text;
 }
 
 function sendFooter(input: TextInputState, target: string, error: string | undefined, now: number, theme?: SessionsTheme): string {

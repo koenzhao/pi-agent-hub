@@ -11,7 +11,7 @@ import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
 import { errorMessage, isPromise, type CloseSidePaneResult, type DialogContext, type FocusSidePaneResult, type SessionDialog, type SessionsViewActions, type SidePaneActionResult } from "./dialog.js";
-import { handlePromptInput, openFilterPrompt, openRenamePrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
+import { handlePromptInput, openFilterPrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
 import { handleFormDialogInput, openForkDialog, openMoveGroupDialog, openRenameGroupDialog, openRenameSessionForm, renderFormDialog } from "./form-dialogs.js";
 import { handleConfirmInput, openDeleteDialog, openFinishDialog, renderConfirmDialog, renderRestartDialog } from "./confirm-dialogs.js";
 import { createPickerDialog, handlePickerDialogInput, renderPickerDialog } from "./picker-dialog.js";
@@ -304,8 +304,7 @@ export class SessionsView implements Component {
       this.message = "subagent rows cannot be renamed";
       return;
     }
-    if (!returnAfterRenameTmuxSession) this.openDialog(openRenamePrompt);
-    else this.openDialog((ctx) => openRenameSessionForm(ctx, returnAfterRenameTmuxSession));
+    this.openDialog((ctx) => openRenameSessionForm(ctx, returnAfterRenameTmuxSession));
   }
 
   private startRenameGroupDialog() {

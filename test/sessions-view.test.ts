@@ -971,7 +971,7 @@ test("mouse wheel moves selection", () => {
   assert.equal(controller.snapshot().selectedId, "api");
 });
 
-test("mouse sequences are consumed while rename prompt is open", () => {
+test("mouse sequences are consumed while rename form is open", () => {
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
   const view = new SessionsView(controller, () => {});
   view.render(100);
@@ -980,7 +980,7 @@ test("mouse sequences are consumed while rename prompt is open", () => {
   view.handleInput("\u001b[<0;3;4m");
 
   assert.equal(controller.snapshot().selectedId, "api");
-  assert.match(stripAnsi(view.render(100).join("\n")), /rename api: api[█▌]/);
+  assert.match(stripAnsi(view.render(100).join("\n")), /Rename session/);
 });
 
 test("mouse press only dismisses restart choices and wheel is ignored", () => {
@@ -2008,31 +2008,41 @@ test("group dialog cycles groups from the filtered dashboard", () => {
   assert.match(rendered, /existing or new group label/);
 });
 
-test("R opens footer rename prompt for selected session title", () => {
+test("R opens rename form for selected session title", () => {
   let renamed: { id: string; title: string } | undefined;
-  let now = 100;
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
     renameSession: (id, title) => { renamed = { id, title }; },
-    now: () => now,
   });
 
   view.handleInput("R");
-  const rendered = view.render(100).join("\n");
-  assert.match(rendered, /\u001b\[5m█\u001b\[25m/);
-  assert.match(stripAnsi(rendered), /rename api: api█/);
-  assert.doesNotMatch(stripAnsi(rendered), /Rename session/);
-  now = 1_100;
-  assert.match(view.render(100).join("\n"), /\u001b\[5m▌\u001b\[25m/);
+  const rendered = stripAnsi(view.render(100).join("\n"));
+  assert.match(rendered, /Rename session/);
+  assert.match(rendered, /title\s+api█/);
   for (let i = 0; i < "api".length; i += 1) view.handleInput("\u007f");
   for (const char of "backend") view.handleInput(char);
   view.handleInput("\r");
 
   assert.deepEqual(renamed, { id: "api", title: "backend" });
-  assert.doesNotMatch(view.render(100).join("\n"), /rename api:/);
+  assert.doesNotMatch(view.render(100).join("\n"), /Rename session/);
 });
 
-test("footer rename prompt supports cursor movement and mid-line editing", () => {
+test("narrow rename form keeps a long title and cursor visible", () => {
+  const title = "Market Snapshot Workflow Review and Export";
+  const controller = new SessionsController({ version: 1, sessions: [session("market", title)] });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("R");
+  const rendered = view.render(42);
+  const plain = rendered.map(stripAnsi);
+  const titleLine = plain.find((line) => line.includes("title")) ?? "";
+
+  assert.match(plain.join("\n"), /Rename session/);
+  assert.match(titleLine, /….*█/);
+  assert.ok(rendered.every((line) => visibleWidth(line) <= 42));
+});
+
+test("rename form supports cursor movement and mid-line editing", () => {
   let renamed: { id: string; title: string } | undefined;
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, { renameSession: (id, title) => { renamed = { id, title }; } });
@@ -2046,7 +2056,7 @@ test("footer rename prompt supports cursor movement and mid-line editing", () =>
   assert.deepEqual(renamed, { id: "api", title: "apXi" });
 });
 
-test("footer rename prompt supports word movement and word backspace", () => {
+test("rename form supports word movement and word backspace", () => {
   let renamed: { id: string; title: string } | undefined;
   const controller = new SessionsController({ version: 1, sessions: [session("api", "alpha beta gamma")] });
   const view = new SessionsView(controller, () => {}, { renameSession: (id, title) => { renamed = { id, title }; } });
@@ -2059,7 +2069,7 @@ test("footer rename prompt supports word movement and word backspace", () => {
   assert.deepEqual(renamed, { id: "api", title: "alpha gamma" });
 });
 
-test("footer rename prompt validates blank title", () => {
+test("rename form validates blank title", () => {
   let renamed: { id: string; title: string } | undefined;
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, { renameSession: (id, title) => { renamed = { id, title }; } });
@@ -2160,7 +2170,6 @@ test("p opens footer send prompt and submits message to selected live session", 
 test("themed footer text remains styled when input is truncated", () => {
   const theme = { ...darkTheme, dim: "#010203", border: "#040506" };
   const cases = [
-    { key: "R", expected: "rename api:" },
     { key: "p", expected: "send to api:" },
   ];
 
@@ -2250,7 +2259,7 @@ test("e remains a rename alias", () => {
 
   view.handleInput("e");
 
-  assert.match(stripAnsi(view.render(100).join("\n")), /rename api: api/);
+  assert.match(stripAnsi(view.render(100).join("\n")), /Rename session/);
 });
 
 test("group rename dialog renames selected session current group", () => {

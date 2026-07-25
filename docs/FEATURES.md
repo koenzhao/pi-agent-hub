@@ -51,7 +51,7 @@ Ctrl+Q returns to the dashboard
 | `i` | Toggle compact/full selected-session info |
 | `↑↓` / `j` / `k` | Move selection |
 | `r` | Open restart choices: `r` restarts selected, `n` starts a new conversation, `a` restarts all active sessions (not Backlog or Archived) |
-| `R` | Rename the selected session in the dashboard footer |
+| `R` | Rename the selected session in a cursor-aware form |
 | `d` | Delete or forget the selected session |
 | `f` | Fork the selected session |
 | `a` | Mark the selected waiting session read |
