@@ -9,11 +9,49 @@ export interface ActiveThemeSnapshot {
   tokens?: Partial<Record<ActiveThemeToken, string | number>>;
 }
 
+export interface WorkflowStep {
+  id: string;
+  short: string;
+  label?: string;
+}
+
+export interface WorkflowModeDisplay {
+  id: string;
+  short: string;
+  label?: string;
+  detail?: string;
+}
+
 export interface WorkflowSnapshot {
-  steps: { id: string; short: string }[];
+  steps: WorkflowStep[];
   activeIndex: number;
   ticketId?: string;
   updatedAt: number;
+}
+
+export interface WorkflowRuntimeSnapshot extends WorkflowSnapshot {
+  activeMode?: WorkflowModeDisplay;
+}
+
+export interface SessionPlanSummary {
+  feature?: string;
+  phase?: {
+    title: string;
+    index: number;
+    count: number;
+  };
+  tasks?: {
+    completed: number;
+    total: number;
+  };
+  nextStep?: string;
+}
+
+export type SessionAttentionKind = "ready" | "question" | "blocked";
+
+export interface SessionAttention {
+  kind: SessionAttentionKind;
+  text: string;
 }
 
 export interface SessionMetadata {
@@ -23,7 +61,9 @@ export interface SessionMetadata {
   nextStep?: string;
   stage?: string;
   confidence?: number;
+  attention?: SessionAttention;
   updatedAt?: number;
+  plan?: SessionPlanSummary;
 }
 
 export interface ManagedWorktree {
@@ -72,6 +112,7 @@ export interface ManagedSession {
 
 export interface RuntimeSession extends ManagedSession {
   sessionMetadata?: SessionMetadata;
+  workflow?: WorkflowRuntimeSnapshot;
 }
 
 export interface SessionsRegistry {
@@ -94,7 +135,7 @@ export interface Heartbeat {
   taskPreview?: string;
   resultPath?: string;
   activeTheme?: ActiveThemeSnapshot;
-  workflow?: WorkflowSnapshot;
+  workflow?: WorkflowRuntimeSnapshot;
 }
 
 export interface TmuxState {

@@ -99,10 +99,10 @@ test("help overlay opens and closes", () => {
   assert.match(help, /F then 1-4 or Alt\+1-4 focus panel/);
   assert.match(help, /o reset to one panel/);
   assert.match(help, /mouse click select · double-click open\/switch/);
-  assert.match(help, /v toggle groups\/stages view/);
+  assert.match(help, /v toggle groups\/board view/);
   assert.match(help, /Active and Backlog keep project\/group headers/);
   assert.match(help, /Archived shows 5 parent cascades/);
-  assert.match(help, /Stages view lanes active sessions by workflow step/);
+  assert.match(help, /Board view lanes Active workflow sessions by producer-defined step/);
   view.handleInput("\u001b");
   assert.doesNotMatch(view.render(80).join("\n"), /pi agent hub help/);
 });
@@ -290,42 +290,43 @@ test("reorder is disabled while filter is active", () => {
 
 const VIEW_WORKFLOW = {
   steps: [
-    { id: "next-feature", short: "NX" },
-    { id: "prime", short: "PR" },
-    { id: "plan-md", short: "PL" },
-    { id: "execute", short: "EX" },
-    { id: "review", short: "RV" },
-    { id: "reflect", short: "RF" },
-    { id: "commit", short: "CM" },
+    { id: "plan-md", short: "PL", label: "Plan" },
+    { id: "execute", short: "EX", label: "Execute" },
+    { id: "review", short: "RV", label: "Review" },
+    { id: "reflect", short: "RF", label: "Reflect" },
+    { id: "commit", short: "CM", label: "Commit" },
   ],
   updatedAt: 1,
 };
 
-test("v toggles stage-lane view and navigation follows lane order", () => {
+test("v toggles board view and navigation follows producer lane order", () => {
   const controller = new SessionsController({ version: 1, sessions: [
-    { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 3 } },
-    { ...session("b", "docs"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
+    { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
+    { ...session("b", "docs"), workflow: { ...VIEW_WORKFLOW, activeIndex: 0 } },
   ] });
   const view = new SessionsView(controller, () => {});
 
   view.handleInput("v");
-  assert.match(stripAnsi(view.render(120).join("\n")), /view stages/);
+  assert.match(stripAnsi(view.render(120).join("\n")), /view board/);
   assert.equal(controller.snapshot().selectedId, "a");
 
   view.handleInput("j");
-  assert.equal(controller.snapshot().selectedId, "b", "j wraps to prime lane row");
+  assert.equal(controller.snapshot().selectedId, "b", "j wraps to plan lane row");
   view.handleInput("j");
-  assert.equal(controller.snapshot().selectedId, "a", "lane order is prime then execute");
+  assert.equal(controller.snapshot().selectedId, "a", "lane order is plan then execute");
   view.handleInput("k");
   assert.equal(controller.snapshot().selectedId, "b");
 
   view.handleInput("v");
-  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view stages/);
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view board/);
 });
 
-test("reorder is disabled in stages view", () => {
+test("reorder is disabled in board view", () => {
   const deltas: number[] = [];
-  const controller = new SessionsController({ version: 1, sessions: [session("api", "api"), session("docs", "docs")] });
+  const controller = new SessionsController({ version: 1, sessions: [
+    { ...session("api", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
+    { ...session("docs", "docs"), workflow: { ...VIEW_WORKFLOW, activeIndex: 2 } },
+  ] });
   const view = new SessionsView(controller, () => {}, {
     reorderSelected: (delta) => { deltas.push(delta); },
   });
@@ -345,19 +346,36 @@ test("v inside filter mode edits the filter instead of toggling views", () => {
   view.handleInput("v");
 
   assert.equal(controller.snapshot().filter, "v");
-  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view stages/);
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view board/);
 });
 
-test("stages view snaps selection to a visible lane row", () => {
+test("board view snaps selection to the first eligible workflow row", () => {
   const controller = new SessionsController({ version: 1, sessions: [
     { ...session("bk", "backlogged"), bucket: "backlog", bucketChangedAt: 1 },
-    { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 3 } },
+    { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
   ] });
   const view = new SessionsView(controller, () => {});
   controller.selectSession("bk");
 
   view.handleInput("v");
   assert.equal(controller.snapshot().selectedId, "a");
+});
+
+test("board empty state blocks actions on hidden group selections", () => {
+  const opened: string[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("plain", "plain")] });
+  const view = new SessionsView(controller, () => {}, {
+    assignSidePaneSlot: (sessionId) => { opened.push(sessionId); return { kind: "opened", slot: 1 }; },
+  });
+
+  view.handleInput("v");
+  view.handleInput("1");
+  assert.deepEqual(opened, []);
+  assert.match(stripAnsi(view.render(80).join("\n")), /No active workflow sessions/);
+
+  view.handleInput("v");
+  view.handleInput("1");
+  assert.deepEqual(opened, ["plain"]);
 });
 
 test("side pane presence snapshots render numbered slot glyphs", () => {

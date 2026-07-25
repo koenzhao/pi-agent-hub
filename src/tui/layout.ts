@@ -1,5 +1,5 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { WorkflowSnapshot } from "../core/types.js";
+import type { WorkflowModeDisplay, WorkflowRuntimeSnapshot } from "../core/types.js";
 import type { RenderModel, RenderSession, StatusCounts } from "./render-model.js";
 import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, type SessionsTheme } from "./theme.js";
 
@@ -28,6 +28,11 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
     const lines = box(width, fitBoxBody(body, model.height), styles);
     return { lines, rowTargets: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
   }
+  if (model.noBoardSessions) {
+    const body = [renderTopSummary(model, bodyWidth, styles), ...(model.panelStrip ? [renderPanelStrip(model, bodyWidth, styles)] : []), ...noBoardLines(width, model, styles), styles.border("─".repeat(bodyWidth)), styleFooter(model.footer, styles)];
+    const lines = box(width, fitBoxBody(body, model.height), styles);
+    return { lines, rowTargets: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
+  }
 
   const split = model.showPreview ? Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38))) : bodyWidth;
   const stripLines = model.panelStrip ? 1 : 0;
@@ -40,7 +45,7 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
   if (model.panelStrip) body.push(renderPanelStrip(model, bodyWidth, styles));
   for (let i = 0; i < rows; i += 1) {
     const padded = pad(windowedLeft.lines[i] ?? "", split);
-    const l = i === windowedLeft.selectedIndex ? styles.selected(padded) : padded;
+    const l = i >= windowedLeft.selectedIndex && i <= windowedLeft.selectedEndIndex ? styles.selected(padded) : padded;
     if (!model.showPreview) body.push(l);
     else body.push(`${l}${styles.border("│")}${pad(right[i] ?? "", bodyWidth - split - 1)}`);
   }
@@ -82,6 +87,7 @@ interface LayoutStyles {
   border(text: string): string;
   dim(text: string): string;
   error(text: string): string;
+  success(text: string): string;
   muted(text: string): string;
   warning(text: string): string;
   selected(text: string): string;
@@ -94,6 +100,7 @@ function createStyles(theme: SessionsTheme): LayoutStyles {
     border: (text) => styleToken(theme, "border", text),
     dim: (text) => styleToken(theme, "dim", text),
     error: (text) => styleToken(theme, "error", text),
+    success: (text) => styleToken(theme, "success", text),
     muted: (text) => styleToken(theme, "muted", text),
     warning: (text) => styleToken(theme, "warning", text),
     selected: (text) => styleBgToken(theme, "selectedBg", text),
@@ -129,6 +136,18 @@ function noMatchLines(width: number, filter: string, styles: LayoutStyles): stri
   ].map((line) => truncate(line, inner));
 }
 
+function noBoardLines(width: number, model: RenderModel, styles: LayoutStyles): string[] {
+  const inner = width - 2;
+  return [
+    "",
+    styles.accent("No active workflow sessions."),
+    "",
+    `${styles.accent("▶")} ${styles.accent("v")}  return to groups view`,
+    boardHiddenSummary(model, inner, styles),
+    "",
+  ].map((line) => truncate(line, inner));
+}
+
 const STATUS_ORDER = [
   ["running", "●"],
   ["waiting", "◐"],
@@ -138,13 +157,16 @@ const STATUS_ORDER = [
 ] as const;
 
 function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyles): string {
-  const countLabel = model.filter === undefined
-    ? `${model.summary.total} ${model.summary.total === 1 ? "session" : "sessions"}`
-    : `${model.summary.visibleTotal}/${model.summary.total} sessions`;
+  const board = model.viewMode === "board";
+  const countLabel = board
+    ? `${model.boardCardCount} workflow ${model.boardCardCount === 1 ? "session" : "sessions"}`
+    : model.filter === undefined
+      ? `${model.summary.total} ${model.summary.total === 1 ? "session" : "sessions"}`
+      : `${model.summary.visibleTotal}/${model.summary.total} sessions`;
   const parts = [styles.accent(countLabel)];
-  const counts = formatStatusCounts(model.summary.statusCounts, styles);
+  const counts = formatStatusCounts(board ? model.boardStatusCounts : model.summary.statusCounts, styles);
   if (counts) parts.push(counts);
-  if (model.viewMode === "stages") parts.push(styles.dim("view stages"));
+  if (board) parts.push(styles.dim("view board"));
   if (model.filter !== undefined) parts.push(styles.dim(`filter: ${model.filter}`));
   return truncate(parts.join(" · "), width);
 }
@@ -158,77 +180,109 @@ function renderPanelStrip(model: RenderModel, width: number, styles: LayoutStyle
   return truncate(segments.join("  "), width);
 }
 
-function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): { lines: string[]; targets: (SessionListTarget | undefined)[]; selectedIndex: number } {
-  const stages = model.viewMode === "stages";
+interface SessionListContent {
+  lines: string[];
+  targets: (SessionListTarget | undefined)[];
+  selectedIndex: number;
+  selectedEndIndex: number;
+  continuationPriorities: Map<number, number>;
+}
+
+function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): SessionListContent {
+  const board = model.viewMode === "board";
   const lines: string[] = [];
   const targets: (SessionListTarget | undefined)[] = [];
+  const continuationPriorities = new Map<number, number>();
   let selectedIndex = -1;
+  let selectedEndIndex = -1;
   const pushLine = (line: string, target?: SessionListTarget) => {
     lines.push(line);
     targets.push(target);
   };
   const pushRow = (session: RenderSession) => {
+    if (board && session.selected) {
+      const innerWidth = Math.max(0, width - 2);
+      selectedIndex = lines.length;
+      const header = renderSessionRow(session, innerWidth, styles, true, model.sidePaneFocusedSlot, false);
+      pushLine(`${styles.accent("┌")}${pad(header, innerWidth)}${styles.accent("┐")}`, { kind: "session", id: session.id });
+      for (const continuation of selectedCardLines(session, innerWidth, styles)) {
+        pushLine(`${styles.accent("│")}${pad(continuation.line, innerWidth)}${styles.accent("│")}`);
+        continuationPriorities.set(lines.length - 1, continuation.priority);
+      }
+      pushLine(styles.accent(`└${"─".repeat(innerWidth)}┘`));
+      continuationPriorities.set(lines.length - 1, 3);
+      selectedEndIndex = lines.length - 1;
+      return;
+    }
     if (session.selected) selectedIndex = lines.length;
-    pushLine(renderSessionRow(session, width, styles, stages, model.sidePaneFocusedSlot), { kind: "session", id: session.id });
+    pushLine(renderSessionRow(session, width, styles, board, model.sidePaneFocusedSlot), { kind: "session", id: session.id });
+    if (session.selected) selectedEndIndex = lines.length - 1;
   };
   if (!model.showSections) {
     for (const group of model.groups) {
       pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
       for (const session of group.sessions) pushRow(session);
     }
-    return { lines, targets, selectedIndex };
+    return { lines, targets, selectedIndex, selectedEndIndex, continuationPriorities };
   }
   let firstSection = true;
   for (const section of model.sections) {
     if (!firstSection) pushLine("");
-    pushLine(sectionHeader(section.title, formatStatusCounts(section.statusCounts, styles), width, styles));
+    const headingRight = board ? styles.dim(`·${section.sessionsTotal}`) : formatStatusCounts(section.statusCounts, styles);
+    pushLine(sectionHeader(section.title, headingRight, width, styles));
     firstSection = false;
     for (const group of section.groups) {
       if (group.name) pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
       for (const session of group.sessions) pushRow(session);
     }
     if (section.archiveDisclosure) {
-      if (section.archiveDisclosure.selected) selectedIndex = lines.length;
+      if (section.archiveDisclosure.selected) {
+        selectedIndex = lines.length;
+        selectedEndIndex = lines.length;
+      }
       const label = section.archiveDisclosure.expanded ? "⌃ show fewer" : `… ${section.archiveDisclosure.hiddenParents} older archived`;
       const prefix = section.archiveDisclosure.selected ? `${styles.accent("▌")} ` : "  ";
       pushLine(`${prefix}${styles.dim(truncate(label, Math.max(0, width - 2)))}`, { kind: "archive-disclosure" });
     }
   }
-  if (stages && model.hiddenNonActive > 0) {
+  if (board) {
     pushLine("");
-    pushLine(styles.dim(truncate(`+${model.hiddenNonActive} backlog/archived · v groups view`, width)));
+    pushLine(boardHiddenSummary(model, width, styles));
   }
-  return { lines, targets, selectedIndex };
+  return { lines, targets, selectedIndex, selectedEndIndex, continuationPriorities };
+}
+
+function boardHiddenSummary(model: RenderModel, width: number, styles: LayoutStyles): string {
+  const parts = [
+    model.boardHidden.withoutWorkflow ? `+${model.boardHidden.withoutWorkflow} without workflow` : "",
+    model.boardHidden.otherWorkflows ? `${model.boardHidden.otherWorkflows} other workflow${model.boardHidden.otherWorkflows === 1 ? "" : "s"}` : "",
+    model.boardHidden.nonActive ? `${model.boardHidden.nonActive} backlog/archived` : "",
+    "v groups",
+  ].filter(Boolean);
+  return styles.dim(truncate(parts.join(" · "), width));
 }
 
 interface ListWindow {
   lines: string[];
   targets: (SessionListTarget | undefined)[];
   selectedIndex: number;
+  selectedEndIndex: number;
   top: number;
 }
 
-function windowList(
-  list: { lines: string[]; targets: (SessionListTarget | undefined)[]; selectedIndex: number },
-  capacity: number,
-  scrollTop: number,
-  styles: LayoutStyles,
-): ListWindow {
+function windowList(list: SessionListContent, capacity: number, scrollTop: number, styles: LayoutStyles): ListWindow {
+  if (list.selectedEndIndex > list.selectedIndex) return windowSelectedCard(list, capacity, styles);
   if (capacity <= 0 || list.lines.length <= capacity) return { ...list, top: 0 };
   const total = list.lines.length;
   const selectedIndex = Math.max(0, list.selectedIndex);
   const sessionCount = (from: number, to: number) => list.targets.slice(Math.max(0, from), Math.min(total, to)).filter((target) => target?.kind === "session").length;
-  const indicator = (arrow: "↑" | "↓", count: number) => styles.dim(`${arrow} ${count} more`);
-  const slice = (top: number, lines: string[], targets: (SessionListTarget | undefined)[], selectedOffset = top): ListWindow => ({
-    lines,
-    targets,
-    selectedIndex: selectedIndex >= selectedOffset && selectedIndex < selectedOffset + lines.length ? selectedIndex - selectedOffset : -1,
-    top,
-  });
+  const indicator = (arrow: "↑" | "↓", count: number) => count > 0 ? styles.dim(`${arrow} ${count} more`) : "";
+  const slice = (top: number, lines: string[], targets: (SessionListTarget | undefined)[], selectedOffset = top): ListWindow => {
+    const visibleSelected = selectedIndex >= selectedOffset && selectedIndex < selectedOffset + lines.length ? selectedIndex - selectedOffset : -1;
+    return { lines, targets, selectedIndex: visibleSelected, selectedEndIndex: visibleSelected, top };
+  };
 
-  if (capacity === 1) {
-    return slice(selectedIndex, [list.lines[selectedIndex] ?? ""], [list.targets[selectedIndex]], selectedIndex);
-  }
+  if (capacity === 1) return slice(selectedIndex, [list.lines[selectedIndex] ?? ""], [list.targets[selectedIndex]], selectedIndex);
 
   if (selectedIndex < capacity - 1) {
     const visibleEnd = capacity - 1;
@@ -241,6 +295,7 @@ function windowList(
       lines: [indicator("↑", sessionCount(0, top)), ...list.lines.slice(top)],
       targets: [undefined, ...list.targets.slice(top)],
       selectedIndex: selectedIndex - top + 1,
+      selectedEndIndex: selectedIndex - top + 1,
       top,
     };
   }
@@ -250,6 +305,7 @@ function windowList(
       lines: [indicator("↑", sessionCount(0, selectedIndex)), list.lines[selectedIndex] ?? ""],
       targets: [undefined, list.targets[selectedIndex]],
       selectedIndex: 1,
+      selectedEndIndex: 1,
       top: selectedIndex,
     };
   }
@@ -265,8 +321,119 @@ function windowList(
     lines: [indicator("↑", sessionCount(0, top)), ...list.lines.slice(top, bottomStart), indicator("↓", sessionCount(bottomStart, total))],
     targets: [undefined, ...list.targets.slice(top, bottomStart), undefined],
     selectedIndex: selectedIndex - top + 1,
+    selectedEndIndex: selectedIndex - top + 1,
     top,
   };
+}
+
+function windowSelectedCard(list: SessionListContent, capacity: number, styles: LayoutStyles): ListWindow {
+  const safeCapacity = Math.max(1, capacity);
+  if (list.lines.length <= safeCapacity) return { ...list, top: 0 };
+
+  const headerIndex = list.selectedIndex;
+  const footerIndex = list.selectedEndIndex;
+  if (safeCapacity === 1) {
+    return { lines: [list.lines[headerIndex] ?? ""], targets: [list.targets[headerIndex]], selectedIndex: 0, selectedEndIndex: 0, top: headerIndex };
+  }
+
+  const beforeCount = list.targets.slice(0, headerIndex).filter((target) => target?.kind === "session").length;
+  const afterCount = list.targets.slice(footerIndex + 1).filter((target) => target?.kind === "session").length;
+  const indicators = [
+    ...(beforeCount ? [{ side: "before" as const, line: styles.dim(`↑ ${beforeCount} more`) }] : []),
+    ...(afterCount ? [{ side: "after" as const, line: styles.dim(`↓ ${afterCount} more`) }] : []),
+  ];
+  const detailIndexes = Array.from(
+    { length: Math.max(0, footerIndex - headerIndex - 1) },
+    (_, offset) => headerIndex + offset + 1,
+  ).sort((a, b) => (list.continuationPriorities.get(a) ?? 99) - (list.continuationPriorities.get(b) ?? 99) || a - b);
+
+  const available = safeCapacity - 2;
+  const coreDetailCount = Math.min(2, detailIndexes.length, available);
+  const indicatorCount = Math.min(indicators.length, available - coreDetailCount);
+  const detailCount = Math.min(detailIndexes.length, available - indicatorCount);
+  const keptDetails = new Set(detailIndexes.slice(0, detailCount));
+  const keptIndicators = indicators.slice(0, indicatorCount);
+  const beforeIndicator = keptIndicators.find((indicator) => indicator.side === "before");
+  const afterIndicator = keptIndicators.find((indicator) => indicator.side === "after");
+  const orderedDetails = Array.from(keptDetails).sort((a, b) => a - b);
+
+  const lines = [
+    ...(beforeIndicator ? [beforeIndicator.line] : []),
+    list.lines[headerIndex] ?? "",
+    ...orderedDetails.map((index) => list.lines[index] ?? ""),
+    list.lines[footerIndex] ?? "",
+    ...(afterIndicator ? [afterIndicator.line] : []),
+  ];
+  const targets = [
+    ...(beforeIndicator ? [undefined] : []),
+    list.targets[headerIndex],
+    ...orderedDetails.map(() => undefined),
+    undefined,
+    ...(afterIndicator ? [undefined] : []),
+  ];
+  const selectedIndex = beforeIndicator ? 1 : 0;
+  return {
+    lines,
+    targets,
+    selectedIndex,
+    selectedEndIndex: selectedIndex + orderedDetails.length + 1,
+    top: headerIndex,
+  };
+}
+
+function selectedCardLines(session: RenderSession, width: number, styles: LayoutStyles): { line: string; priority: number }[] {
+  const indent = "    ";
+  const lines: { line: string; priority: number }[] = [];
+  if (session.attention) {
+    const marker = attentionGlyph(session.attention.kind, styles);
+    lines.push({ line: truncate(`${indent}${marker} ${session.attention.text}`, width), priority: 0 });
+  }
+  const plan = session.selectedPlan;
+  if (!plan) return lines;
+  if (plan.feature) lines.push({ line: truncate(`${indent}${plan.feature}`, width), priority: 3 });
+  const progress = planProgressText(plan, Math.max(0, width - indent.length), styles, width >= 54);
+  if (progress) lines.push({ line: truncate(`${indent}${progress}`, width), priority: 1 });
+  if (plan.nextStep && normalizedText(plan.nextStep) !== normalizedText(plan.feature) && normalizedText(plan.nextStep) !== normalizedText(session.attention?.text)) {
+    const firstPrefix = `${indent}${styles.dim("next")}  `;
+    const nextPrefix = " ".repeat(displayWidth(firstPrefix));
+    const wrapped = wrapWords(
+      plan.nextStep,
+      Math.max(4, width - displayWidth(firstPrefix)),
+      Math.max(4, width - displayWidth(nextPrefix)),
+    );
+    for (const [index, line] of wrapped.entries()) {
+      lines.push({ line: truncate(`${index === 0 ? firstPrefix : nextPrefix}${line}`, width), priority: 2 });
+    }
+  }
+  return lines;
+}
+
+function planProgressText(plan: NonNullable<RenderSession["selectedPlan"]>, width: number, styles: LayoutStyles, showBar: boolean): string {
+  const phase = plan.phase ? `Phase ${plan.phase.index}/${plan.phase.count}` : undefined;
+  const tasks = plan.tasks ? `${plan.tasks.completed}/${plan.tasks.total} tasks` : undefined;
+  if (!phase) {
+    if (!tasks || !plan.tasks) return "";
+    const withBar = `${progressBar(plan.tasks.completed, plan.tasks.total, styles)} ${tasks}`;
+    return showBar && displayWidth(withBar) <= width ? withBar : truncate(tasks, width);
+  }
+  if (!tasks) return truncate(`${phase} · ${plan.phase?.title ?? ""}`, width);
+
+  const title = plan.phase?.title ?? "";
+  const bar = plan.tasks ? progressBar(plan.tasks.completed, plan.tasks.total, styles) : "";
+  const full = `${phase} · ${title} · ${bar} ${tasks}`;
+  if (showBar && displayWidth(full) <= width) return full;
+  const withoutBar = `${phase} · ${title} · ${tasks}`;
+  if (displayWidth(withoutBar) <= width) return withoutBar;
+
+  const titleWidth = width - displayWidth(phase) - displayWidth(tasks) - 6;
+  return titleWidth >= 2
+    ? `${phase} · ${truncate(title, titleWidth)} · ${tasks}`
+    : truncate(`${phase} · ${tasks}`, width);
+}
+
+function progressBar(completed: number, total: number, styles: LayoutStyles): string {
+  const filled = Math.max(0, Math.min(8, Math.round((completed / total) * 8)));
+  return `${styles.accent("▓".repeat(filled))}${styles.dim("░".repeat(8 - filled))}`;
 }
 
 function renderDetails(session: RenderSession | undefined, width: number, preview: string, expanded: boolean, targetRows: number | undefined, styles: LayoutStyles): string[] {
@@ -288,10 +455,18 @@ function titleStatusRow(session: RenderSession, width: number, styles: LayoutSty
   return `${title}${" ".repeat(gap)}${status}`;
 }
 
-function railCompact(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
+function activeWorkflowMode(session: RenderSession): WorkflowModeDisplay | undefined {
+  return session.status === "stopped" ? undefined : session.workflow?.activeMode;
+}
+
+function activeStepShort(workflow: WorkflowRuntimeSnapshot, mode?: WorkflowModeDisplay): string {
   const step = workflow.steps[workflow.activeIndex];
-  if (!step) return "";
-  return styles.accent(step.short);
+  return step ? mode?.short ?? step.short : "";
+}
+
+function railCompact(workflow: WorkflowRuntimeSnapshot, mode: WorkflowModeDisplay | undefined, styles: LayoutStyles): string {
+  const short = activeStepShort(workflow, mode);
+  return short ? styles.accent(short) : "";
 }
 
 function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined, styles: LayoutStyles): string {
@@ -299,32 +474,45 @@ function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined
   return `${slot === focusedSlot ? styles.accent(`◫${slot}`) : styles.muted(`◫${slot}`)} `;
 }
 
-function rowRightAdornment(session: RenderSession, styles: LayoutStyles, stages: boolean, width: number): string {
-  const stage = session.workflow?.steps[session.workflow.activeIndex]?.short ?? "";
+function rowRightAdornment(session: RenderSession, styles: LayoutStyles, board: boolean, width: number, leftWidth: number): string {
+  const mode = activeWorkflowMode(session);
+  const fits = (right: string): boolean => Boolean(right) && width - displayWidth(right) - 1 >= 12;
+  if (board) {
+    if (session.kind === "subagent") return "";
+    if (mode) {
+      const combined = `${styles.accent(mode.short)}${styles.border(" · ")}${styles.dim(session.group)}`;
+      if (fits(combined) && leftWidth + displayWidth(combined) + 1 <= width) return combined;
+      const short = styles.accent(mode.short);
+      return fits(short) ? short : "";
+    }
+    const group = styles.dim(session.group);
+    return fits(group) ? group : "";
+  }
+
+  const stage = session.workflow ? activeStepShort(session.workflow, mode) : "";
   const activity = session.displayStatus === "running" ? "" : session.activityAge ?? "";
-  const stageSlot = `${stage}${" ".repeat(Math.max(0, 2 - displayWidth(stage)))}`;
+  const stageSlot = `${stage}${" ".repeat(Math.max(0, 3 - displayWidth(stage)))}`;
   const activitySlot = `${" ".repeat(Math.max(0, 3 - displayWidth(activity)))}${activity}`;
   const active = `${stage ? styles.accent(stageSlot) : stageSlot} ${activity ? styles.dim(activitySlot) : activitySlot}`;
-  const right = stages
-    ? (session.kind === "subagent" ? "" : styles.dim(session.group))
-    : session.archivedAge ? styles.dim(session.archivedAge) : active;
-  return right && width - displayWidth(right) - 1 >= 12 ? right : "";
+  const right = session.archivedAge ? styles.dim(session.archivedAge) : active;
+  return fits(right) ? right : "";
 }
 
-function railFull(workflow: WorkflowSnapshot, styles: LayoutStyles): string {
+function railFull(workflow: WorkflowRuntimeSnapshot, mode: WorkflowModeDisplay | undefined, styles: LayoutStyles): string {
   const rail = workflow.steps
-    .map((step, index) => index === workflow.activeIndex ? styles.accent(`▐${step.short}▌`) : styles.dim(step.short))
+    .map((step, index) => index === workflow.activeIndex ? styles.accent(`▐${activeStepShort(workflow, mode)}▌`) : styles.dim(step.short))
     .join(styles.border("─"));
   return workflow.ticketId ? `${rail} ${styles.border("·")} ${styles.muted(workflow.ticketId)}` : rail;
 }
 
-function railLine(workflow: WorkflowSnapshot, width: number, styles: LayoutStyles): string {
-  const full = railFull(workflow, styles);
-  return displayWidth(full) <= width ? full : railCompact(workflow, styles);
+function railLine(workflow: WorkflowRuntimeSnapshot, mode: WorkflowModeDisplay | undefined, width: number, styles: LayoutStyles): string {
+  const full = railFull(workflow, mode, styles);
+  return displayWidth(full) <= width ? full : railCompact(workflow, mode, styles);
 }
 
 function compactDetails(session: RenderSession, width: number, styles: LayoutStyles): string[] {
   const lines = [titleStatusRow(session, width, styles)];
+  if (session.workflow) lines.push(railLine(session.workflow, activeWorkflowMode(session), width, styles));
   if (session.kind === "subagent") {
     lines.push(truncate([`agent ${session.agentName ?? "subagent"}`, session.taskPreview ? `task ${session.taskPreview}` : ""].filter(Boolean).join(" · "), width));
   } else {
@@ -333,7 +521,6 @@ function compactDetails(session: RenderSession, width: number, styles: LayoutSty
     if (session.repoCount > 1) parts.push(`${session.repoCount} repos`);
     lines.push(truncate(parts.join(" · "), width));
   }
-  if (session.workflow) lines.push(railLine(session.workflow, width, styles));
   const lifecycle = lifecycleLine(session);
   if (lifecycle) lines.push(styles.dim(lifecycle));
   lines.push(...metadataBlock(session, width, false, styles));
@@ -352,8 +539,14 @@ function compactCapabilities(session: RenderSession, width: number, styles: Layo
 }
 
 function expandedDetails(session: RenderSession, width: number, styles: LayoutStyles): string[] {
-  const lines = [
-    titleStatusRow(session, width, styles),
+  const lines = [titleStatusRow(session, width, styles)];
+  const mode = activeWorkflowMode(session);
+  if (session.workflow) lines.push(railLine(session.workflow, mode, width, styles));
+  if (mode) {
+    const detail = mode.detail ? `${styles.border(" · ")}${styles.dim(mode.detail)}` : "";
+    lines.push(`mode      ${mode.label ?? mode.id}${detail}`);
+  }
+  lines.push(...[
     session.kind === "subagent" ? `agent     ${session.agentName ?? "subagent"}` : undefined,
     session.taskPreview ? `task      ${session.taskPreview}` : undefined,
     `cwd       ${truncatePath(session.cwd, Math.max(0, width - 10))}`,
@@ -362,8 +555,7 @@ function expandedDetails(session: RenderSession, width: number, styles: LayoutSt
     session.section !== "active" ? `section   ${session.section}` : undefined,
     session.archivedAge ? `archived  ${session.archivedAge === "now" ? "now" : `${session.archivedAge} ago`}` : undefined,
     session.archiveRetentionIn ? `cleanup   eligible ${session.archiveRetentionIn === "now" ? "now" : `in ${session.archiveRetentionIn}`}` : undefined,
-  ].filter((line): line is string => Boolean(line));
-  if (session.workflow) lines.splice(1, 0, railLine(session.workflow, width, styles));
+  ].filter((line): line is string => Boolean(line)));
   for (const cwd of session.additionalCwds) lines.push(`extra     ${truncatePath(cwd, Math.max(0, width - 10))}`);
   if (session.worktreeBranch) lines.push(`worktree  ${session.worktreeBranch} → ${session.worktreeBaseBranch ?? "unknown"}${session.worktreeCount && session.worktreeCount > 1 ? ` (${session.worktreeCount})` : ""}`);
   if (session.worktreePath) lines.push(`wt path   ${truncatePath(session.worktreePath, Math.max(0, width - 10))}`);
@@ -379,13 +571,25 @@ function expandedDetails(session: RenderSession, width: number, styles: LayoutSt
 function metadataBlock(session: RenderSession, width: number, expanded: boolean, styles: LayoutStyles): string[] {
   const metadata = session.sessionMetadata;
   if (!metadata) return [];
+  const attentionText = session.attention?.text;
+  const showGoal = metadata.goal && normalizedText(metadata.goal) !== normalizedText(session.selectedPlan?.feature);
+  const showStatus = metadata.status && normalizedText(metadata.status) !== normalizedText(attentionText);
+  const showNext = metadata.nextStep
+    && normalizedText(metadata.nextStep) !== normalizedText(session.selectedPlan?.nextStep)
+    && normalizedText(metadata.nextStep) !== normalizedText(attentionText);
+  const showStage = expanded && metadata.stage && !session.attention;
+  if (!showGoal && !showStatus && !showNext && !showStage) return [];
   const headerRight = [metadata.source ? `via ${metadata.source}` : undefined, session.metadataUpdatedAge].filter(Boolean).join(" · ");
   const lines = ["", twoColumn(styles.border("── metadata ─"), styles.dim(headerRight), width)];
-  if (metadata.goal) lines.push(...metadataField("goal", metadata.goal, width, styles));
-  if (metadata.status) lines.push(...metadataField("prog", metadata.status, width, styles));
-  if (metadata.nextStep) lines.push(...metadataField("next", metadata.nextStep, width, styles));
-  if (expanded && metadata.stage) lines.push(`${styles.muted(pad("stage", 5))} ${styles.muted(truncate(`[${metadata.stage}]`, Math.max(4, width - 6)))}`);
+  if (showGoal) lines.push(...metadataField("goal", metadata.goal!, width, styles));
+  if (showStatus) lines.push(...metadataField("prog", metadata.status!, width, styles));
+  if (showNext) lines.push(...metadataField("next", metadata.nextStep!, width, styles));
+  if (showStage) lines.push(`${styles.muted(pad("stage", 5))} ${styles.muted(truncate(`[${metadata.stage}]`, Math.max(4, width - 6)))}`);
   return lines;
+}
+
+function normalizedText(value: string | undefined): string {
+  return value?.trim().replace(/\s+/g, " ").toLowerCase() ?? "";
 }
 
 function metadataField(label: string, value: string, width: number, styles: LayoutStyles, marker = ""): string[] {
@@ -443,8 +647,15 @@ function truncatePath(path: string, width: number): string {
   return truncateValue(path, width, "start");
 }
 
-function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, stages = false, focusedSlot?: number): string {
-  const prefix = session.selected ? styles.accent("▌") : session.status === "stopped" ? styles.dim("·") : " ";
+function attentionGlyph(kind: NonNullable<RenderSession["attention"]>["kind"], styles: LayoutStyles): string {
+  if (kind === "ready") return styles.success("✓");
+  if (kind === "question") return styles.warning("?");
+  return styles.error("!");
+}
+
+function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, board = false, focusedSlot?: number, selectionMarker = true): string {
+  const attention = board && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
+  const prefix = session.selected && selectionMarker ? styles.accent("▌") : attention || (session.status === "stopped" ? styles.dim("·") : " ");
   const symbol = styles.status(session.displayStatus, session.symbol);
   const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : session.title;
   const title = session.status === "stopped" ? styles.dim(titleText) : titleText;
@@ -453,7 +664,7 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
   const text = `${prefix} ${indent}${symbol} ${sidePaneMarker}${title}${repoBadge}${worktreeBadge}`;
-  const right = rowRightAdornment(session, styles, stages, width);
+  const right = rowRightAdornment(session, styles, board, width, displayWidth(text));
   return right ? twoColumn(text, right, width) : truncate(text, width);
 }
 

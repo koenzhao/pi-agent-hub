@@ -8,9 +8,9 @@ import { assignGroupOrder, compareSessionPriority, nextOrderInGroup, orderedSess
 import { orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../core/session-tree.js";
 import { readPiSessionName } from "../core/pi-session-name.js";
 import { readSessionMetadata } from "../core/session-metadata.js";
-import { applyComputedStatus, computeStatus, markAcknowledged, readHeartbeat } from "../core/status.js";
+import { applyComputedStatus, computeStatus, isFreshHeartbeat, markAcknowledged, readHeartbeat } from "../core/status.js";
 import { capturePane, sessionPresence } from "../core/tmux.js";
-import type { SessionsRegistry, ManagedSession, RuntimeSession, SessionMetadata, SessionBucket } from "../core/types.js";
+import type { SessionsRegistry, ManagedSession, RuntimeSession, SessionMetadata, SessionBucket, WorkflowModeDisplay } from "../core/types.js";
 
 export interface SessionsSnapshot {
   registry: SessionsRegistry;
@@ -28,6 +28,7 @@ export type SyncPiNameResult =
 export class SessionsController {
   private registry: SessionsRegistry;
   private sessionMetadata = new Map<string, SessionMetadata>();
+  private workflowModes = new Map<string, WorkflowModeDisplay>();
   private selectedId: string | undefined;
   private preview = "";
   private previewRequest = 0;
@@ -36,6 +37,7 @@ export class SessionsController {
   constructor(
     registry: SessionsRegistry = { version: 1, sessions: [] },
     private capture: typeof capturePane = capturePane,
+    private presence: typeof sessionPresence = sessionPresence,
   ) {
     this.registry = registry;
     this.selectedId = visibleSessions(registry.sessions, undefined)[0]?.id;
@@ -47,14 +49,18 @@ export class SessionsController {
     const sessions: ManagedSession[] = [];
     const prunedIds = new Set<string>();
     for (const session of this.registry.sessions) {
-      const presence = await sessionPresence(session.tmuxSession);
+      const presence = await this.presence(session.tmuxSession);
       const exists = presence === "present";
       if (isSubagentSession(session) && presence === "missing") {
         prunedIds.add(session.id);
         this.sessionMetadata.delete(session.id);
+        this.workflowModes.delete(session.id);
         continue;
       }
       const heartbeat = await readHeartbeat(session.id);
+      const activeMode = exists && isFreshHeartbeat(heartbeat, now) ? heartbeat.workflow?.activeMode : undefined;
+      if (activeMode) this.workflowModes.set(session.id, activeMode);
+      else this.workflowModes.delete(session.id);
       const sessionMetadata = await readSessionMetadata(session.id);
       if (sessionMetadata) this.sessionMetadata.set(session.id, sessionMetadata);
       else this.sessionMetadata.delete(session.id);
@@ -67,6 +73,7 @@ export class SessionsController {
     for (const id of expiredArchivedIds) {
       prunedIds.add(id);
       this.sessionMetadata.delete(id);
+      this.workflowModes.delete(id);
     }
     const prunedSessions = this.registry.sessions.filter((session) => prunedIds.has(session.id));
     this.registry = await updateRegistry((latest) => ({
@@ -238,6 +245,10 @@ export class SessionsController {
     const oldIndex = before.findIndex((session) => session.id === id);
     const wasSelected = this.selectedId === id;
     const ids = sessionCascadeIds(this.registry.sessions, id);
+    for (const removedId of ids) {
+      this.sessionMetadata.delete(removedId);
+      this.workflowModes.delete(removedId);
+    }
     this.registry = { ...this.registry, sessions: this.registry.sessions.filter((session) => !ids.has(session.id)) };
     const after = this.visibleSessions();
     this.selectedId = wasSelected ? after[Math.min(oldIndex, after.length - 1)]?.id : keepSelection(after, this.selectedId);
@@ -266,7 +277,11 @@ export class SessionsController {
   private sessionsWithMetadata(): RuntimeSession[] {
     return this.registry.sessions.map((session) => {
       const metadata = this.sessionMetadata.get(session.id);
-      return metadata ? { ...session, sessionMetadata: metadata } : session;
+      const activeMode = this.workflowModes.get(session.id);
+      const workflow = activeMode && session.workflow ? { ...session.workflow, activeMode } : session.workflow;
+      return metadata || workflow !== session.workflow
+        ? { ...session, ...(metadata ? { sessionMetadata: metadata } : {}), workflow }
+        : session;
     });
   }
 }

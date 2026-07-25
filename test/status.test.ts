@@ -95,18 +95,22 @@ test("apply computed status keeps fresh active theme and drops stale theme", () 
   assert.equal(stale.activeTheme, undefined);
 });
 
-test("apply computed status adopts fresh workflow and retains it across stale or shutdown heartbeats", () => {
-  const workflow = { steps: [{ id: "prime", short: "PR" }, { id: "execute", short: "EX" }], activeIndex: 1, ticketId: "auth-001", updatedAt: now };
-  const fresh = applyComputedStatus(session(), { status: "waiting" }, now, heartbeat({ workflow }));
+test("apply computed status retains base workflow without transient active mode", () => {
+  const workflow = { steps: [{ id: "plan-md", short: "PL", label: "Plan" }, { id: "execute", short: "EX", label: "Execute" }], activeIndex: 1, ticketId: "auth-001", updatedAt: now };
+  const runtimeWorkflow = {
+    ...workflow,
+    activeMode: { id: "focus", short: "FOC", label: "Focus", detail: "turn 4" },
+  };
+  const fresh = applyComputedStatus(session(), { status: "waiting" }, now, heartbeat({ workflow: runtimeWorkflow }));
   assert.deepEqual(fresh.workflow, workflow);
 
   const cleared = applyComputedStatus(session({ workflow }), { status: "waiting" }, now, heartbeat());
   assert.equal(cleared.workflow, undefined);
 
-  const stale = applyComputedStatus(session({ workflow }), { status: "waiting", note: "stale heartbeat" }, now, heartbeat({ updatedAt: now - HEARTBEAT_STALE_MS - 1 }));
+  const stale = applyComputedStatus(session({ workflow }), { status: "waiting", note: "stale heartbeat" }, now, heartbeat({ workflow: runtimeWorkflow, updatedAt: now - HEARTBEAT_STALE_MS - 1 }));
   assert.deepEqual(stale.workflow, workflow);
 
-  const shutdown = applyComputedStatus(session({ workflow }), { status: "stopped" }, now, heartbeat({ state: "shutdown" }));
+  const shutdown = applyComputedStatus(session({ workflow }), { status: "stopped" }, now, heartbeat({ state: "shutdown", workflow: runtimeWorkflow }));
   assert.deepEqual(shutdown.workflow, workflow);
 
   const missing = applyComputedStatus(session({ workflow }), { status: "waiting", note: "missing heartbeat" }, now);

@@ -2,7 +2,7 @@ import { ARCHIVE_PRUNE_AFTER_MS, type SessionSection } from "../core/session-buc
 import { compareGroupPriority, groupOrder, orderedSessions } from "../core/session-order.js";
 import { orderedSessionRows, sessionDepth } from "../core/session-tree.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
-import type { RuntimeSession, SessionStatus, SessionMetadata, WorkflowSnapshot } from "../core/types.js";
+import type { RuntimeSession, SessionAttention, SessionStatus, SessionMetadata, WorkflowRuntimeSnapshot, WorkflowSnapshot } from "../core/types.js";
 import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
 
 export interface RenderSession {
@@ -35,7 +35,9 @@ export interface RenderSession {
   resultSummary?: string;
   sessionMetadata?: SessionMetadata;
   metadataUpdatedAge?: string;
-  workflow?: WorkflowSnapshot;
+  attention?: SessionAttention;
+  selectedPlan?: RenderPlanSummary;
+  workflow?: WorkflowRuntimeSnapshot;
   worktreePath?: string;
   worktreeBranch?: string;
   worktreeBaseBranch?: string;
@@ -84,25 +86,41 @@ export interface PanelStripItem {
   title?: string;
 }
 
+export interface RenderPlanSummary {
+  feature?: string;
+  phase?: { title: string; index: number; count: number };
+  tasks?: { completed: number; total: number };
+  nextStep?: string;
+}
+
+export interface BoardHiddenCounts {
+  withoutWorkflow: number;
+  otherWorkflows: number;
+  nonActive: number;
+}
+
 export interface RenderModel {
   width: number;
   height?: number;
   listScrollTop?: number;
   empty: boolean;
   noMatches: boolean;
+  noBoardSessions: boolean;
   showPreview: boolean;
   compactFooter: boolean;
   groups: RenderGroup[];
   sections: RenderSection[];
   showSections: boolean;
   summary: RenderSummary;
+  boardCardCount: number;
+  boardStatusCounts: StatusCounts;
+  boardHidden: BoardHiddenCounts;
   selected?: RenderSession;
   footer: string;
   filter?: string;
   preview: string;
   detailsExpanded: boolean;
-  viewMode: "groups" | "stages";
-  hiddenNonActive: number;
+  viewMode: "groups" | "board";
   panelStrip?: PanelStripItem[];
   sidePaneFocusedSlot?: number;
 }
@@ -118,7 +136,7 @@ export interface BuildRenderModelInput {
   preview?: string;
   detailsExpanded?: boolean;
   selectedSkillCount?: number;
-  viewMode?: "groups" | "stages";
+  viewMode?: "groups" | "board";
   now?: number;
   sidePaneSessionIds?: ReadonlyMap<string, number>;
   sidePaneFocusedSlot?: number;
@@ -128,11 +146,12 @@ export interface BuildRenderModelInput {
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
-  const stages = input.viewMode === "stages";
+  const board = input.viewMode === "board";
   const allRows = orderedSessionRows(input.sessions, input.filter);
   const activeRows = allRows.filter((session) => effectiveSessionLifecycle(session, allRows).section === "active");
+  const boardProjection = projectBoardRows(activeRows, allRows);
   const archive = archiveSectionRows(allRows, { expanded: input.archiveExpanded ?? false, filterActive: input.filter !== undefined });
-  const visible = stages ? stageLaneRows(activeRows).flatMap((lane) => lane.rows) : archive.rows;
+  const visible = board ? boardProjection.rows : archive.rows;
   const selectedId = pickSelectedId(input.archiveDisclosureSelected ? allRows : visible, input.selectedId);
   const sidePaneSessionIds = input.sidePaneSessionIds;
   const occupiedSlots = new Map<number, string>();
@@ -143,11 +162,11 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const panelStrip = occupiedSlots.size
     ? ([1, 2, 3, 4] as const).map((slot) => ({ slot, ...(occupiedSlots.has(slot) ? { title: occupiedSlots.get(slot) } : {}) }))
     : undefined;
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id)));
-  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id)));
+  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board));
+  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board));
   const groups = groupsForSessions(mapped);
-  const sections = stages
-    ? lanesForSessions(mapped)
+  const sections = board
+    ? lanesForBoard(mapped, boardProjection)
     : sectionsForSessions(mapped, allMapped, archive.showDisclosure ? {
       expanded: input.archiveExpanded ?? false,
       hiddenParents: archive.hiddenParents,
@@ -155,25 +174,31 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     } : undefined);
 
   const compactFooter = input.width < 90;
-  const selected = allMapped.find((session) => session.id === selectedId);
+  const selected = (board ? mapped : allMapped).find((session) => session.id === selectedId);
   const worktreeFooter = selected?.worktreeOwnedByHub ? " · w Finish WT" : "";
   const showLifecycleFooter = selected && selected.kind !== "subagent" && input.width >= 120;
   const lifecycleFooter = showLifecycleFooter ? selected.section === "active" ? " · A Archive · B Backlog" : " · U Restore" : "";
   const deleteFooter = input.width >= 120 ? "d Delete" : "d Del";
+  const boardParents = mapped.filter((session) => session.kind !== "subagent");
+  const noBoardMatches = board && input.filter !== undefined && allRows.length > 0 && mapped.length === 0;
   return {
     width: input.width,
     empty: input.sessions.length === 0,
-    noMatches: input.sessions.length > 0 && allRows.length === 0,
+    noMatches: input.sessions.length > 0 && (allRows.length === 0 || noBoardMatches),
+    noBoardSessions: board && input.filter === undefined && mapped.length === 0,
     showPreview: input.width >= 80 && !input.hidePreview,
     compactFooter,
     groups,
     sections,
-    showSections: stages ? mapped.length > 0 : sections.some((section) => section.key !== "active" && section.sessionsTotal > 0),
+    showSections: board ? mapped.length > 0 : sections.some((section) => section.key !== "active" && section.sessionsTotal > 0),
     summary: {
       total: input.sessions.length,
       visibleTotal: allRows.length,
       statusCounts: countRenderSessions(allMapped),
     },
+    boardCardCount: boardParents.length,
+    boardStatusCounts: countRenderSessions(boardParents),
+    boardHidden: boardProjection.hidden,
     ...(input.height ? { height: input.height } : {}),
     ...(input.listScrollTop ? { listScrollTop: input.listScrollTop } : {}),
     selected,
@@ -185,52 +210,114 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,
-    viewMode: stages ? "stages" : "groups",
-    hiddenNonActive: stages ? allRows.length - visible.length : 0,
+    viewMode: board ? "board" : "groups",
     ...(panelStrip ? { panelStrip } : {}),
     ...(input.sidePaneFocusedSlot !== undefined ? { sidePaneFocusedSlot: input.sidePaneFocusedSlot } : {}),
   };
 }
 
-export interface StageLaneRow {
+export interface BoardLaneRow {
   id: string;
   kind?: "main" | "subagent";
   parentId?: string;
-  workflow?: WorkflowSnapshot;
+  workflow?: WorkflowRuntimeSnapshot;
 }
 
-export function stageLaneRows<T extends StageLaneRow>(rows: T[]): { key: string; rows: T[] }[] {
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  const laneOf = (row: T): string => {
-    let owner: StageLaneRow | undefined = row;
-    while (owner && owner.kind === "subagent") owner = owner.parentId ? byId.get(owner.parentId) : undefined;
-    const workflow = owner?.workflow;
-    return workflow?.steps[workflow.activeIndex]?.id ?? "none";
+interface BoardProjection<T> {
+  rows: T[];
+  lanes: { key: string; title: string; rows: T[]; parentCount: number }[];
+  hidden: BoardHiddenCounts;
+}
+
+export function boardLaneRows<T extends BoardLaneRow>(activeRows: T[], allRows: T[] = activeRows): { key: string; rows: T[] }[] {
+  return projectBoardRows(activeRows, allRows).lanes.map(({ key, rows }) => ({ key, rows }));
+}
+
+function projectBoardRows<T extends BoardLaneRow>(activeRows: T[], allRows: T[]): BoardProjection<T> {
+  const activeParents = activeRows.filter((row) => row.kind !== "subagent");
+  const pipelineCounts = new Map<string, number>();
+  for (const parent of activeParents) {
+    const identity = workflowIdentity(parent.workflow);
+    if (identity) pipelineCounts.set(identity, (pipelineCounts.get(identity) ?? 0) + 1);
+  }
+  const canonicalIdentity = [...pipelineCounts.entries()]
+    .sort(([aId, aCount], [bId, bCount]) => bCount - aCount || aId.localeCompare(bId))[0]?.[0];
+  const compatibleParents = activeParents.filter((parent) => workflowIdentity(parent.workflow) === canonicalIdentity);
+  const vocabularyOwner = compatibleParents
+    .slice()
+    .sort((a, b) => (b.workflow?.updatedAt ?? 0) - (a.workflow?.updatedAt ?? 0) || a.id.localeCompare(b.id))[0];
+  const steps = vocabularyOwner?.workflow?.steps ?? [];
+  const compatibleIds = new Set(compatibleParents.map((parent) => parent.id));
+  const byId = new Map(activeRows.map((row) => [row.id, row]));
+  const ownerOf = (row: T): T | undefined => {
+    let owner: T | undefined = row;
+    const seen = new Set<string>();
+    while (owner?.kind === "subagent" && owner.parentId && !seen.has(owner.parentId)) {
+      seen.add(owner.parentId);
+      owner = byId.get(owner.parentId);
+    }
+    return owner?.kind === "subagent" ? undefined : owner;
   };
-  const order: string[] = [];
-  for (const row of rows) {
-    for (const step of row.workflow?.steps ?? []) if (!order.includes(step.id)) order.push(step.id);
-  }
-  order.push("none");
-  const byLane = new Map<string, T[]>();
-  for (const row of rows) {
-    const lane = laneOf(row);
-    byLane.set(lane, [...(byLane.get(lane) ?? []), row]);
-  }
-  return order.flatMap((key) => {
-    const laneRows = byLane.get(key);
-    return laneRows?.length ? [{ key, rows: laneRows }] : [];
+  const rows = activeRows.filter((row) => {
+    const owner = ownerOf(row);
+    return owner ? compatibleIds.has(owner.id) : false;
   });
+  const lanes = steps.flatMap((step) => {
+    const laneRows = rows.filter((row) => ownerOf(row)?.workflow?.steps[ownerOf(row)?.workflow?.activeIndex ?? -1]?.id === step.id);
+    if (!laneRows.length) return [];
+    return [{
+      key: step.id,
+      title: (step.label ?? step.id).toUpperCase(),
+      rows: laneRows,
+      parentCount: laneRows.filter((row) => row.kind !== "subagent").length,
+    }];
+  });
+  const allParents = allRows.filter((row) => row.kind !== "subagent");
+  const activeParentIds = new Set(activeParents.map((row) => row.id));
+  return {
+    rows: lanes.flatMap((lane) => lane.rows),
+    lanes,
+    hidden: {
+      withoutWorkflow: activeParents.filter((parent) => !workflowIdentity(parent.workflow)).length,
+      otherWorkflows: canonicalIdentity ? activeParents.filter((parent) => {
+        const identity = workflowIdentity(parent.workflow);
+        return identity !== undefined && identity !== canonicalIdentity;
+      }).length : 0,
+      nonActive: allParents.filter((parent) => !activeParentIds.has(parent.id)).length,
+    },
+  };
 }
 
-function lanesForSessions(sessions: RenderSession[]): RenderSection[] {
-  return stageLaneRows(sessions).map(({ key, rows }) => ({
-    key,
-    title: key === "none" ? "NO WORKFLOW" : key.toUpperCase(),
-    statusCounts: countRenderSessions(rows),
-    sessionsTotal: rows.length,
-    groups: [{ name: "", statusCounts: countRenderSessions(rows), sessions: rows }],
-  } satisfies RenderSection));
+function workflowIdentity(workflow: WorkflowSnapshot | undefined): string | undefined {
+  if (!workflow || !Number.isFinite(workflow.updatedAt) || !Number.isInteger(workflow.activeIndex)) return undefined;
+  if (!workflow.steps.length || workflow.activeIndex < 0 || workflow.activeIndex >= workflow.steps.length) return undefined;
+  const ids = new Set<string>();
+  const orderedIds: string[] = [];
+  for (const step of workflow.steps) {
+    const id = step.id?.trim();
+    if (!id || !step.short?.trim() || ids.has(id)) return undefined;
+    if (step.label !== undefined && !step.label.trim()) return undefined;
+    ids.add(id);
+    orderedIds.push(id);
+  }
+  return orderedIds.join("\u001f");
+}
+
+function lanesForBoard(sessions: RenderSession[], projection: BoardProjection<RuntimeSession>): RenderSection[] {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  return projection.lanes.map((lane) => {
+    const rows = lane.rows.flatMap((row) => {
+      const session = byId.get(row.id);
+      return session ? [session] : [];
+    });
+    return {
+      key: lane.key,
+      title: lane.title,
+      statusCounts: countRenderSessions(rows),
+      sessionsTotal: lane.parentCount,
+      groups: [{ name: "", statusCounts: countRenderSessions(rows), sessions: rows }],
+    } satisfies RenderSection;
+  });
 }
 
 export function retainSelectionAfterRefresh(
@@ -292,7 +379,7 @@ function sectionsForSessions(sessions: RenderSession[], allSessions: RenderSessi
   });
 }
 
-function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined): RenderSession {
+function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined, projectPlan: boolean): RenderSession {
   const displayStatus = displayStatusFor(session.status);
   const worktree = primaryWorktree(session);
   const worktrees = sessionWorktrees(session);
@@ -327,6 +414,10 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     resultSummary: session.resultSummary,
     sessionMetadata: session.sessionMetadata,
     metadataUpdatedAge: metadataUpdatedAge(session.sessionMetadata, now),
+    ...(projectPlan && (session.status === "waiting" || session.status === "idle") && session.sessionMetadata?.attention
+      ? { attention: session.sessionMetadata.attention }
+      : {}),
+    ...(selected && projectPlan ? { selectedPlan: selectedPlanSummary(session.sessionMetadata) } : {}),
     workflow: session.workflow,
     worktreePath: worktree?.path ?? session.worktreePath,
     worktreeBranch: worktree?.branch ?? session.worktreeBranch,
@@ -355,6 +446,17 @@ function activityAge(lastActivityAt: number | undefined, now: number | undefined
 function metadataUpdatedAge(metadata: SessionMetadata | undefined, now: number | undefined): string | undefined {
   if (!metadata?.updatedAt || now === undefined) return undefined;
   return ageLabel(Math.max(0, now - metadata.updatedAt));
+}
+
+function selectedPlanSummary(metadata: SessionMetadata | undefined): RenderPlanSummary | undefined {
+  if (!metadata) return undefined;
+  const summary: RenderPlanSummary = {
+    feature: metadata.plan?.feature ?? metadata.goal,
+    phase: metadata.plan?.phase,
+    tasks: metadata.plan?.tasks,
+    nextStep: metadata.plan?.nextStep ?? metadata.nextStep,
+  };
+  return summary.feature || summary.phase || summary.tasks || summary.nextStep ? summary : undefined;
 }
 
 function ageLabel(ageMs: number): string {

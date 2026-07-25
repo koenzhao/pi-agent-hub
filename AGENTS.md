@@ -22,6 +22,7 @@
 ## TUI Rules
 
 - Keep rendering pure/testable and ANSI width-safe through theme/layout helpers; reserve width for right-side badges/counts in left/right columns. In groups view, keep fixed Active/Backlog slots for a muted workflow stage and right-aligned activity age, with the age blank while running; Archived remains age-only. Archived collapse/disclosure stays ephemeral TUI state and must remain a synthetic non-session target so session actions cannot reach a stale real selection. Keep dashboard footer rendering in `src/tui/render-model.ts` distinct from managed-session tmux chrome in `src/core/tmux.ts`.
+- Keep the workflow board a read-only projection over producer metadata: no mirrored stage list or board persistence. Preserve one target per card, targetless selected continuations, and the selected card's visible border at every width. Treat workflow position, Hub runtime status, and explicit attention as independent axes; show attention only for waiting/idle rows, never infer it from liveness, and never promote subagent attention to a parent. See `docs/STRUCTURE.md` for projection and pipeline rules.
 - Route dialogs through `SessionDialog` in `src/tui/dialog.ts` and the small `src/tui/*-dialog.ts` modules. Use `src/tui/text-input.ts` and `src/tui/form.ts`/`renderForm()` for editable inputs instead of one-off state.
 - For themed footers, prefer Pi `statusLineBg` before `border` so Catppuccin border/accent colors do not become unreadable full-bar backgrounds.
 
@@ -53,7 +54,7 @@
 ## Compatibility Metadata
 
 - Optional `kind: "subagent"` registry rows are owned by `pi-tmux-subagents`: keep them nested and short in the left pane, keep task text in details/filtering, and disable normal session lifecycle/group/order actions on them.
-- Optional `session-metadata/<session-id>.json` files are extension-owned transient display state: do not persist them into `registry.json`, do not use them for liveness/status counts/title sync, and clean them up with deletion.
+- Optional `session-metadata/<session-id>.json` files are extension-owned transient display state: do not persist them into `registry.json`, do not use them for liveness/status counts/title sync, and clean them up with deletion. Attention requires the semantic confidence gate plus `ready/complete`, `question/waiting`, or `blocked/blocked` compatibility.
 
 ## Validation
 

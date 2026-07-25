@@ -48,7 +48,7 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
 | `i` | Toggle compact/full selected-session info |
-| `v` | Toggle groups view ↔ stages view |
+| `v` | Toggle groups view ↔ workflow board |
 | `q` | Quit the dashboard |
 | `r` | Open restart choices (`r` selected, `n` new conversation, `a` all active sessions) |
 | `R` | Rename the selected session |
@@ -63,6 +63,8 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `K` / `J` | Move the selected Active/Backlog session up/down within its group |
 | `s` / `m` | Pick project skills or MCP servers; `←→` switches Enabled/Available |
 | Click / double-click | Select a session / open, switch, or restart it |
+
+In workflow-board mode, producer-confirmed attention is visible without changing workflow or runtime state: `✓` marks a ready handoff, `?` an explicit question, and `!` a blocker on waiting/idle rows. The selected session remains an accent-bordered card with the attention reason before plan progress.
 
 ## Install
 

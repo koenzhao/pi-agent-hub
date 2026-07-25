@@ -59,8 +59,8 @@ export function applyComputedStatus(session: ManagedSession, computed: ComputedS
     agentName: heartbeat?.agentName ?? session.agentName,
     taskPreview: heartbeat?.taskPreview ?? session.taskPreview,
     resultPath: heartbeat?.resultPath ?? session.resultPath,
-    activeTheme: freshHeartbeat(heartbeat, now) ? heartbeat.activeTheme : undefined,
-    workflow: freshHeartbeat(heartbeat, now) ? heartbeat.workflow : session.workflow,
+    activeTheme: isFreshHeartbeat(heartbeat, now) ? heartbeat.activeTheme : undefined,
+    workflow: isFreshHeartbeat(heartbeat, now) ? retainedWorkflow(heartbeat.workflow) : session.workflow,
     updatedAt: now,
   };
 }
@@ -74,8 +74,14 @@ function latestActivityAt(current: number | undefined, heartbeatStateSince: numb
   return Math.max(current ?? heartbeatStateSince, heartbeatStateSince);
 }
 
-function freshHeartbeat(heartbeat: Heartbeat | undefined, now: number): heartbeat is Heartbeat {
+export function isFreshHeartbeat(heartbeat: Heartbeat | undefined, now: number): heartbeat is Heartbeat {
   return Boolean(heartbeat && heartbeat.state !== "shutdown" && now - heartbeat.updatedAt <= HEARTBEAT_STALE_MS);
+}
+
+function retainedWorkflow(workflow: Heartbeat["workflow"]): ManagedSession["workflow"] {
+  if (!workflow) return undefined;
+  const { activeMode: _activeMode, ...snapshot } = workflow;
+  return snapshot;
 }
 
 export function tmuxMissing(error?: string): TmuxState {

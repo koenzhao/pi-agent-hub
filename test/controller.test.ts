@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionsController } from "../src/app/controller.js";
 import { heartbeatPath, multiRepoWorkspacePath, sessionMetadataPath } from "../src/core/paths.js";
+import { HEARTBEAT_STALE_MS } from "../src/core/status.js";
 import type { ManagedSession } from "../src/core/types.js";
+import type { TmuxPresence } from "../src/core/tmux.js";
 
 function session(status: ManagedSession["status"], overrides: Partial<ManagedSession> = {}): ManagedSession {
   const id = overrides.id ?? "s1";
@@ -267,6 +269,9 @@ test("refresh reads optional session metadata without changing liveness", async 
       goal: "Expose semantic dashboard metadata.",
       status: "Metadata file detected.",
       nextStep: "Render it carefully.",
+      stage: "waiting",
+      confidence: 0.9,
+      attention: { kind: "question", text: "Choose the render order" },
     })}\n`, "utf8");
     const controller = new SessionsController(registry);
 
@@ -278,6 +283,71 @@ test("refresh reads optional session metadata without changing liveness", async 
     assert.equal(updated?.title, "Hub title");
     assert.equal("sessionMetadata" in (updated ?? {}), false);
     assert.equal(runtime?.sessionMetadata?.status, "Metadata file detected.");
+    assert.deepEqual(runtime?.sessionMetadata?.attention, { kind: "question", text: "Choose the render order" });
+
+    await unlink(sessionMetadataPath("api"));
+    await controller.refresh(20);
+
+    assert.equal(controller.snapshot().sessions[0]?.sessionMetadata, undefined);
+    assert.equal("sessionMetadata" in (controller.snapshot().registry.sessions[0] ?? {}), false);
+  });
+});
+
+test("refresh projects active workflow mode only from a fresh heartbeat with confirmed tmux presence", async () => {
+  await withTempSessionsDir(async () => {
+    const now = 1_000_000;
+    const workflow = {
+      steps: [{ id: "plan-md", short: "PL", label: "Plan" }, { id: "execute", short: "EX", label: "Execute" }],
+      activeIndex: 1,
+      ticketId: "workflow-board-002",
+      updatedAt: now,
+    };
+    const activeMode = { id: "focus", short: "FOC", label: "Focus", detail: "turn 4" };
+    const registry = { version: 1 as const, sessions: [session("running", { id: "api" })] };
+    await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
+    let presence: TmuxPresence = "present";
+    const controller = new SessionsController(registry, async () => "", async () => presence);
+    const writeHeartbeat = async (overrides: Record<string, unknown> = {}) => {
+      await writeFile(heartbeatPath("api"), `${JSON.stringify({
+        managedSessionId: "api",
+        cwd: "/tmp/api",
+        state: "waiting",
+        stateSince: now - 1_000,
+        updatedAt: now,
+        workflow: { ...workflow, activeMode },
+        ...overrides,
+      })}\n`, "utf8");
+    };
+
+    await writeHeartbeat();
+    await controller.refresh(now);
+    assert.deepEqual(controller.snapshot().sessions[0]?.workflow?.activeMode, activeMode);
+    assert.deepEqual(controller.snapshot().registry.sessions[0]?.workflow, workflow);
+    const persisted = JSON.parse(await readFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), "utf8"));
+    assert.equal(persisted.sessions[0].workflow.activeMode, undefined);
+
+    await writeHeartbeat({ state: "error", message: "provider paused" });
+    await controller.refresh(now);
+    assert.deepEqual(controller.snapshot().sessions[0]?.workflow?.activeMode, activeMode);
+
+    await writeHeartbeat({ workflow });
+    await controller.refresh(now + 1);
+    assert.equal(controller.snapshot().sessions[0]?.workflow?.activeMode, undefined);
+
+    await writeHeartbeat({ updatedAt: now - HEARTBEAT_STALE_MS - 1 });
+    await controller.refresh(now);
+    assert.equal(controller.snapshot().sessions[0]?.workflow?.activeMode, undefined);
+
+    await writeHeartbeat({ state: "shutdown" });
+    await controller.refresh(now);
+    assert.equal(controller.snapshot().sessions[0]?.workflow?.activeMode, undefined);
+
+    for (presence of ["missing", "unknown"] as const) {
+      await writeHeartbeat();
+      await controller.refresh(now);
+      assert.equal(controller.snapshot().sessions[0]?.workflow?.activeMode, undefined, presence);
+    }
   });
 });
 

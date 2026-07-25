@@ -100,6 +100,11 @@ export function matchesFilter(session: RuntimeSession, filter: string): boolean 
     session.sessionMetadata?.status ?? "",
     session.sessionMetadata?.nextStep ?? "",
     session.sessionMetadata?.stage ?? "",
+    session.sessionMetadata?.attention?.kind ?? "",
+    session.sessionMetadata?.attention?.text ?? "",
+    session.sessionMetadata?.plan?.feature ?? "",
+    session.sessionMetadata?.plan?.phase?.title ?? "",
+    session.sessionMetadata?.plan?.nextStep ?? "",
   ].some((value) => value.toLowerCase().includes(filter));
 }
 

@@ -5,7 +5,7 @@ import { orderedSessionRows } from "../core/session-tree.js";
 import type { ManagedSession } from "../core/types.js";
 import { matchesDashboardShortcut } from "./dashboard-shortcuts.js";
 import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
-import { buildRenderModel, stageLaneRows } from "./render-model.js";
+import { boardLaneRows, buildRenderModel } from "./render-model.js";
 import { renderSessions, type SessionListTarget } from "./layout.js";
 import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
@@ -25,7 +25,7 @@ export class SessionsView implements Component {
   private message: string | undefined;
   private flash: { text: string; expiresAt: number } | undefined;
   private detailsExpanded = false;
-  private viewMode: "groups" | "stages" = "groups";
+  private viewMode: "groups" | "board" = "groups";
   private pendingRestart: { sessionId: string } | undefined;
   private pendingFocusSlot = false;
   private pendingCloseSlot = false;
@@ -106,6 +106,14 @@ export class SessionsView implements Component {
         this.closeSidePane(slot);
         return;
       }
+    }
+    if (this.viewMode === "board" && !this.boardRows().length) {
+      if (matchesKey(data, Key.slash)) this.startFilter();
+      else if (data === "n") this.startNewDialog();
+      else if (data === "v") this.toggleViewMode();
+      else if (data === "?") this.dialog = { kind: "help" };
+      else if (data === "q") this.stop();
+      return;
     }
     if (data === "F") {
       this.clearPendingRestart();
@@ -603,7 +611,7 @@ export class SessionsView implements Component {
   }
 
   private visibleListTargets(): SessionListTarget[] {
-    if (this.viewMode === "stages") return this.stageRows().map((row) => ({ kind: "session", id: row.id }));
+    if (this.viewMode === "board") return this.boardRows().map((row) => ({ kind: "session", id: row.id }));
     const snapshot = this.controller.snapshot();
     const allRows = orderedSessionRows(snapshot.sessions, snapshot.filter);
     const archive = archiveSectionRows(allRows, { expanded: this.archiveExpanded, filterActive: snapshot.filter !== undefined });
@@ -633,25 +641,25 @@ export class SessionsView implements Component {
     this.normalizeListSelection();
   }
 
-  private stageRows() {
+  private boardRows() {
     const snapshot = this.controller.snapshot();
     const rows = orderedSessionRows(snapshot.sessions, snapshot.filter);
     const active = rows.filter((session) => effectiveSessionLifecycle(session, rows).section === "active");
-    return stageLaneRows(active).flatMap((lane) => lane.rows);
+    return boardLaneRows(active, rows).flatMap((lane) => lane.rows);
   }
 
   private toggleViewMode() {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
-    this.viewMode = this.viewMode === "groups" ? "stages" : "groups";
+    this.viewMode = this.viewMode === "groups" ? "board" : "groups";
     const previousId = this.controller.snapshot().selectedId;
     this.archiveDisclosureSelected = false;
-    if (this.viewMode !== "stages") {
+    if (this.viewMode !== "board") {
       this.normalizeListSelection();
       return;
     }
-    const rows = this.stageRows();
+    const rows = this.boardRows();
     if (rows.length && !rows.some((row) => row.id === previousId)) {
       this.controller.selectSession(rows[0]?.id ?? "");
       if (this.controller.snapshot().selectedId !== previousId) this.actions.selectionChanged?.();
@@ -662,7 +670,7 @@ export class SessionsView implements Component {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
-    if (this.viewMode === "stages") {
+    if (this.viewMode === "board") {
       this.message = "switch to groups view to reorder";
       return;
     }
@@ -865,7 +873,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  1-4 assign panels         x then 1-4 close panel",
     "  F then 1-4 or Alt+1-4 focus panel     o reset to one panel",
     "  q quit                     Esc cancel/clear",
-    "  K/J reorder in group      v toggle groups/stages view",
+    "  K/J reorder in group      v toggle groups/board view",
     "  mouse click select · double-click open/switch · wheel move",
     "",
     heading("Sessions"),
@@ -889,8 +897,8 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  Active and Backlog keep project/group headers; Archived is flat and chronological",
     "  Archived shows 5 parent cascades; Enter/double-click reveals older rows",
     "  Archived cascades auto-remove after 7d once every tmux session is gone",
-    "  Stages view lanes active sessions by workflow step (via the workflow-runtime extension);",
-    "  backlog/archived rows are summarized and K/J reorder is groups-view only",
+    "  Board view lanes Active workflow sessions by producer-defined step;",
+    "  other sessions are summarized and K/J reorder is groups-view only",
     "",
     heading("Status legend"),
     "  ● running/starting     ◐ waiting     ○ idle     × error     - stopped",

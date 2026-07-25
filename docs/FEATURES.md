@@ -31,7 +31,7 @@ Ctrl+Q returns to the dashboard
 | Project Skills | `s` picker | Attach Pi skills to the selected session's primary repo. |
 | Project MCP servers | `m` picker | Enable MCP tools for the selected session's primary repo. |
 | Subagent rows | Automatic when `pi-tmux-subagents` reports them | See child agent work nested under the parent session. |
-| Workflow rail + stages view | Automatic when the `workflow-runtime` extension reports steps; `v` toggles views | See each session's workflow stage in the row (`EX`) and details rail, or lane all active sessions by stage. |
+| Workflow rail + board | Automatic when `workflow-runtime` reports its ordered steps; `v` toggles views | Supervise compatible Active workflow sessions in producer-defined lanes, with plan context and explicit attention on the selected card. |
 
 ## Dashboard keys
 
@@ -67,7 +67,7 @@ Ctrl+Q returns to the dashboard
 | `s` | Pick project skills |
 | `Alt+E` | Edit the Skill pool path while the `s` picker is open |
 | `m` | Pick project MCP servers |
-| `v` | Toggle groups view ↔ stages view |
+| `v` | Toggle groups view ↔ workflow board |
 
 ## Status vocabulary
 
@@ -83,7 +83,17 @@ Zero counts are hidden in the dashboard summaries, so `◐2 ×1` means only wait
 
 The session list is sectioned as Active, Backlog, then Archived when any non-active rows exist. Active and Backlog keep group headers and manual order; Archived is one flat globally newest-first list. It shows the newest five parent cascades by default, keeping all nested subagent rows with their parent. Select `… N older archived` and press `Enter` or double-click to expand; use `⌃ show fewer` to collapse. Filtering reveals all matching archived rows regardless of collapse state. All-active dashboards omit the Active section header to stay compact.
 
-Sessions running the optional `workflow-runtime` extension also show a workflow rail: the compact stage label `EX` in the list row, and the full rail `NX─PR─PL─▐EX▌─RV─RF─CM · ticket` in the details pane. In groups view, Active and Backlog rows use fixed stage-and-age slots (`EX 14m`) so workflow and recency stay column-aligned; running rows leave the redundant age slot blank, and rows without a workflow leave the stage slot blank. Archived rows keep their existing right-aligned time-since-archive label instead. Pressing `v` switches to the stages view, which lanes active sessions by their current workflow step (with a final `NO WORKFLOW` lane) and shows each row's group name instead of the rail. Backlog and Archived rows are summarized as one dim line in the stages view, subagents stay nested under their parent's lane, and `K`/`J` reordering is groups-view only. Workflow state is remembered for stopped sessions so cards keep their lane.
+Sessions running the optional `workflow-runtime` extension also show a workflow rail: the compact active-step short code (`EX`) in groups rows and the producer-defined full rail (`PL─▐EX▌─RV─RF─CM · ticket`) in the details pane. Active and Backlog groups rows keep fixed stage-and-age slots (`EX 14m`) so workflow and recency stay column-aligned; running rows leave the redundant age slot blank, and Archived rows retain their time-since-archive label. The runtime owns the ordered ids, short codes, and friendly labels; Hub does not mirror a workflow vocabulary.
+
+When Rules focus mode is active, its producer-owned display metadata substitutes `FOC` for the active `EX` short in groups rows and rails. The card stays in the `EXECUTE` lane and shows `FOC · group` when space permits; expanded details show the producer's `Focus · turn N` text. Focus is display-only in Hub: it adds no lane, ordering priority, control, or animation. Stopped sessions retain their Execute lane but fall back to `EX` and omit stale focus detail.
+
+Pressing `v` switches to the read-only workflow board. It shows only Active parent sessions with a valid workflow from the selected canonical producer pipeline, ordered in vertical lanes; unselected cards stay one row with the group name on the right when space permits, subagents remain nested under their parent, and lane headings include parent-card counts. Active sessions without workflow metadata, incompatible pipelines, and Backlog/Archived parents are summarized in a dim footer instead of becoming cards. If multiple pipeline versions are visible, the most prevalent ordered-id sequence wins deterministically and the newest compatible labels/short codes supply the vocabulary. `K`/`J` reordering remains groups-view only.
+
+There is no board feature flag. Install the [`workflow-runtime` extension from the `rules` package](https://github.com/masta-g3/rules#setup), run `/reload` in an existing Pi session if needed, invoke a tracked workflow skill, and press `v`. Rich selected-card context is optional and appears when an extension such as `pi-session-summary` publishes the generic plan metadata described in [Configuration](CONFIG.md#session-metadata).
+
+Only the selected board card expands: an accent border encloses its identity, explicit attention reason, feature intent, exact phase/task progress, and next action at every width, while unselected cards remain one line. Attention is a board-only overlay: it requires an Active session eligible for the canonical workflow pipeline and does not appear in groups view or for sessions without valid workflow metadata. Waiting/idle rows with producer-confirmed attention use the existing prefix cell: `✓` means a ready handoff, `?` an explicit question/choice, and `!` a blocker. Running/error/stopped rows keep their operational presentation, and subagent attention is never promoted to its parent.
+
+Long next actions wrap inside the card; under height pressure, Hub preserves the identity and prioritizes attention, progress, next action, then feature context. The right pane remains available for workflow, distinct semantic metadata, and live preview without duplicating the deterministic plan or attention already shown. Deterministic nested plan metadata takes precedence over duplicate semantic goal/next text and remains visible even when model confidence is low. Workflow step, Hub runtime status, and attention are independent axes: the board never infers attention from waiting, advances a workflow, creates sessions, dispatches skills, moves stages, or persists board state.
 
 The dashboard top line summarizes visible sessions and nonzero status counts in fixed order. Press `?` for the full help/legend and `i` to toggle compact vs full selected-session metadata. The details pane can also show extension-provided session metadata; see [Configuration](CONFIG.md#session-metadata).
 

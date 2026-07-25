@@ -5,7 +5,7 @@ import { KIND_ENV, PARENT_ID_ENV, SESSION_ID_ENV, STATE_ENV } from "../core/name
 import { sessionsStateDir } from "../core/paths.js";
 import { HEARTBEAT_INTERVAL_MS } from "../core/status.js";
 import { registerMcpTools } from "../mcp/register-tools.js";
-import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, WorkflowSnapshot } from "../core/types.js";
+import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, WorkflowModeDisplay, WorkflowRuntimeSnapshot, WorkflowStep } from "../core/types.js";
 
 type PiTheme = {
   name?: string;
@@ -33,19 +33,9 @@ type PiAgentHubGlobal = typeof globalThis & { [EXTENSION_KEY]?: true };
 // capture; disk theme resolution supplies them instead.
 const THEME_TOKENS: Exclude<ActiveThemeToken, "statusLineBg" | "selectedBg">[] = ["accent", "success", "warning", "error", "muted", "dim", "text", "border"];
 
-// Soft contract with rules/extensions/workflow-runtime: mirror of its
-// WORKFLOW_STEPS constant and custom-entry type. If that extension renames
-// steps or the entry type, the rail silently disappears instead of crashing.
+// Soft contract with rules/extensions/workflow-runtime. Invalid or absent
+// base workflow metadata hides the rail; invalid mode decoration is omitted.
 const WORKFLOW_RUNTIME_ENTRY = "workflow-runtime";
-const WORKFLOW_STEPS = [
-  { id: "next-feature", short: "NX" },
-  { id: "prime", short: "PR" },
-  { id: "plan-md", short: "PL" },
-  { id: "execute", short: "EX" },
-  { id: "review", short: "RV" },
-  { id: "reflect", short: "RF" },
-  { id: "commit", short: "CM" },
-];
 const STARTUP_HEARTBEAT_DELAYS_MS = [250, 1_000, 3_000];
 
 export default function piAgentHubExtension(pi: ExtensionAPI) {
@@ -111,19 +101,68 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
   });
 }
 
-function workflowSnapshot(ctx: PiContext): WorkflowSnapshot | undefined {
+function workflowSnapshot(ctx: PiContext): WorkflowRuntimeSnapshot | undefined {
   try {
     const entries = ctx.sessionManager?.getBranch?.();
     if (!entries) return undefined;
     for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i] as { type?: string; customType?: string; data?: { activeStep?: string; ticketId?: string } } | undefined;
+      const entry = entries[i] as { type?: string; customType?: string; data?: unknown } | undefined;
       if (entry?.type !== "custom" || entry.customType !== WORKFLOW_RUNTIME_ENTRY) continue;
-      const activeIndex = WORKFLOW_STEPS.findIndex((step) => step.id === entry.data?.activeStep);
-      if (activeIndex < 0) return undefined;
-      return { steps: WORKFLOW_STEPS, activeIndex, ticketId: entry.data?.ticketId, updatedAt: Date.now() };
+      return parseWorkflowSnapshot(entry.data);
     }
   } catch {}
   return undefined;
+}
+
+function parseWorkflowSnapshot(value: unknown): WorkflowRuntimeSnapshot | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const data = value as Record<string, unknown>;
+  if (typeof data.activeStep !== "string" || !data.activeStep.trim()) return undefined;
+  if (typeof data.updatedAt !== "number" || !Number.isFinite(data.updatedAt)) return undefined;
+  if (!Array.isArray(data.steps) || !data.steps.length) return undefined;
+
+  const steps: WorkflowStep[] = [];
+  const ids = new Set<string>();
+  for (const value of data.steps) {
+    if (!value || typeof value !== "object") return undefined;
+    const step = value as Record<string, unknown>;
+    if (typeof step.id !== "string" || typeof step.short !== "string") return undefined;
+    const id = step.id.trim();
+    const short = step.short.trim();
+    if (!id || !short || ids.has(id)) return undefined;
+    if (step.label !== undefined && (typeof step.label !== "string" || !step.label.trim())) return undefined;
+    ids.add(id);
+    steps.push({ id, short, ...(typeof step.label === "string" ? { label: step.label.trim() } : {}) });
+  }
+
+  const activeIndex = steps.findIndex((step) => step.id === data.activeStep);
+  if (activeIndex < 0) return undefined;
+  const ticketId = typeof data.ticketId === "string" ? data.ticketId.trim() : "";
+  const activeMode = parseWorkflowMode(data.activeMode);
+  return {
+    steps,
+    activeIndex,
+    ...(activeMode ? { activeMode } : {}),
+    ...(ticketId ? { ticketId } : {}),
+    updatedAt: data.updatedAt,
+  };
+}
+
+function parseWorkflowMode(value: unknown): WorkflowModeDisplay | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const mode = value as Record<string, unknown>;
+  if (typeof mode.id !== "string" || typeof mode.short !== "string") return undefined;
+  const id = mode.id.trim();
+  const short = mode.short.trim();
+  if (!id || !short) return undefined;
+  if (mode.label !== undefined && (typeof mode.label !== "string" || !mode.label.trim())) return undefined;
+  if (mode.detail !== undefined && (typeof mode.detail !== "string" || !mode.detail.trim())) return undefined;
+  return {
+    id,
+    short,
+    ...(typeof mode.label === "string" ? { label: mode.label.trim() } : {}),
+    ...(typeof mode.detail === "string" ? { detail: mode.detail.trim() } : {}),
+  };
 }
 
 function activeTheme(ctx: PiContext): ActiveThemeSnapshot | undefined {

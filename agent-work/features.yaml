@@ -455,3 +455,33 @@
   created_at: '2026-07-17'
   plan_file: agent-work/history/20260718_split-view-010_stable_quadrant_slots.md
   completed_at: '2026-07-18'
+- epic: workflow-board
+  status: in_progress
+  title: Rich workflow board
+  description: Replace the dashboard's current stages presentation with a responsive
+    read-only workflow board whose selected card shows extension-provided feature
+    intent, plan phase/task progress, and next action, while workflow producers publish
+    their own ordered stage definitions through generic transient contracts.
+  steps: []
+  priority: 2
+  depends_on: []
+  discovered_from: null
+  plan_file: agent-work/plans/workflow-board-001.md
+  references: []
+  created_at: '2026-07-23'
+  id: workflow-board-001
+- epic: workflow-board
+  status: done
+  title: Focus mode display
+  description: User can distinguish an active Rules focus run from ordinary Execute
+    work in Hub while it remains in the Execute workflow lane.
+  steps: []
+  priority: 2
+  depends_on:
+  - workflow-board-001
+  discovered_from: workflow-board-001
+  plan_file: agent-work/history/20260725_workflow-board-002_focus_mode_display.md
+  references: []
+  created_at: '2026-07-25'
+  id: workflow-board-002
+  completed_at: '2026-07-25'

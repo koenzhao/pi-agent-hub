@@ -23,41 +23,79 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 
 ### Session metadata
 
-Extensions can publish dashboard-only semantic metadata for a managed session by writing:
+Extensions can publish dashboard-only semantic metadata, an optional explicit attention reason, and an optional deterministic plan summary for a managed session by writing:
 
 ```text
 <global-state>/session-metadata/<session-id>.json
 ```
 
-Hub treats this file as extension-owned transient state: it displays known fields in the selected-session details pane, removes the file on session delete, and never uses it for liveness, status counts, ordering, or Hub title changes.
+Hub treats this file as extension-owned transient state: it displays known fields for the selected session, removes the file on session delete, and never uses it for liveness, status counts, ordering, or Hub title changes. It never copies the file into `registry.json`.
 
 ```json
 {
   "source": "my-extension",
   "goal": "Improve Hub metadata rendering",
   "status": "Generic metadata is visible in the dashboard",
-  "nextStep": "Verify the details pane",
-  "stage": "reviewing",
+  "nextStep": "Choose the rollout order",
+  "stage": "waiting",
   "confidence": 0.86,
-  "updatedAt": 1765060000000
+  "attention": {
+    "kind": "question",
+    "text": "Choose the rollout order"
+  },
+  "updatedAt": 1765060000000,
+  "plan": {
+    "feature": "Replace stages with a responsive workflow board",
+    "phase": { "title": "Render responsive cards", "index": 3, "count": 4 },
+    "tasks": { "completed": 2, "total": 5 },
+    "nextStep": "Add selected-card height tests"
+  }
 }
 ```
 
 Display rules:
 
-- At least one of `goal`, `status`, `nextStep`, or `stage` must be present.
-- If `confidence` is present and below `0.5`, Hub hides the metadata block.
-- `source` and `updatedAt` are shown as provenance/freshness in the metadata header when present.
+- At least one semantic field (`goal`, `status`, `nextStep`, `stage`, `attention`) or one valid nested `plan` field must be present.
+- If `confidence` is present and below `0.5`, Hub hides model-derived semantic fields; valid deterministic `plan` data remains visible. Attention additionally requires an explicit confidence of at least `0.5`.
+- Attention accepts only `ready` with stage `complete`, `question` with stage `waiting`, or `blocked` with stage `blocked`, each with nonblank bounded text. It never changes runtime status, workflow position, ordering, lifecycle bucket, or registry state.
+- In board mode, waiting/idle unselected rows reuse their prefix cell for `✓` ready, `?` question, or `!` blocked. The selected accent-bordered card shows the reason before plan context. Running/error/stopped rows keep operational presentation, and subagent attention stays on its own row.
+- Plan fields are independently optional. Invalid phase/task pairs are omitted without discarding valid sibling fields; strings are trimmed and bounded. Duplicate attention/goal/status/next rows are suppressed in the selected surface.
+- `source` and `updatedAt` remain provenance/freshness for all projections.
 
 ### Workflow heartbeat bridge
 
 Hub's extension can also surface workflow-stage state from the optional `workflow-runtime` extension (from the `rules` package). On every heartbeat tick it reads the Pi session branch via `sessionManager.getBranch()` and takes the latest custom entry of this shape:
 
 ```json
-{ "type": "custom", "customType": "workflow-runtime", "data": { "activeStep": "execute", "ticketId": "auth-003" } }
+{
+  "type": "custom",
+  "customType": "workflow-runtime",
+  "data": {
+    "activeStep": "execute",
+    "ticketId": "workflow-board-001",
+    "updatedAt": 1765060000000,
+    "activeMode": {
+      "id": "focus",
+      "short": "FOC",
+      "label": "Focus",
+      "detail": "turn 4"
+    },
+    "steps": [
+      { "id": "plan-md", "short": "PL", "label": "Plan" },
+      { "id": "execute", "short": "EX", "label": "Execute" },
+      { "id": "review", "short": "RV", "label": "Review" },
+      { "id": "reflect", "short": "RF", "label": "Reflect" },
+      { "id": "commit", "short": "CM", "label": "Commit" }
+    ]
+  }
+}
 ```
 
-The step vocabulary (`next-feature`, `prime`, `plan-md`, `execute`, `review`, `reflect`, `commit`) is mirrored as `WORKFLOW_STEPS` in `src/extension/index.ts` — that constant is the single sync point of this soft contract. If the entry type or step ids drift, or the Pi version has no `getBranch`, the workflow rail silently disappears; nothing else is affected. The snapshot travels as `workflow` in the heartbeat file and drives the per-session rail and the `v` stage-lane view. Because heartbeats fire on agent start/end and every 15 seconds, a step change can lag in the dashboard by up to ~15 seconds.
+The producer owns step order, ids, short codes, and optional labels. `activeStep`, finite `updatedAt`, and a nonempty `steps` array are required; each step needs a unique nonblank `id` and nonblank `short`, while `label` and `ticketId` are optional. `updatedAt` is the producer's state-change timestamp, so it can advance during one workflow step—for example, when a focus turn completes—independently of heartbeat cadence. Missing or malformed base workflow metadata silently removes the rail/board card without affecting process state. The board requires a `workflow-runtime` version from `rules` that publishes `steps` and `updatedAt`; older payloads show no rail or board card. No fallback step list is mirrored in Hub.
+
+`activeMode` is an optional producer-owned display modifier. It requires nonblank `id` and `short`; `label` and `detail` are optional. Hub validates it independently, so malformed mode metadata is omitted without discarding a valid base workflow. Hub does not interpret Rules' private focus execution state. The mode is runtime-only: the controller exposes it only from a fresh, non-shutdown heartbeat with confirmed tmux presence and never writes it to `registry.json`. Stale, missing, shutdown, or stopped sessions retain the base workflow snapshot but lose the transient mode decoration.
+
+The snapshot drives the per-session rail and the read-only `v` workflow board. Modes change the active step's display only; pipeline identity and board lanes continue to use the ordered base step ids. When visible Active parents report different ordered-id pipelines, Hub deterministically selects the most prevalent pipeline, treats label/short-only versions as compatible, uses the newest compatible vocabulary, and summarizes incompatible parents as `other workflows`. Because heartbeats fire on agent start/end and every 15 seconds, a producer state change can lag in the dashboard by up to ~15 seconds.
 
 ## Global config
 

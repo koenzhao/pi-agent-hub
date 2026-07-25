@@ -178,38 +178,118 @@ test("piAgentHubExtension records the active Pi theme in heartbeat", async () =>
   }
 });
 
-test("piAgentHubExtension bridges workflow-runtime entries into heartbeat", async () => {
-  const branches: Record<string, unknown[]> = {
-    "latest wins": [
-      { type: "custom", customType: "workflow-runtime", data: { activeStep: "prime", ticketId: "auth-001" } },
-      { type: "message" },
-      { type: "custom", customType: "workflow-runtime", data: { activeStep: "execute", ticketId: "auth-002" } },
-    ],
-    cleared: [
-      { type: "custom", customType: "workflow-runtime", data: { activeStep: "execute" } },
-      { type: "custom", customType: "workflow-runtime", data: {} },
-    ],
-    malformed: [{ type: "custom", customType: "workflow-runtime", data: { activeStep: "unknown-step" } }],
-    "no entries": [{ type: "message" }],
-  };
-  const expected: Record<string, { activeIndex: number; ticketId?: string } | undefined> = {
-    "latest wins": { activeIndex: 3, ticketId: "auth-002" },
-    cleared: undefined,
-    malformed: undefined,
-    "no entries": undefined,
-  };
+const WORKFLOW_STEPS = [
+  { id: "plan-md", short: "PL", label: "Plan" },
+  { id: "execute", short: "EX", label: "Execute" },
+  { id: "review", short: "RV", label: "Review" },
+  { id: "reflect", short: "RF", label: "Reflect" },
+  { id: "commit", short: "CM", label: "Commit" },
+];
 
-  for (const [name, entries] of Object.entries(branches)) {
-    const heartbeat = await heartbeatWithSessionManager({ getBranch: () => entries });
-    if (expected[name] === undefined) {
-      assert.equal(heartbeat.workflow, undefined, name);
-    } else {
-      assert.equal(heartbeat.workflow?.activeIndex, expected[name]?.activeIndex, name);
-      assert.equal(heartbeat.workflow?.ticketId, expected[name]?.ticketId, name);
-      assert.equal(heartbeat.workflow?.steps.length, 7, name);
-      assert.equal(heartbeat.workflow?.steps[3]?.short, "EX", name);
-    }
+const FOCUS_MODE = {
+  id: "focus",
+  short: "FOC",
+  label: "Focus",
+  detail: "turn 4",
+};
+
+const WORKFLOW_ENTRY = {
+  type: "custom",
+  customType: "workflow-runtime",
+  data: {
+    activeStep: "execute",
+    ticketId: "workflow-board-001",
+    updatedAt: 1_784_772_000_000,
+    steps: WORKFLOW_STEPS,
+  },
+};
+
+test("piAgentHubExtension bridges the producer-owned workflow definition into heartbeat", async () => {
+  const heartbeat = await heartbeatWithSessionManager({
+    getBranch: () => [
+      { ...WORKFLOW_ENTRY, data: { ...WORKFLOW_ENTRY.data, activeStep: "review", updatedAt: 1_784_771_000_000 } },
+      { type: "message" },
+      WORKFLOW_ENTRY,
+    ],
+  });
+
+  assert.deepEqual(heartbeat.workflow, {
+    steps: WORKFLOW_STEPS,
+    activeIndex: 1,
+    ticketId: "workflow-board-001",
+    updatedAt: 1_784_772_000_000,
+  });
+});
+
+test("piAgentHubExtension bridges optional producer mode display into heartbeat", async () => {
+  const heartbeat = await heartbeatWithSessionManager({
+    getBranch: () => [{
+      ...WORKFLOW_ENTRY,
+      data: { ...WORKFLOW_ENTRY.data, activeMode: { ...FOCUS_MODE, ignored: "producer-private" } },
+    }],
+  });
+
+  assert.deepEqual(heartbeat.workflow, {
+    steps: WORKFLOW_STEPS,
+    activeIndex: 1,
+    activeMode: FOCUS_MODE,
+    ticketId: "workflow-board-001",
+    updatedAt: 1_784_772_000_000,
+  });
+});
+
+test("piAgentHubExtension drops malformed optional mode without dropping workflow", async () => {
+  const invalidModes = [
+    {},
+    { id: "", short: "FOC" },
+    { id: "focus", short: "" },
+    { id: "focus", short: "FOC", label: "" },
+    { id: "focus", short: "FOC", detail: "" },
+  ];
+
+  for (const [index, activeMode] of invalidModes.entries()) {
+    const heartbeat = await heartbeatWithSessionManager({
+      getBranch: () => [{ ...WORKFLOW_ENTRY, data: { ...WORKFLOW_ENTRY.data, activeMode } }],
+    });
+    assert.deepEqual(heartbeat.workflow, {
+      steps: WORKFLOW_STEPS,
+      activeIndex: 1,
+      ticketId: "workflow-board-001",
+      updatedAt: 1_784_772_000_000,
+    }, `invalid mode ${index}`);
   }
+});
+
+test("piAgentHubExtension keeps producer workflow time stable across heartbeat cadence", async () => {
+  const first = await heartbeatWithSessionManager({ getBranch: () => [WORKFLOW_ENTRY] });
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  const second = await heartbeatWithSessionManager({ getBranch: () => [WORKFLOW_ENTRY] });
+
+  assert.equal(first.workflow?.updatedAt, WORKFLOW_ENTRY.data.updatedAt);
+  assert.equal(second.workflow?.updatedAt, WORKFLOW_ENTRY.data.updatedAt);
+});
+
+test("piAgentHubExtension rejects invalid producer workflow definitions", async () => {
+  const invalidData: Record<string, unknown>[] = [
+    {},
+    { activeStep: "execute", updatedAt: WORKFLOW_ENTRY.data.updatedAt },
+    { activeStep: "execute", updatedAt: Number.NaN, steps: WORKFLOW_STEPS },
+    { activeStep: "unknown", updatedAt: WORKFLOW_ENTRY.data.updatedAt, steps: WORKFLOW_STEPS },
+    { activeStep: "execute", updatedAt: WORKFLOW_ENTRY.data.updatedAt, steps: [] },
+    { activeStep: "execute", updatedAt: WORKFLOW_ENTRY.data.updatedAt, steps: [{ id: "execute", short: "" }] },
+    { activeStep: "execute", updatedAt: WORKFLOW_ENTRY.data.updatedAt, steps: [{ id: "execute", short: "EX" }, { id: "execute", short: "E2" }] },
+    { activeStep: "execute", updatedAt: WORKFLOW_ENTRY.data.updatedAt, steps: [{ id: "execute", short: "EX", label: "" }] },
+  ];
+
+  for (const [index, data] of invalidData.entries()) {
+    const heartbeat = await heartbeatWithSessionManager({
+      getBranch: () => [{ type: "custom", customType: "workflow-runtime", data }],
+    });
+    assert.equal(heartbeat.workflow, undefined, `invalid definition ${index}`);
+  }
+
+  const cleared = await heartbeatWithSessionManager({ getBranch: () => [WORKFLOW_ENTRY, { type: "custom", customType: "workflow-runtime", data: {} }] });
+  assert.equal(cleared.workflow, undefined);
 });
 
 test("piAgentHubExtension omits workflow when getBranch is unavailable or throws", async () => {
