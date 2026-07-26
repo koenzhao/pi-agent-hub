@@ -36,7 +36,7 @@ Hub treats this file as extension-owned transient state: it displays known field
   "source": "my-extension",
   "goal": "Improve Hub metadata rendering",
   "status": "Generic metadata is visible in the dashboard",
-  "nextStep": "Choose the rollout order",
+  "nextStep": "Approve rollout order",
   "stage": "waiting",
   "confidence": 0.86,
   "attention": {
@@ -45,7 +45,7 @@ Hub treats this file as extension-owned transient state: it displays known field
   },
   "updatedAt": 1765060000000,
   "plan": {
-    "feature": "Replace stages with a responsive workflow board",
+    "feature": "Rich workflow board",
     "phase": { "title": "Render responsive cards", "index": 3, "count": 4 },
     "tasks": { "completed": 2, "total": 5 },
     "nextStep": "Add selected-card height tests"
@@ -58,8 +58,8 @@ Display rules:
 - At least one semantic field (`goal`, `status`, `nextStep`, `stage`, `attention`) or one valid nested `plan` field must be present.
 - If `confidence` is present and below `0.5`, Hub hides model-derived semantic fields; valid deterministic `plan` data remains visible. Attention additionally requires an explicit confidence of at least `0.5`.
 - Attention accepts only `ready` with stage `complete`, `question` with stage `waiting`, or `blocked` with stage `blocked`, each with nonblank bounded text. It never changes runtime status, workflow position, ordering, lifecycle bucket, or registry state.
-- In board mode, waiting/idle unselected rows reuse their prefix cell for `✓` ready, `?` question, or `!` blocked. The selected accent-bordered card shows the reason before plan context. Running/error/stopped rows keep operational presentation, and subagent attention stays on its own row.
-- Plan fields are independently optional. Invalid phase/task pairs are omitted without discarding valid sibling fields; strings are trimmed and bounded. Duplicate attention/goal/status/next rows are suppressed in the selected surface.
+- In board mode, waiting/idle unselected rows reuse their prefix cell for `✓` ready, `?` question, or `!` blocked in both workflow lanes and `OTHER ACTIVE`. The selected accent-bordered card shows the reason before compact exact progress. Running/error/stopped rows keep operational presentation, and subagent attention stays on its own row.
+- `plan.feature` is the producer-authored compact board title. Plan fields are independently optional. Invalid phase/task pairs are omitted without discarding valid sibling fields; strings are trimmed and bounded. The card shows at most one width-truncated action, while the details `work` block retains the complete published deterministic value. Duplicate attention/goal/status/next rows are suppressed across details blocks.
 - `source` and `updatedAt` remain provenance/freshness for all projections.
 
 ### Workflow heartbeat bridge
@@ -91,11 +91,11 @@ Hub's extension can also surface workflow-stage state from the optional `workflo
 }
 ```
 
-The producer owns step order, ids, short codes, and optional labels. `activeStep`, finite `updatedAt`, and a nonempty `steps` array are required; each step needs a unique nonblank `id` and nonblank `short`, while `label` and `ticketId` are optional. `updatedAt` is the producer's state-change timestamp, so it can advance during one workflow step—for example, when a focus turn completes—independently of heartbeat cadence. Missing or malformed base workflow metadata silently removes the rail/board card without affecting process state. The board requires a `workflow-runtime` version from `rules` that publishes `steps` and `updatedAt`; older payloads show no rail or board card. No fallback step list is mirrored in Hub.
+The producer owns step order, ids, short codes, and optional labels. `activeStep`, finite `updatedAt`, and a nonempty `steps` array are required; each step needs a unique nonblank `id` and nonblank `short`, while `label` and `ticketId` are optional. `updatedAt` is the producer's state-change timestamp, so it can advance during one workflow step—for example, when a focus turn completes—independently of heartbeat cadence. Missing or malformed base workflow metadata silently removes the rail and canonical lane placement without affecting process state; an Active session still appears in `OTHER ACTIVE`. The board requires a `workflow-runtime` version from `rules` that publishes `steps` and `updatedAt` for producer-lane placement. Older payloads have no rail and stay in `OTHER ACTIVE`. No fallback step list is mirrored in Hub.
 
 `activeMode` is an optional producer-owned display modifier. It requires nonblank `id` and `short`; `label` and `detail` are optional. Hub validates it independently, so malformed mode metadata is omitted without discarding a valid base workflow. Hub does not interpret Rules' private focus execution state. The mode is runtime-only: the controller exposes it only from a fresh, non-shutdown heartbeat with confirmed tmux presence and never writes it to `registry.json`. Stale, missing, shutdown, or stopped sessions retain the base workflow snapshot but lose the transient mode decoration.
 
-The snapshot drives the per-session rail and the read-only `v` workflow board. Modes change the active step's display only; pipeline identity and board lanes continue to use the ordered base step ids. When visible Active parents report different ordered-id pipelines, Hub deterministically selects the most prevalent pipeline, treats label/short-only versions as compatible, uses the newest compatible vocabulary, and summarizes incompatible parents as `other workflows`. Because heartbeats fire on agent start/end and every 15 seconds, a producer state change can lag in the dashboard by up to ~15 seconds.
+The snapshot drives the per-session rail and canonical lanes in the read-only `v` board. Modes change the active step's display only; pipeline identity and lane placement continue to use the ordered base step ids. When visible Active parents report different ordered-id pipelines, Hub deterministically selects the most prevalent pipeline, treats label/short-only versions as compatible, and uses the newest compatible vocabulary. Incompatible and workflowless Active parent trees render once in synthetic `OTHER ACTIVE`; Backlog/Archived remain footer-only. Because heartbeats fire on agent start/end and every 15 seconds, a producer state change can lag in the dashboard by up to ~15 seconds.
 
 ## Global config
 

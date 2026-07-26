@@ -85,7 +85,7 @@ test("slash on empty state does not trap q in filter mode", () => {
 test("help overlay opens and closes", () => {
   const view = new SessionsView(new SessionsController(), () => {});
   view.handleInput("?");
-  const help = view.render(80).join("\n");
+  const help = view.render(120).join("\n");
   assert.match(help, /pi agent hub help/);
   assert.match(help, /Status legend/);
   assert.match(help, /Alt\+Q/);
@@ -102,7 +102,8 @@ test("help overlay opens and closes", () => {
   assert.match(help, /v toggle groups\/board view/);
   assert.match(help, /Active and Backlog keep project\/group headers/);
   assert.match(help, /Archived shows 5 parent cascades/);
-  assert.match(help, /Board view lanes Active workflow sessions by producer-defined step/);
+  assert.match(help, /Board view lanes canonical workflow sessions by producer step, then OTHER ACTIVE/);
+  assert.match(help, /subagents start collapsed: Space toggles a tree/);
   view.handleInput("\u001b");
   assert.doesNotMatch(view.render(80).join("\n"), /pi agent hub help/);
 });
@@ -321,6 +322,75 @@ test("v toggles board view and navigation follows producer lane order", () => {
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view board/);
 });
 
+test("Space expands and collapses the selected board parent tree", () => {
+  const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
+  const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
+  const controller = new SessionsController({ version: 1, sessions: [parent, child] });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("v");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
+  assert.match(stripAnsi(view.render(120).join("\n")), /api ▸/);
+
+  view.handleInput(" ");
+  assert.match(stripAnsi(view.render(120).join("\n")), /api ▾/);
+  assert.match(stripAnsi(view.render(120).join("\n")), /worker/);
+  view.handleInput("j");
+  assert.equal(controller.snapshot().selectedId, "child");
+
+  view.handleInput(" ");
+  assert.equal(controller.snapshot().selectedId, "parent");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
+});
+
+test("Space remains configurable outside board mode but is reserved for board disclosure", () => {
+  let calls = 0;
+  const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
+  const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: [parent, child] }), () => {}, {
+    dashboardShortcuts: [{ key: " ", send: "ping" }],
+    runDashboardShortcut: () => { calls += 1; },
+  });
+
+  view.handleInput(" ");
+  assert.equal(calls, 1);
+  view.handleInput("v");
+  view.handleInput(" ");
+  assert.equal(calls, 1);
+  assert.match(stripAnsi(view.render(120).join("\n")), /api ▾[\s\S]*worker/);
+});
+
+test("board filters reveal collapsed child matches without persisting expansion", () => {
+  const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
+  const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker-special" };
+  const controller = new SessionsController({ version: 1, sessions: [parent, child] });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("v");
+  view.handleInput("/");
+  for (const char of "worker-special") view.handleInput(char);
+  view.handleInput("\r");
+  assert.match(stripAnsi(view.render(120).join("\n")), /api ▾[\s\S]*worker-special/);
+  view.handleInput(" ");
+
+  view.handleInput("\u001b");
+  assert.match(stripAnsi(view.render(120).join("\n")), /api ▸/);
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker-special/);
+});
+
+test("an empty board filter draft keeps collapsed navigation and rendering aligned", () => {
+  const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
+  const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: [parent, child] }), () => {});
+
+  view.handleInput("v");
+  view.handleInput("/");
+
+  const text = stripAnsi(view.render(120).join("\n"));
+  assert.match(text, /api ▸/);
+  assert.doesNotMatch(text, /worker/);
+});
+
 test("reorder is disabled in board view", () => {
   const deltas: number[] = [];
   const controller = new SessionsController({ version: 1, sessions: [
@@ -349,7 +419,7 @@ test("v inside filter mode edits the filter instead of toggling views", () => {
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /view board/);
 });
 
-test("board view snaps selection to the first eligible workflow row", () => {
+test("board view snaps selection to the first eligible Active row", () => {
   const controller = new SessionsController({ version: 1, sessions: [
     { ...session("bk", "backlogged"), bucket: "backlog", bucketChangedAt: 1 },
     { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
@@ -361,9 +431,9 @@ test("board view snaps selection to the first eligible workflow row", () => {
   assert.equal(controller.snapshot().selectedId, "a");
 });
 
-test("board empty state blocks actions on hidden group selections", () => {
+test("board empty state blocks actions on hidden non-Active selections", () => {
   const opened: string[] = [];
-  const controller = new SessionsController({ version: 1, sessions: [session("plain", "plain")] });
+  const controller = new SessionsController({ version: 1, sessions: [{ ...session("plain", "plain"), bucket: "backlog", bucketChangedAt: 1 }] });
   const view = new SessionsView(controller, () => {}, {
     assignSidePaneSlot: (sessionId) => { opened.push(sessionId); return { kind: "opened", slot: 1 }; },
   });
@@ -371,7 +441,7 @@ test("board empty state blocks actions on hidden group selections", () => {
   view.handleInput("v");
   view.handleInput("1");
   assert.deepEqual(opened, []);
-  assert.match(stripAnsi(view.render(80).join("\n")), /No active workflow sessions/);
+  assert.match(stripAnsi(view.render(80).join("\n")), /No Active sessions/);
 
   view.handleInput("v");
   view.handleInput("1");

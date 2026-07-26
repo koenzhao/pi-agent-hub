@@ -34,7 +34,11 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
     return { lines, rowTargets: lines.map(() => undefined), listWidth: 0, listScrollTop: 0 };
   }
 
-  const split = model.showPreview ? Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38))) : bodyWidth;
+  const split = model.showPreview
+    ? model.viewMode === "board"
+      ? Math.max(40, Math.min(60, Math.floor(bodyWidth * 0.38)))
+      : Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38)))
+    : bodyWidth;
   const stripLines = model.panelStrip ? 1 : 0;
   const targetRows = bodyRowsFromHeight(model.height, stripLines);
   const left = renderSessionList(model, split, styles);
@@ -140,7 +144,7 @@ function noBoardLines(width: number, model: RenderModel, styles: LayoutStyles): 
   const inner = width - 2;
   return [
     "",
-    styles.accent("No active workflow sessions."),
+    styles.accent("No Active sessions."),
     "",
     `${styles.accent("▶")} ${styles.accent("v")}  return to groups view`,
     boardHiddenSummary(model, inner, styles),
@@ -159,7 +163,7 @@ const STATUS_ORDER = [
 function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyles): string {
   const board = model.viewMode === "board";
   const countLabel = board
-    ? `${model.boardCardCount} workflow ${model.boardCardCount === 1 ? "session" : "sessions"}`
+    ? `${model.boardCardCount} Active ${model.boardCardCount === 1 ? "session" : "sessions"}`
     : model.filter === undefined
       ? `${model.summary.total} ${model.summary.total === 1 ? "session" : "sessions"}`
       : `${model.summary.visibleTotal}/${model.summary.total} sessions`;
@@ -232,7 +236,12 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
     pushLine(sectionHeader(section.title, headingRight, width, styles));
     firstSection = false;
     for (const group of section.groups) {
-      if (group.name) pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
+      if (board) {
+        const parentCount = group.sessions.filter((session) => session.kind !== "subagent").length;
+        pushLine(twoColumn(styles.muted(group.name), styles.dim(`·${parentCount}`), width));
+      } else if (group.name) {
+        pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
+      }
       for (const session of group.sessions) pushRow(session);
     }
     if (section.archiveDisclosure) {
@@ -254,8 +263,6 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
 
 function boardHiddenSummary(model: RenderModel, width: number, styles: LayoutStyles): string {
   const parts = [
-    model.boardHidden.withoutWorkflow ? `+${model.boardHidden.withoutWorkflow} without workflow` : "",
-    model.boardHidden.otherWorkflows ? `${model.boardHidden.otherWorkflows} other workflow${model.boardHidden.otherWorkflows === 1 ? "" : "s"}` : "",
     model.boardHidden.nonActive ? `${model.boardHidden.nonActive} backlog/archived` : "",
     "v groups",
   ].filter(Boolean);
@@ -382,7 +389,7 @@ function windowSelectedCard(list: SessionListContent, capacity: number, styles: 
 }
 
 function selectedCardLines(session: RenderSession, width: number, styles: LayoutStyles): { line: string; priority: number }[] {
-  const indent = "    ";
+  const indent = "  ";
   const lines: { line: string; priority: number }[] = [];
   if (session.attention) {
     const marker = attentionGlyph(session.attention.kind, styles);
@@ -390,50 +397,23 @@ function selectedCardLines(session: RenderSession, width: number, styles: Layout
   }
   const plan = session.selectedPlan;
   if (!plan) return lines;
-  if (plan.feature) lines.push({ line: truncate(`${indent}${plan.feature}`, width), priority: 3 });
-  const progress = planProgressText(plan, Math.max(0, width - indent.length), styles, width >= 54);
+  const inExecute = session.workflow?.steps[session.workflow.activeIndex]?.id === "execute";
+  const progress = planProgressText(plan, inExecute, styles);
   if (progress) lines.push({ line: truncate(`${indent}${progress}`, width), priority: 1 });
-  if (plan.nextStep && normalizedText(plan.nextStep) !== normalizedText(plan.feature) && normalizedText(plan.nextStep) !== normalizedText(session.attention?.text)) {
-    const firstPrefix = `${indent}${styles.dim("next")}  `;
-    const nextPrefix = " ".repeat(displayWidth(firstPrefix));
-    const wrapped = wrapWords(
-      plan.nextStep,
-      Math.max(4, width - displayWidth(firstPrefix)),
-      Math.max(4, width - displayWidth(nextPrefix)),
-    );
-    for (const [index, line] of wrapped.entries()) {
-      lines.push({ line: truncate(`${index === 0 ? firstPrefix : nextPrefix}${line}`, width), priority: 2 });
-    }
-  }
+  const showNext = plan.nextStep
+    && !(session.attention && plan.nextSource === "metadata")
+    && normalizedText(plan.nextStep) !== normalizedText(plan.feature)
+    && normalizedText(plan.nextStep) !== normalizedText(session.attention?.text);
+  if (showNext) lines.push({ line: truncate(` ${styles.accent("→")} ${plan.nextStep}`, width), priority: 2 });
   return lines;
 }
 
-function planProgressText(plan: NonNullable<RenderSession["selectedPlan"]>, width: number, styles: LayoutStyles, showBar: boolean): string {
-  const phase = plan.phase ? `Phase ${plan.phase.index}/${plan.phase.count}` : undefined;
+function planProgressText(plan: NonNullable<RenderSession["selectedPlan"]>, inExecute: boolean, styles: LayoutStyles): string {
+  const phase = plan.phase ? `${inExecute ? "Phase" : "plan"} ${plan.phase.index}/${plan.phase.count}` : undefined;
   const tasks = plan.tasks ? `${plan.tasks.completed}/${plan.tasks.total} tasks` : undefined;
-  if (!phase) {
-    if (!tasks || !plan.tasks) return "";
-    const withBar = `${progressBar(plan.tasks.completed, plan.tasks.total, styles)} ${tasks}`;
-    return showBar && displayWidth(withBar) <= width ? withBar : truncate(tasks, width);
-  }
-  if (!tasks) return truncate(`${phase} · ${plan.phase?.title ?? ""}`, width);
-
-  const title = plan.phase?.title ?? "";
-  const bar = plan.tasks ? progressBar(plan.tasks.completed, plan.tasks.total, styles) : "";
-  const full = `${phase} · ${title} · ${bar} ${tasks}`;
-  if (showBar && displayWidth(full) <= width) return full;
-  const withoutBar = `${phase} · ${title} · ${tasks}`;
-  if (displayWidth(withoutBar) <= width) return withoutBar;
-
-  const titleWidth = width - displayWidth(phase) - displayWidth(tasks) - 6;
-  return titleWidth >= 2
-    ? `${phase} · ${truncate(title, titleWidth)} · ${tasks}`
-    : truncate(`${phase} · ${tasks}`, width);
-}
-
-function progressBar(completed: number, total: number, styles: LayoutStyles): string {
-  const filled = Math.max(0, Math.min(8, Math.round((completed / total) * 8)));
-  return `${styles.accent("▓".repeat(filled))}${styles.dim("░".repeat(8 - filled))}`;
+  const text = [phase, tasks].filter(Boolean).join(" · ");
+  if (!text) return "";
+  return inExecute ? text : styles.dim(phase ? text : `plan ${text}`);
 }
 
 function renderDetails(session: RenderSession | undefined, width: number, preview: string, expanded: boolean, targetRows: number | undefined, styles: LayoutStyles): string[] {
@@ -474,19 +454,13 @@ function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined
   return `${slot === focusedSlot ? styles.accent(`◫${slot}`) : styles.muted(`◫${slot}`)} `;
 }
 
-function rowRightAdornment(session: RenderSession, styles: LayoutStyles, board: boolean, width: number, leftWidth: number): string {
+function rowRightAdornment(session: RenderSession, styles: LayoutStyles, board: boolean, width: number): string {
   const mode = activeWorkflowMode(session);
   const fits = (right: string): boolean => Boolean(right) && width - displayWidth(right) - 1 >= 12;
   if (board) {
-    if (session.kind === "subagent") return "";
-    if (mode) {
-      const combined = `${styles.accent(mode.short)}${styles.border(" · ")}${styles.dim(session.group)}`;
-      if (fits(combined) && leftWidth + displayWidth(combined) + 1 <= width) return combined;
-      const short = styles.accent(mode.short);
-      return fits(short) ? short : "";
-    }
-    const group = styles.dim(session.group);
-    return fits(group) ? group : "";
+    if (session.kind === "subagent" || !mode) return "";
+    const short = styles.accent(mode.short);
+    return fits(short) ? short : "";
   }
 
   const stage = session.workflow ? activeStepShort(session.workflow, mode) : "";
@@ -523,6 +497,7 @@ function compactDetails(session: RenderSession, width: number, styles: LayoutSty
   }
   const lifecycle = lifecycleLine(session);
   if (lifecycle) lines.push(styles.dim(lifecycle));
+  lines.push(...workBlock(session, width, styles));
   lines.push(...metadataBlock(session, width, false, styles));
   const capabilities = compactCapabilities(session, width, styles);
   if (capabilities) lines.push(capabilities);
@@ -561,11 +536,38 @@ function expandedDetails(session: RenderSession, width: number, styles: LayoutSt
   if (session.worktreePath) lines.push(`wt path   ${truncatePath(session.worktreePath, Math.max(0, width - 10))}`);
   if (session.workspaceCwd) lines.push(`runtime   ${truncatePath(session.workspaceCwd, Math.max(0, width - 10))}`);
   if (session.sessionFile) lines.push(`session   ${truncatePath(session.sessionFile, Math.max(0, width - 10))}`);
+  lines.push(...workBlock(session, width, styles));
   lines.push(...metadataBlock(session, width, true, styles));
   if (session.enabledMcpServers.length) lines.push(`mcp       ${session.enabledMcpServers.join(", ")}`);
   if (session.resultSummary) lines.push(`result    ${session.resultSummary}`);
   if (session.error) lines.push(styles.error(`error     ${session.error}`));
   return lines;
+}
+
+function workBlock(session: RenderSession, width: number, styles: LayoutStyles): string[] {
+  const plan = session.selectedPlan;
+  if (!plan && !session.attention) return [];
+  const fields: [string, string, string?][] = [];
+  if (plan?.feature) fields.push(["feature", plan.feature]);
+  if (plan?.phase) fields.push(["phase", `${plan.phase.index}/${plan.phase.count} · ${plan.phase.title}`]);
+  if (plan?.tasks) fields.push(["progress", `${plan.tasks.completed}/${plan.tasks.total} tasks`]);
+  if (session.attention) fields.push(["attention", session.attention.text, attentionGlyph(session.attention.kind, styles)]);
+  if (plan?.nextStep && plan.nextSource === "plan") fields.push(["next", plan.nextStep, styles.accent("→")]);
+  if (!fields.length) return [];
+  return [
+    "",
+    styles.border("── work ─"),
+    ...fields.flatMap(([label, value, marker]) => workField(label, value, width, styles, marker ? `${marker} ` : "")),
+  ];
+}
+
+function workField(label: string, value: string, width: number, styles: LayoutStyles, marker = ""): string[] {
+  const labelText = styles.muted(pad(label, 9));
+  const firstPrefix = `${labelText} `;
+  const nextPrefix = `${pad("", 9)} `;
+  const firstWidth = Math.max(4, width - displayWidth(firstPrefix) - displayWidth(marker));
+  const nextWidth = Math.max(4, width - displayWidth(nextPrefix));
+  return wrapWords(value, firstWidth, nextWidth).map((line, index) => index === 0 ? `${firstPrefix}${marker}${line}` : `${nextPrefix}${line}`);
 }
 
 function metadataBlock(session: RenderSession, width: number, expanded: boolean, styles: LayoutStyles): string[] {
@@ -574,8 +576,13 @@ function metadataBlock(session: RenderSession, width: number, expanded: boolean,
   const attentionText = session.attention?.text;
   const showGoal = metadata.goal && normalizedText(metadata.goal) !== normalizedText(session.selectedPlan?.feature);
   const showStatus = metadata.status && normalizedText(metadata.status) !== normalizedText(attentionText);
+  const selectedNext = session.selectedPlan?.nextStep;
+  const selectedNextRenderedInCard = session.selectedPlan?.nextSource === "metadata"
+    && !session.attention
+    && normalizedText(selectedNext) !== normalizedText(session.selectedPlan.feature);
   const showNext = metadata.nextStep
-    && normalizedText(metadata.nextStep) !== normalizedText(session.selectedPlan?.nextStep)
+    && !(session.selectedPlan?.nextSource === "plan" && normalizedText(metadata.nextStep) === normalizedText(selectedNext))
+    && !(selectedNextRenderedInCard && normalizedText(metadata.nextStep) === normalizedText(selectedNext))
     && normalizedText(metadata.nextStep) !== normalizedText(attentionText);
   const showStage = expanded && metadata.stage && !session.attention;
   if (!showGoal && !showStatus && !showNext && !showStage) return [];
@@ -614,12 +621,33 @@ function wrapWords(value: string, firstWidth: number, nextWidth: number): string
       current = candidate;
       continue;
     }
-    if (current) lines.push(current);
-    width = nextWidth;
-    current = word;
+    if (current) {
+      lines.push(current);
+      current = "";
+      width = nextWidth;
+    }
+    let remainder = word;
+    while (displayWidth(remainder) > width) {
+      const [head, tail] = splitAtWidth(remainder, width);
+      lines.push(head);
+      remainder = tail;
+      width = nextWidth;
+    }
+    current = remainder;
   }
   if (current) lines.push(current);
   return lines;
+}
+
+function splitAtWidth(value: string, width: number): [string, string] {
+  let head = "";
+  let consumed = 0;
+  for (const char of value) {
+    if (head && displayWidth(`${head}${char}`) > width) break;
+    head += char;
+    consumed += char.length;
+  }
+  return [head, value.slice(consumed)];
 }
 
 function lifecycleLine(session: RenderSession): string | undefined {
@@ -654,17 +682,27 @@ function attentionGlyph(kind: NonNullable<RenderSession["attention"]>["kind"], s
 }
 
 function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, board = false, focusedSlot?: number, selectionMarker = true): string {
-  const attention = board && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
+  const attention = board && selectionMarker && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
   const prefix = session.selected && selectionMarker ? styles.accent("▌") : attention || (session.status === "stopped" ? styles.dim("·") : " ");
   const symbol = styles.status(session.displayStatus, session.symbol);
-  const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : session.title;
-  const title = session.status === "stopped" ? styles.dim(titleText) : titleText;
+  const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : board ? (session.boardTitle ?? session.title) : session.title;
+  const styleTitle = (value: string) => session.status === "stopped" ? styles.dim(value) : value;
   const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, focusedSlot, styles);
-  const repoBadge = session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
-  const worktreeBadge = session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
+  const repoBadge = !board && session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
+  const worktreeBadge = !board && session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
+  const disclosureBadge = board && session.kind !== "subagent" && session.boardDescendantCount
+    ? ` ${styles.dim(session.boardExpanded ? "▾" : "▸")}`
+    : "";
+  const runningBadge = board && session.kind !== "subagent" && session.runningSubagentCount
+    ? ` ${styles.success(`⚙︎${session.runningSubagentCount}`)}`
+    : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
-  const text = `${prefix} ${indent}${symbol} ${sidePaneMarker}${title}${repoBadge}${worktreeBadge}`;
-  const right = rowRightAdornment(session, styles, board, width, displayWidth(text));
+  const leftPrefix = `${prefix} ${indent}${symbol} ${sidePaneMarker}`;
+  const leftSuffix = `${disclosureBadge}${runningBadge}${repoBadge}${worktreeBadge}`;
+  const right = rowRightAdornment(session, styles, board, width);
+  const rightSpace = right ? displayWidth(right) + 1 : 0;
+  const titleWidth = Math.max(0, width - displayWidth(leftPrefix) - displayWidth(leftSuffix) - rightSpace);
+  const text = `${leftPrefix}${styleTitle(truncate(titleText, titleWidth))}${leftSuffix}`;
   return right ? twoColumn(text, right, width) : truncate(text, width);
 }
 

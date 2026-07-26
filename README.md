@@ -64,7 +64,7 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `s` / `m` | Pick project skills or MCP servers; `←→` switches Enabled/Available |
 | Click / double-click | Select a session / open, switch, or restart it |
 
-In workflow-board mode, producer-confirmed attention is visible without changing workflow or runtime state: `✓` marks a ready handoff, `?` an explicit question, and `!` a blocker on waiting/idle rows. The selected session remains an accent-bordered card with the attention reason before plan progress.
+In board mode, every Active session remains visible: compatible workflow sessions stay in producer-defined lanes and all others appear in `OTHER ACTIVE`, nested under their existing project/group labels. Top-level parent rows show `⚙︎N` when descendant subagents are starting or running. Board child rows start collapsed: `▸`/`▾` shows disclosure state, `Space` toggles the selected tree, and filters temporarily reveal matching child context. Producer-confirmed attention remains independent of workflow and runtime state: `✓` marks a ready handoff, `?` a question, and `!` a blocker on waiting/idle rows. The selected accent-bordered card uses the authored `plan.feature` title when available and shows only attention, exact phase/task fractions, and one distinct one-line action; the right pane keeps full available plan context.
 
 ## Install
 

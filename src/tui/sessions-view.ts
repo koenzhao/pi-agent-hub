@@ -36,6 +36,7 @@ export class SessionsView implements Component {
   private rowTargets: (SessionListTarget | undefined)[] = [];
   private listWidth = 0;
   private listScrollTop = 0;
+  private expandedBoardParentIds = new Set<string>();
 
   constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {}
 
@@ -150,6 +151,10 @@ export class SessionsView implements Component {
       this.openSelectedSidePane(panelSlot);
       return;
     }
+    if (this.viewMode === "board" && data === " ") {
+      if (!this.controller.snapshot().filter?.trim()) this.toggleBoardSubagents();
+      return;
+    }
     if (this.runConfiguredShortcut(data)) return;
 
     if (data === "J" || matchesKey(data, Key.shift("down"))) this.reorderSelected(1);
@@ -218,11 +223,12 @@ export class SessionsView implements Component {
     const selected = this.controller.selected();
     const now = this.actions.now?.() ?? Date.now();
     const sidePaneSessionIds = this.actions.sidePaneSessionIds?.();
+    const filter = (this.dialog?.kind === "prompt" ? (promptFilterValue(this.dialog) ?? snapshot.filter) : snapshot.filter)?.trim() || undefined;
     const layout = renderSessions(buildRenderModel({
       sessions: snapshot.sessions,
       selectedId: snapshot.selectedId,
       width,
-      filter: this.dialog?.kind === "prompt" ? (promptFilterValue(this.dialog) ?? snapshot.filter) : snapshot.filter,
+      filter,
       filterEditing: this.dialog?.kind === "prompt" && this.dialog.purpose === "filter",
       preview: snapshot.preview,
       detailsExpanded: this.detailsExpanded,
@@ -236,6 +242,7 @@ export class SessionsView implements Component {
       archiveExpanded: this.archiveExpanded,
       archiveDisclosureSelected: this.archiveDisclosureSelected,
       hidePreview: Boolean(sidePaneSessionIds?.size),
+      expandedBoardParentIds: this.expandedBoardParentIds,
     }), this.theme);
     this.rowTargets = layout.rowTargets;
     this.listWidth = layout.listWidth;
@@ -632,6 +639,11 @@ export class SessionsView implements Component {
     }
     const selectedId = this.controller.snapshot().selectedId;
     if (targets.some((target) => target.kind === "session" && target.id === selectedId)) return;
+    const boardParentId = this.viewMode === "board" ? this.topLevelBoardParentId(selectedId) : undefined;
+    if (boardParentId && targets.some((target) => target.kind === "session" && target.id === boardParentId)) {
+      if (this.controller.selectSession(boardParentId) && boardParentId !== selectedId) this.actions.selectionChanged?.();
+      return;
+    }
     const fallback = [...targets].reverse().find((target): target is Extract<SessionListTarget, { kind: "session" }> => target.kind === "session");
     if (fallback && this.controller.selectSession(fallback.id) && fallback.id !== selectedId) this.actions.selectionChanged?.();
   }
@@ -645,7 +657,36 @@ export class SessionsView implements Component {
     const snapshot = this.controller.snapshot();
     const rows = orderedSessionRows(snapshot.sessions, snapshot.filter);
     const active = rows.filter((session) => effectiveSessionLifecycle(session, rows).section === "active");
-    return boardLaneRows(active, rows).flatMap((lane) => lane.rows);
+    return boardLaneRows(active, rows, {
+      expandedParentIds: this.expandedBoardParentIds,
+      revealAll: snapshot.filter !== undefined,
+    }).flatMap((lane) => lane.rows);
+  }
+
+  private topLevelBoardParentId(sessionId: string | undefined): string | undefined {
+    if (!sessionId) return undefined;
+    const byId = new Map(this.controller.snapshot().sessions.map((session) => [session.id, session]));
+    let session = byId.get(sessionId);
+    const seen = new Set<string>();
+    while (session?.kind === "subagent" && session.parentId && !seen.has(session.parentId)) {
+      seen.add(session.parentId);
+      session = byId.get(session.parentId);
+    }
+    return session?.kind === "subagent" ? undefined : session?.id;
+  }
+
+  private toggleBoardSubagents() {
+    const snapshot = this.controller.snapshot();
+    const selectedId = snapshot.selectedId;
+    const parentId = this.topLevelBoardParentId(selectedId);
+    if (!parentId || !snapshot.sessions.some((session) => session.kind === "subagent" && session.parentId === parentId)) return;
+    if (this.expandedBoardParentIds.has(parentId)) {
+      this.expandedBoardParentIds.delete(parentId);
+      if (selectedId !== parentId && this.controller.selectSession(parentId)) this.actions.selectionChanged?.();
+    } else {
+      this.expandedBoardParentIds.add(parentId);
+    }
+    this.listScrollTop = 0;
   }
 
   private toggleViewMode() {
@@ -661,7 +702,9 @@ export class SessionsView implements Component {
     }
     const rows = this.boardRows();
     if (rows.length && !rows.some((row) => row.id === previousId)) {
-      this.controller.selectSession(rows[0]?.id ?? "");
+      const parentId = this.topLevelBoardParentId(previousId);
+      const nextId = rows.find((row) => row.id === parentId)?.id ?? rows[0]?.id ?? "";
+      this.controller.selectSession(nextId);
       if (this.controller.snapshot().selectedId !== previousId) this.actions.selectionChanged?.();
     }
   }
@@ -897,8 +940,9 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  Active and Backlog keep project/group headers; Archived is flat and chronological",
     "  Archived shows 5 parent cascades; Enter/double-click reveals older rows",
     "  Archived cascades auto-remove after 7d once every tmux session is gone",
-    "  Board view lanes Active workflow sessions by producer-defined step;",
-    "  other sessions are summarized and K/J reorder is groups-view only",
+    "  Board view lanes canonical workflow sessions by producer step, then OTHER ACTIVE;",
+    "  subagents start collapsed: Space toggles a tree; filters reveal matching children",
+    "  every lane nests project/group labels; Backlog/Archived stay summarized",
     "",
     heading("Status legend"),
     "  ● running/starting     ◐ waiting     ○ idle     × error     - stopped",

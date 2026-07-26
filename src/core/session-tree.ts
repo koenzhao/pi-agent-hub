@@ -102,6 +102,7 @@ export function matchesFilter(session: RuntimeSession, filter: string): boolean 
     session.sessionMetadata?.stage ?? "",
     session.sessionMetadata?.attention?.kind ?? "",
     session.sessionMetadata?.attention?.text ?? "",
+    session.workflow?.ticketId ?? "",
     session.sessionMetadata?.plan?.feature ?? "",
     session.sessionMetadata?.plan?.phase?.title ?? "",
     session.sessionMetadata?.plan?.nextStep ?? "",
