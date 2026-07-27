@@ -540,8 +540,10 @@
   - agent-work/plans/cleanup-000.md
   discovered_from: 2026-07-25 behavior-preserving cleanup audit
   id: cleanup-003
-  status: pending
+  status: done
   created_at: '2026-07-26'
+  plan_file: agent-work/history/20260726_cleanup-003_tui_text_input.md
+  completed_at: '2026-07-26'
 - epic: cleanup
   title: Optimize dashboard refresh I/O
   description: Reduce avoidable repeated or serial dashboard refresh filesystem/tmux

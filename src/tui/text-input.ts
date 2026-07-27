@@ -13,6 +13,16 @@ export function normalizeTextInput(state: TextInputState): TextInputState {
   return { ...state, cursor: Math.max(0, Math.min(state.cursor, charLength(state.value))) };
 }
 
+export function isEnterKey(data: string): boolean {
+  return matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r";
+}
+
+export function renderTextInput(input: TextInputState, marker = "█"): string {
+  const chars = [...input.value];
+  const cursor = Math.max(0, Math.min(input.cursor, chars.length));
+  return `${chars.slice(0, cursor).join("")}${marker}${chars.slice(cursor).join("")}`;
+}
+
 export function insertText(state: TextInputState, text: string): TextInputState {
   const input = normalizeTextInput(state);
   const chars = charsOf(input.value);

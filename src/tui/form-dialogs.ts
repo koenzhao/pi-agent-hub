@@ -1,5 +1,6 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { orderedSessionRows } from "../core/session-tree.js";
+import { isEnterKey } from "./text-input.js";
 import { createForm, editField, moveFocus, setValue, validateRequired, type FormState } from "./form.js";
 import { renderForm } from "./layout.js";
 import type { DialogContext } from "./dialog.js";
@@ -89,7 +90,7 @@ export function handleFormDialogInput(dialog: FormDialog, data: string, ctx: Dia
     ctx.setMessage(undefined);
     return undefined;
   }
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") return submitFormDialog(dialog, ctx);
+  if (isEnterKey(data)) return submitFormDialog(dialog, ctx);
   if (matchesKey(data, Key.tab) || matchesKey(data, Key.down)) return { ...dialog, form: moveFocus(dialog.form, 1) };
   if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.up)) return { ...dialog, form: moveFocus(dialog.form, -1) };
   const edited = editField(dialog.form, data);

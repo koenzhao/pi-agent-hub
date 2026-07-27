@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRepoPicker, moveRepoPickerSelection, renderRepoPicker, selectedRepoCwd } from "../src/tui/repo-picker.js";
-import { insertText } from "../src/tui/text-input.js";
+import { createTextInput, insertText } from "../src/tui/text-input.js";
 
 test("repo picker renders labels and compact paths", () => {
   const picker = createRepoPicker(["/Users/manager/Code/api", "/Users/manager/Code/web"]);
@@ -11,6 +11,11 @@ test("repo picker renders labels and compact paths", () => {
   assert.match(rendered, /api/);
   assert.match(rendered, /web/);
   assert.match(rendered, /~\/Code\/api|\/Users\/manager\/Code\/api/);
+});
+
+test("repo picker renders its search cursor at the stored position", () => {
+  const picker = { ...createRepoPicker(["/tmp/api"]), filter: createTextInput("abcd", 2) };
+  assert.match(renderRepoPicker(picker, 80).join("\n"), /search: ab█cd/);
 });
 
 test("repo picker filters by basename and full path", () => {

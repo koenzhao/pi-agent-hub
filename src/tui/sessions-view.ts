@@ -12,6 +12,7 @@ import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
 import { errorMessage, isPromise, type CloseSidePaneResult, type DialogContext, type FocusSidePaneResult, type SessionDialog, type SessionsViewActions, type SidePaneActionResult } from "./dialog.js";
 import { handlePromptInput, openFilterPrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
+import { isEnterKey } from "./text-input.js";
 import { handleFormDialogInput, openForkDialog, openMoveGroupDialog, openRenameGroupDialog, openRenameSessionForm, renderFormDialog } from "./form-dialogs.js";
 import { handleConfirmInput, openDeleteDialog, openFinishDialog, renderConfirmDialog, renderRestartDialog } from "./confirm-dialogs.js";
 import { createPickerDialog, handlePickerDialogInput, renderPickerDialog } from "./picker-dialog.js";
@@ -141,7 +142,7 @@ export class SessionsView implements Component {
     if (this.archiveDisclosureSelected) {
       if (matchesKey(data, Key.down) || data === "j") this.moveSelection(1);
       else if (matchesKey(data, Key.up) || data === "k") this.moveSelection(-1);
-      else if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") this.toggleArchiveDisclosure();
+      else if (isEnterKey(data)) this.toggleArchiveDisclosure();
       else if (matchesKey(data, Key.slash)) this.startFilter();
       else if (data === "n") this.startNewDialog();
       else if (data === "i") this.detailsExpanded = !this.detailsExpanded;
@@ -174,7 +175,7 @@ export class SessionsView implements Component {
       this.clearPendingRestart();
       this.moveSelection(-1);
     }
-    else if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") this.attachSelected();
+    else if (isEnterKey(data)) this.attachSelected();
     else if (matchesKey(data, Key.slash)) this.startFilter();
     else if (data === "n") this.startNewDialog();
     else if (data === "f") this.startForkDialog();

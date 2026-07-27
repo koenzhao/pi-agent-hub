@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
-import { createTextInput, type TextInputState } from "./text-input.js";
+import { createTextInput, renderTextInput, type TextInputState } from "./text-input.js";
 import { darkTheme, stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 
 export interface RepoPickerItem {
@@ -52,7 +52,7 @@ export function renderRepoPicker(state: RepoPickerState, width: number, theme?: 
   const rows = visibleWindow(indexes, selectedIndex(state));
   const lines = [
     styles.accent("Recent repos"),
-    `search: ${renderSearch(state.filter)}`,
+    `search: ${renderTextInput(state.filter)}`,
     "",
   ];
   if (!indexes.length) lines.push(styles.muted("No repos match the current search."));
@@ -91,12 +91,6 @@ function visibleWindow(indexes: number[], selected: number | undefined): number[
   const selectedPosition = Math.max(0, selected === undefined ? 0 : indexes.indexOf(selected));
   const start = Math.max(0, Math.min(selectedPosition - Math.floor(MAX_VISIBLE_ROWS / 2), indexes.length - MAX_VISIBLE_ROWS));
   return indexes.slice(start, start + MAX_VISIBLE_ROWS);
-}
-
-function renderSearch(input: TextInputState): string {
-  const chars = [...input.value];
-  const cursor = Math.max(0, Math.min(input.cursor, chars.length));
-  return `${chars.slice(0, cursor).join("")}█${chars.slice(cursor).join("")}`;
 }
 
 function compactPath(path: string): string {

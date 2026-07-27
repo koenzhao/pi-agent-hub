@@ -1,5 +1,5 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
-import { createTextInput, editTextInput } from "./text-input.js";
+import { createTextInput, editTextInput, isEnterKey } from "./text-input.js";
 import { errorMessage, isPromise, type DialogContext } from "./dialog.js";
 import { movePickerSelection, renderTwoColumnPicker, switchPickerColumn, togglePickerItem, type PickerItem, type PickerState } from "./two-column-picker.js";
 
@@ -39,7 +39,7 @@ export function handlePickerDialogInput(dialog: PickerDialog, data: string, ctx:
   if (matchesKey(data, Key.down)) return { ...dialog, picker: movePickerSelection(dialog.picker, 1) };
   if (matchesKey(data, Key.up)) return { ...dialog, picker: movePickerSelection(dialog.picker, -1) };
   if (matchesKey(data, Key.space) || data === " ") return { ...dialog, picker: togglePickerItem(dialog.picker) };
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") return applyPickerSelection(dialog, ctx);
+  if (isEnterKey(data)) return applyPickerSelection(dialog, ctx);
   const edited = editPickerSearch(data, dialog.picker);
   return edited ? { ...dialog, picker: { ...edited, poolError: undefined, poolMessage: undefined } } : dialog;
 }
@@ -51,7 +51,7 @@ export function renderPickerDialog(dialog: PickerDialog, width: number, ctx: Dia
 function handleSkillPoolInput(dialog: PickerDialog, data: string, ctx: DialogContext): PickerDialog | undefined {
   if (!dialog.picker.poolInput) return dialog;
   if (matchesKey(data, Key.escape)) return { ...dialog, picker: { ...dialog.picker, poolInput: undefined, poolError: undefined, poolMessage: undefined } };
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+  if (isEnterKey(data)) {
     const dir = dialog.picker.poolInput.value.trim();
     if (!dir) return { ...dialog, picker: { ...dialog.picker, poolError: "skill pool dir cannot be blank", poolMessage: undefined } };
     const save = ctx.actions.saveSkillPoolDir;

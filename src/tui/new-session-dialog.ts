@@ -1,6 +1,6 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
 import type { DialogContext } from "./dialog.js";
-import { editTextInput } from "./text-input.js";
+import { editTextInput, isEnterKey } from "./text-input.js";
 import { renderForm } from "./layout.js";
 import { createRepoPicker, moveRepoPickerSelection, renderRepoPicker, selectedRepoCwd, type RepoPickerState } from "./repo-picker.js";
 import {
@@ -57,7 +57,7 @@ function handleNewFormInput(dialog: NewSessionDialog, data: string, ctx: DialogC
     ctx.setMessage(undefined);
     return undefined;
   }
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+  if (isEnterKey(data)) {
     const result = validateNewForm(form);
     if (!result.ok) return { ...dialog, form: result.state };
     ctx.runAction(() => ctx.actions.createSession?.(submission(result.state)), "creating session...");
@@ -89,7 +89,7 @@ function handleRepoPickerInput(dialog: RepoPickerDialog, data: string): NewSessi
   if (matchesKey(data, Key.escape)) return { kind: "new", form: dialog.form };
   if (matchesKey(data, Key.down)) return { ...dialog, picker: moveRepoPickerSelection(dialog.picker, 1) };
   if (matchesKey(data, Key.up)) return { ...dialog, picker: moveRepoPickerSelection(dialog.picker, -1) };
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") return applyRepoPickerSelection(dialog);
+  if (isEnterKey(data)) return applyRepoPickerSelection(dialog);
   const edited = editTextInput(data, dialog.picker.filter);
   return edited ? { ...dialog, picker: { ...dialog.picker, filter: edited, selected: 0 } } : dialog;
 }

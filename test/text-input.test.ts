@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { backspaceText, backspaceWord, createTextInput, deleteText, deleteWord, editKey, editTextInput, insertText, moveCursor, moveCursorEnd, moveCursorHome, moveCursorWordLeft, moveCursorWordRight } from "../src/tui/text-input.js";
+import { backspaceText, backspaceWord, createTextInput, deleteText, deleteWord, editKey, editTextInput, insertText, isEnterKey, moveCursor, moveCursorEnd, moveCursorHome, moveCursorWordLeft, moveCursorWordRight, renderTextInput } from "../src/tui/text-input.js";
 
 const LEFT = "\u001b[D";
 const RIGHT = "\u001b[C";
@@ -20,6 +20,19 @@ const CTRL_W = "\u0017";
 const CTRL_DELETE = "\u001b[3;5~";
 const ALT_DELETE = "\u001b[3;3~";
 const ALT_D = "\u001bd";
+
+test("text input renders a clamped cursor with a configurable marker", () => {
+  assert.equal(renderTextInput(createTextInput("a🙂c", 2)), "a🙂█c");
+  assert.equal(renderTextInput(createTextInput("api", 1), "▌"), "a▌pi");
+  assert.equal(renderTextInput({ value: "api", cursor: -1 }), "█api");
+  assert.equal(renderTextInput({ value: "api", cursor: 99 }), "api█");
+});
+
+test("text input recognizes every compatible Enter sequence", () => {
+  assert.equal(isEnterKey("\n"), true);
+  assert.equal(isEnterKey("\r"), true);
+  assert.equal(isEnterKey("x"), false);
+});
 
 test("text input inserts and deletes at cursor", () => {
   const start = createTextInput("api", 1);

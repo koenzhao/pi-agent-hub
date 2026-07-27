@@ -1,9 +1,10 @@
 import { Key, matchesKey, type KeyId } from "@earendil-works/pi-tui";
+import { isEnterKey } from "./text-input.js";
 
 export function matchesDashboardShortcut(data: string, key: string): boolean {
   if (key.startsWith("C-") && key.length === 3) return matchesKey(data, `ctrl+${key.slice(2)}` as KeyId);
   if (key.startsWith("M-") && key.length === 3) return matchesKey(data, `alt+${key.slice(2)}` as KeyId);
-  if (key === "Enter") return matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r";
+  if (key === "Enter") return isEnterKey(data);
   if (key === "Esc") return matchesKey(data, Key.escape);
   if (key === "Up") return matchesKey(data, Key.up);
   if (key === "Down") return matchesKey(data, Key.down);

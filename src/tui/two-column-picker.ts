@@ -1,5 +1,5 @@
 import { darkTheme, stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
-import type { TextInputState } from "./text-input.js";
+import { createTextInput, renderTextInput, type TextInputState } from "./text-input.js";
 
 export interface PickerItem {
   name: string;
@@ -79,15 +79,12 @@ export function renderTwoColumnPicker(state: PickerState, width: number, theme?:
 }
 
 function renderSearch(state: PickerState): string {
-  const value = state.filter ?? "";
-  const chars = [...value];
-  const cursor = Math.max(0, Math.min(state.filterCursor ?? chars.length, chars.length));
-  return `${chars.slice(0, cursor).join("")}█${chars.slice(cursor).join("")}`;
+  return renderTextInput(createTextInput(state.filter ?? "", state.filterCursor));
 }
 
 function renderPoolLine(state: PickerState, width: number): string {
   const label = "pool: ";
-  if (state.poolInput) return `${label}${renderInput(state.poolInput)}`;
+  if (state.poolInput) return `${label}${renderTextInput(state.poolInput)}`;
   const extra = state.poolDirExtraCount && state.poolDirExtraCount > 0 ? ` (+${state.poolDirExtraCount})` : "";
   const hint = "Alt+E edit";
   const available = Math.max(0, width - visibleWidth(label) - visibleWidth(hint) - 1);
@@ -100,12 +97,6 @@ function renderPoolMessages(state: PickerState, styles: ReturnType<typeof create
   if (state.poolError) return [styles.error(state.poolError)];
   if (state.poolMessage) return [styles.muted(state.poolMessage)];
   return [];
-}
-
-function renderInput(input: TextInputState): string {
-  const chars = [...input.value];
-  const cursor = Math.max(0, Math.min(input.cursor, chars.length));
-  return `${chars.slice(0, cursor).join("")}█${chars.slice(cursor).join("")}`;
 }
 
 function pickerFooter(state: PickerState): string {

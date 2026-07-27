@@ -49,6 +49,11 @@ test("picker renders skill pool path and edit hint", () => {
   assert.match(rendered, /Alt\+E edit pool/);
 });
 
+test("picker renders its search cursor at the stored position", () => {
+  const lines = renderTwoColumnPicker({ title: "Skills", selected: 0, filter: "abcd", filterCursor: 2, items: [] }, 80);
+  assert.match(lines.join("\n"), /search: ab█cd/);
+});
+
 test("picker renders skill pool input cursor while editing", () => {
   const lines = renderTwoColumnPicker({ title: "Skills", selected: 0, poolInput: createTextInput("/tmp/skills", 4), items: [] }, 80);
   assert.match(lines.join("\n"), /pool: \/tmp█\/skills/);

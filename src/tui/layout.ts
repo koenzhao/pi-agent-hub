@@ -1,6 +1,7 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { WorkflowModeDisplay, WorkflowRuntimeSnapshot } from "../core/types.js";
 import type { RenderModel, RenderSession, StatusCounts } from "./render-model.js";
+import { createTextInput, renderTextInput } from "./text-input.js";
 import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, type SessionsTheme } from "./theme.js";
 
 export type SessionListTarget =
@@ -855,7 +856,7 @@ function renderCursorValue(value: string, cursor: number | undefined, width: num
   if (width <= 0) return "";
   const chars = [...value];
   const pos = Math.max(0, Math.min(cursor ?? chars.length, chars.length));
-  const rendered = `${chars.slice(0, pos).join("")}█${chars.slice(pos).join("")}`;
+  const rendered = renderTextInput(createTextInput(value, pos));
   if ([...rendered].length <= width) return rendered;
   if (mode === "start" || pos >= width - 1) {
     const tailWidth = Math.max(0, width - 1);

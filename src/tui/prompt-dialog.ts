@@ -1,5 +1,5 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
-import { createTextInput, editTextInput, type TextInputState } from "./text-input.js";
+import { createTextInput, editTextInput, isEnterKey, renderTextInput, type TextInputState } from "./text-input.js";
 import { styleToken, type SessionsTheme } from "./theme.js";
 import type { DialogContext } from "./dialog.js";
 
@@ -60,7 +60,7 @@ function handleFilterInput(dialog: PromptDialog, data: string, ctx: DialogContex
     setFilter(ctx, undefined);
     return undefined;
   }
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+  if (isEnterKey(data)) {
     setFilter(ctx, dialog.draft.value);
     return undefined;
   }
@@ -81,7 +81,7 @@ function handleSendInput(dialog: PromptDialog, data: string, ctx: DialogContext)
     ctx.setMessage(undefined);
     return undefined;
   }
-  if (matchesKey(data, Key.enter) || matchesKey(data, Key.return) || data === "\r") {
+  if (isEnterKey(data)) {
     const target = ctx.controller.snapshot().registry.sessions.find((session) => session.id === dialog.targetId);
     if (!target) return undefined;
     const message = dialog.draft.value.trim();
@@ -104,24 +104,18 @@ function sendTargetTitle(dialog: PromptDialog, ctx: DialogContext): string {
 }
 
 function filterFooter(input: TextInputState, now: number, theme?: SessionsTheme): string {
-  const text = `filter: ${renderInlineInput(input, footerCursor(now))}  • ←→ edit • esc clear • enter done`;
+  const text = `filter: ${renderTextInput(input, footerCursor(now))}  • ←→ edit • esc clear • enter done`;
   return theme ? styleToken(theme, "dim", text) : text;
 }
 
 function sendFooter(input: TextInputState, target: string, error: string | undefined, now: number, theme?: SessionsTheme): string {
   const text = error
-    ? `send to ${target}: ${renderInlineInput(input, footerCursor(now))}  • ${error}`
-    : `send to ${target}: ${renderInlineInput(input, footerCursor(now))}  • ←→ edit • esc cancel • enter send`;
+    ? `send to ${target}: ${renderTextInput(input, footerCursor(now))}  • ${error}`
+    : `send to ${target}: ${renderTextInput(input, footerCursor(now))}  • ←→ edit • esc cancel • enter send`;
   return theme ? styleToken(theme, error ? "error" : "dim", text) : text;
 }
 
 function footerCursor(now: number): string {
   const marker = Math.floor(now / 1_000) % 2 === 0 ? "█" : "▌";
   return `\u001b[5m${marker}\u001b[25m`;
-}
-
-function renderInlineInput(input: TextInputState, marker = "█"): string {
-  const chars = [...input.value];
-  const cursor = Math.max(0, Math.min(input.cursor, chars.length));
-  return `${chars.slice(0, cursor).join("")}${marker}${chars.slice(cursor).join("")}`;
 }
