@@ -239,6 +239,14 @@ test("configureDashboardStatusBar overrides inherited colored window formats", a
   ]]);
 });
 
+test("configureDashboardStatusBar escapes tmux format markers in the project path", async () => {
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await configureDashboardStatusBar({ name: "pi-agent-hub-dashboard", cwd: "/repo/proj#ect" }, exec);
+
+  assert.match(exec.calls[0]?.args.join("\n"), /proj##ect/);
+});
+
 test("configureDashboardStatusBar applies theme-derived chrome", async () => {
   const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
 

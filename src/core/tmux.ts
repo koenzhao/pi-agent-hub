@@ -215,6 +215,26 @@ export async function sendTextToSession(name: string, text: string, exec: TmuxEx
   await exec.exec("tmux", ["send-keys", "-t", name, "Enter"]);
 }
 
+type TmuxStatusOption = readonly [key: string, value: string];
+
+function statusBarArgs(options: {
+  name: string;
+  chrome: TmuxChrome;
+  visible?: boolean;
+  sideOptions: readonly TmuxStatusOption[];
+}): string[] {
+  const setOption = (key: string, value: string): string[] => [";", "set-option", "-t", options.name, key, value];
+  return [
+    "set-option", "-t", options.name, "status", options.visible === false ? "off" : "on",
+    ...setOption("status-style", options.chrome.statusStyle),
+    ...options.sideOptions.flatMap(([key, value]) => setOption(key, value)),
+    ...setOption("window-status-style", options.chrome.windowStatusStyle),
+    ...setOption("window-status-current-style", options.chrome.windowStatusCurrentStyle),
+    ...setOption("window-status-format", " #I:#W#F "),
+    ...setOption("window-status-current-format", " #I:#W#F "),
+  ];
+}
+
 export async function configureManagedSessionStatusBar(options: {
   name: string;
   title: string;
@@ -224,18 +244,17 @@ export async function configureManagedSessionStatusBar(options: {
 }, exec: TmuxExec = realTmuxExec): Promise<void> {
   const chrome = tmuxChromeFromTheme(options.theme);
   const statusRight = `#[fg=${chrome.hintColor}]ctrl+q return · alt+r rename#[default] │ 📁 ${tmuxFormatText(options.title)} | ${tmuxFormatText(projectDisplayName(options.cwd))} `;
-  await exec.exec("tmux", [
-    "set-option", "-t", options.name, "status", options.visible === false ? "off" : "on",
-    ";", "set-option", "-t", options.name, "status-style", chrome.statusStyle,
-    ";", "set-option", "-t", options.name, "status-right", statusRight,
-    ";", "set-option", "-t", options.name, "status-right-length", "100",
-    ";", "set-option", "-t", options.name, "status-left", "",
-    ";", "set-option", "-t", options.name, "status-left-length", "120",
-    ";", "set-option", "-t", options.name, "window-status-style", chrome.windowStatusStyle,
-    ";", "set-option", "-t", options.name, "window-status-current-style", chrome.windowStatusCurrentStyle,
-    ";", "set-option", "-t", options.name, "window-status-format", " #I:#W#F ",
-    ";", "set-option", "-t", options.name, "window-status-current-format", " #I:#W#F ",
-  ]);
+  await exec.exec("tmux", statusBarArgs({
+    name: options.name,
+    chrome,
+    visible: options.visible,
+    sideOptions: [
+      ["status-right", statusRight],
+      ["status-right-length", "100"],
+      ["status-left", ""],
+      ["status-left-length", "120"],
+    ],
+  }));
 }
 
 export async function setSessionStatusBarVisible(options: {
@@ -261,17 +280,16 @@ export async function configureDashboardStatusBar(options: {
 }, exec: TmuxExec = realTmuxExec): Promise<void> {
   const chrome = tmuxChromeFromTheme(options.theme);
   const statusRight = `#[fg=${chrome.hintColor}]dashboard#[default] │ 📁 ${tmuxFormatText(projectDisplayName(options.cwd))} `;
-  await exec.exec("tmux", [
-    "set-option", "-t", options.name, "status", options.visible === false ? "off" : "on",
-    ";", "set-option", "-t", options.name, "status-style", chrome.statusStyle,
-    ";", "set-option", "-t", options.name, "status-left", "",
-    ";", "set-option", "-t", options.name, "status-right", statusRight,
-    ";", "set-option", "-t", options.name, "status-right-length", "100",
-    ";", "set-option", "-t", options.name, "window-status-style", chrome.windowStatusStyle,
-    ";", "set-option", "-t", options.name, "window-status-current-style", chrome.windowStatusCurrentStyle,
-    ";", "set-option", "-t", options.name, "window-status-format", " #I:#W#F ",
-    ";", "set-option", "-t", options.name, "window-status-current-format", " #I:#W#F ",
-  ]);
+  await exec.exec("tmux", statusBarArgs({
+    name: options.name,
+    chrome,
+    visible: options.visible,
+    sideOptions: [
+      ["status-left", ""],
+      ["status-right", statusRight],
+      ["status-right-length", "100"],
+    ],
+  }));
 }
 
 export interface SwitchClientOptions {
