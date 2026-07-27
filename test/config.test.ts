@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSessionPrelude, setSkillPoolDir, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "../src/core/config.js";
+import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSessionPrelude, setSkillPoolDirs, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "../src/core/config.js";
 import { loadMcpCatalog } from "../src/mcp/config.js";
 import { listSkillPool } from "../src/skills/catalog.js";
 
@@ -261,7 +261,7 @@ test("skill pool setter trims validates expands and preserves unrelated config",
     dashboard: { themeSessionId: "session-1" },
   }), "utf8");
 
-  await setSkillPoolDir(`  ${pool}  `, env);
+  await setSkillPoolDirs([`  ${pool}  `], env);
 
   assert.deepEqual(await effectiveSkillPoolDirs(env), [pool]);
   assert.equal(await effectiveMcpCatalogPath(env), catalogPath);
@@ -273,7 +273,7 @@ test("skill pool setter rejects blank paths", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
   const env = { PI_AGENT_HUB_DIR: root };
 
-  await assert.rejects(() => setSkillPoolDir("   ", env), /skill pool dir cannot be blank/);
+  await assert.rejects(() => setSkillPoolDirs(["   "], env), /skill pool dir cannot be blank/);
 });
 
 test("listSkillPool reads configured skill directories", async () => {

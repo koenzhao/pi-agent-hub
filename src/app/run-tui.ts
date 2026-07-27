@@ -11,7 +11,7 @@ import { loadManagedSessionTheme, loadSessionsTheme, type SessionsTheme } from "
 import { loadProjectSkillsState, setProjectSkills } from "../skills/attach.js";
 import { listSkillPool } from "../skills/catalog.js";
 import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mcp/config.js";
-import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSkillPoolDir } from "../core/config.js";
+import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSkillPoolDirs } from "../core/config.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { tmuxChromeFromTheme } from "../core/chrome.js";
 import { sessionSection } from "../core/session-bucket.js";
@@ -546,7 +546,7 @@ export async function runTui(): Promise<void> {
       return Math.max(0, skillPoolDirs.length - 1);
     },
     async saveSkillPoolDir(dir) {
-      await setSkillPoolDir(dir);
+      await setSkillPoolDirs([dir]);
       skillPoolDirs = await effectiveSkillPoolDirs();
       skillPool = await listSkillPool();
       return skillPickerItems(selectedProjectCwd(controller.selected(), cwd));
