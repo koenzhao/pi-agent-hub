@@ -6,10 +6,6 @@ export function agentDir(env: NodeJS.ProcessEnv = process.env): string {
   return resolve(env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"));
 }
 
-export function sessionDir(env: NodeJS.ProcessEnv = process.env): string {
-  return resolve(env.PI_CODING_AGENT_SESSION_DIR ?? join(agentDir(env), "sessions"));
-}
-
 export function sessionsStateDir(env: NodeJS.ProcessEnv = process.env): string {
   return resolve(env[STATE_ENV] ?? join(agentDir(env), STATE_DIR_BASENAME));
 }

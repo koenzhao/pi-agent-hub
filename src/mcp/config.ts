@@ -1,7 +1,6 @@
 import { loadStore, updateStore, type JsonStore } from "../core/atomic-json.js";
 import { effectiveMcpCatalogPath } from "../core/config.js";
-import { sessionsStateDir, projectMcpStatePath } from "../core/paths.js";
-import { join } from "node:path";
+import { projectMcpStatePath } from "../core/paths.js";
 
 export interface McpCatalog {
   version: 1;
@@ -15,10 +14,6 @@ export type McpServerConfig =
 export interface ProjectMcpState {
   version: 1;
   enabledServers: string[];
-}
-
-export function mcpCatalogPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(sessionsStateDir(env), "mcp.json");
 }
 
 export async function loadMcpCatalog(path?: string, env: NodeJS.ProcessEnv = process.env): Promise<McpCatalog> {

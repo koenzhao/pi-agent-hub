@@ -1,6 +1,6 @@
 import { readJsonOr } from "./atomic-json.js";
 import { heartbeatPath } from "./paths.js";
-import type { ManagedSession, SessionStatus, Heartbeat, StatusInput, TmuxState } from "./types.js";
+import type { ManagedSession, SessionStatus, Heartbeat, StatusInput } from "./types.js";
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 export const HEARTBEAT_STALE_MS = 60_000;
@@ -82,8 +82,4 @@ function retainedWorkflow(workflow: Heartbeat["workflow"]): ManagedSession["work
   if (!workflow) return undefined;
   const { activeMode: _activeMode, ...snapshot } = workflow;
   return snapshot;
-}
-
-export function tmuxMissing(error?: string): TmuxState {
-  return { exists: false, error };
 }

@@ -148,11 +148,6 @@ export async function finishOwnedWorktrees(input: FinishWorktreeInput): Promise<
   return { finished };
 }
 
-export async function removeOwnedWorktree(session: ManagedSession, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const meta = requireWorktreeMetadata(session);
-  await removeOne(meta, env);
-}
-
 export async function removeOwnedWorktrees(session: ManagedSession, env: NodeJS.ProcessEnv = process.env): Promise<ManagedWorktree[]> {
   await assertWorktreesClean(session, env, "Worktree has uncommitted changes; commit or stash before removing");
   const ordered = finishOrder(sessionWorktrees(session));
