@@ -287,22 +287,16 @@ export async function runTui(): Promise<void> {
     const restoreBindings = () => Promise.all([presencePaused, sidePaneDrained])
       .then(() => restoreSwitchReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {}))
       .then(() => removeSidebarReturnBinding({ onlyOwnerPid: process.pid }).catch(() => {}));
-    if (ownPane) {
-      void restoreBindings()
-        .then(async () => {
-          for (const tmuxSession of sidePaneSlots) if (tmuxSession) await setSessionStatusBarVisible({ name: tmuxSession, visible: true }).catch(() => {});
-        })
-        .then(() => closeSidePanes({ ownPane }).catch(() => {}))
-        .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
-        .then(() => setWindowPaneBorderStatus(ownPane, false).catch(() => {}))
-        .then(() => process.env.TMUX ? setDashboardMouse({ name: DASHBOARD_SESSION, enabled: false }).catch(() => {}) : undefined)
-        .finally(finish);
-    } else {
-      void restoreBindings()
-        .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
-        .then(() => process.env.TMUX ? setDashboardMouse({ name: DASHBOARD_SESSION, enabled: false }).catch(() => {}) : undefined)
-        .finally(finish);
-    }
+    void restoreBindings()
+      .then(async () => {
+        if (!ownPane) return;
+        for (const tmuxSession of sidePaneSlots) if (tmuxSession) await setSessionStatusBarVisible({ name: tmuxSession, visible: true }).catch(() => {});
+        await closeSidePanes({ ownPane }).catch(() => {});
+      })
+      .then(() => applyDashboardStatusVisibility(true, true).catch(() => {}))
+      .then(() => ownPane ? setWindowPaneBorderStatus(ownPane, false).catch(() => {}) : undefined)
+      .then(() => process.env.TMUX ? setDashboardMouse({ name: DASHBOARD_SESSION, enabled: false }).catch(() => {}) : undefined)
+      .finally(finish);
   };
   const mutateRegistry = createRegistryMutator({
     async pause() {

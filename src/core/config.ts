@@ -79,14 +79,20 @@ export async function setSessionPrelude(prelude: string, env: NodeJS.ProcessEnv 
   await writeJsonAtomic(configPath(env), { ...config, session: { ...config.session, prelude: trimmed } });
 }
 
-export async function unsetSessionPrelude(env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const config = await loadSessionsConfig(env);
+type SessionConfigKey = keyof NonNullable<SessionsConfig["session"]>;
+
+function withoutSessionProperty(config: SessionsConfig, key: SessionConfigKey): SessionsConfig {
   const next: SessionsConfig = { ...config, session: config.session ? { ...config.session } : undefined };
   if (next.session) {
-    delete next.session.prelude;
+    delete next.session[key];
     if (!Object.keys(next.session).length) delete next.session;
   }
-  await writeJsonAtomic(configPath(env), next);
+  return next;
+}
+
+export async function unsetSessionPrelude(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const config = await loadSessionsConfig(env);
+  await writeJsonAtomic(configPath(env), withoutSessionProperty(config, "prelude"));
 }
 
 export async function setWorktreeDefault(enabled: boolean, env: NodeJS.ProcessEnv = process.env): Promise<void> {
@@ -96,12 +102,7 @@ export async function setWorktreeDefault(enabled: boolean, env: NodeJS.ProcessEn
 
 export async function unsetWorktreeDefault(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const config = await loadSessionsConfig(env);
-  const next: SessionsConfig = { ...config, session: config.session ? { ...config.session } : undefined };
-  if (next.session) {
-    delete next.session.worktreeDefault;
-    if (!Object.keys(next.session).length) delete next.session;
-  }
-  await writeJsonAtomic(configPath(env), next);
+  await writeJsonAtomic(configPath(env), withoutSessionProperty(config, "worktreeDefault"));
 }
 
 export async function setDashboardThemeSessionId(sessionId: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -60,6 +60,26 @@ test("worktree default is validated and preserves unrelated session config", asy
 
   await writeFile(configPath(env), JSON.stringify({ version: 1, session: { worktreeDefault: "yes" } }), "utf8");
   await assert.rejects(() => effectiveWorktreeDefault(env), /Invalid session\.worktreeDefault/);
+});
+
+test("unsetting the final session setting removes the empty session object", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
+  const env = { PI_AGENT_HUB_DIR: root };
+  await writeFile(configPath(env), JSON.stringify({ version: 1, session: { prelude: "echo setup" } }), "utf8");
+
+  await unsetSessionPrelude(env);
+  assert.deepEqual(JSON.parse(await readFile(configPath(env), "utf8")), { version: 1 });
+
+  await writeFile(configPath(env), JSON.stringify({ version: 1, session: { prelude: "echo setup", worktreeDefault: true } }), "utf8");
+  await unsetSessionPrelude(env);
+  assert.deepEqual(JSON.parse(await readFile(configPath(env), "utf8")), { version: 1, session: { worktreeDefault: true } });
+
+  await unsetWorktreeDefault(env);
+  assert.deepEqual(JSON.parse(await readFile(configPath(env), "utf8")), { version: 1 });
+
+  await writeFile(configPath(env), JSON.stringify({ version: 1 }), "utf8");
+  await unsetSessionPrelude(env);
+  assert.deepEqual(JSON.parse(await readFile(configPath(env), "utf8")), { version: 1 });
 });
 
 test("session prelude setters preserve unrelated config", async () => {
