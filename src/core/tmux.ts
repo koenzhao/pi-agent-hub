@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { isErrno, withFileLock, writeJsonAtomic } from "./atomic-json.js";
+import { isErrno, readJsonOr, withFileLock, writeJsonAtomic } from "./atomic-json.js";
 import { tmuxChromeFromTheme, type ChromeThemeTokens, type TmuxChrome } from "./chrome.js";
 import { MANAGED_SESSION_PREFIX } from "./names.js";
 import { sessionsStateDir } from "./paths.js";
@@ -413,13 +413,9 @@ export async function switchClientWithReturn(
 export async function inspectSwitchReturnBinding(options: { stateDir?: string } = {}): Promise<SwitchReturnBindingStatus> {
   const stateDir = options.stateDir ?? join(sessionsStateDir(), "return-key");
   const activePath = join(stateDir, "active.json");
-  try {
-    const active = JSON.parse(await readFile(activePath, "utf8")) as ActiveReturnBinding;
-    return { ...active, active: true, stale: !isProcessAlive(active.ownerPid) };
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return { active: false };
-    throw error;
-  }
+  const active = await readJsonOr<ActiveReturnBinding | undefined>(activePath, undefined);
+  if (active === undefined) return { active: false };
+  return { ...active, active: true, stale: !isProcessAlive(active.ownerPid) };
 }
 
 export async function currentKeyBinding(returnKey: string, exec: TmuxExec = realTmuxExec): Promise<string> {
@@ -447,13 +443,9 @@ export type SidebarReturnBindingStatus =
 
 export async function inspectSidebarReturnBinding(options: { stateDir?: string } = {}): Promise<SidebarReturnBindingStatus> {
   const stateDir = options.stateDir ?? join(sessionsStateDir(), "sidebar-return");
-  try {
-    const active = JSON.parse(await readFile(join(stateDir, "active.json"), "utf8")) as ActiveSidebarReturnBinding;
-    return { ...active, keys: active.keys ?? [active.returnKey], active: true, stale: !isProcessAlive(active.ownerPid) };
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return { active: false };
-    throw error;
-  }
+  const active = await readJsonOr<ActiveSidebarReturnBinding | undefined>(join(stateDir, "active.json"), undefined);
+  if (active === undefined) return { active: false };
+  return { ...active, keys: active.keys ?? [active.returnKey], active: true, stale: !isProcessAlive(active.ownerPid) };
 }
 
 export async function installSidebarReturnBinding(options: {
@@ -516,13 +508,8 @@ async function removeSidebarReturnBindingUnlocked(
   exec: TmuxExec,
 ): Promise<void> {
   const activePath = join(options.stateDir, "active.json");
-  let active: ActiveSidebarReturnBinding;
-  try {
-    active = JSON.parse(await readFile(activePath, "utf8")) as ActiveSidebarReturnBinding;
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return;
-    throw error;
-  }
+  const active = await readJsonOr<ActiveSidebarReturnBinding | undefined>(activePath, undefined);
+  if (active === undefined) return;
   if (options.onlyOwnerPid !== undefined && active.ownerPid !== options.onlyOwnerPid) return;
   if (options.refuseLiveForeignOwner && active.ownerPid !== process.pid && isProcessAlive(active.ownerPid)) {
     throw new Error(`tmux sidebar return binding is already active for pid ${active.ownerPid}`);
@@ -580,13 +567,8 @@ export async function restoreSwitchReturnBinding(
 ): Promise<void> {
   const stateDir = options.stateDir ?? join(sessionsStateDir(), "return-key");
   const activePath = join(stateDir, "active.json");
-  let active: ActiveReturnBinding;
-  try {
-    active = JSON.parse(await readFile(activePath, "utf8")) as ActiveReturnBinding;
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return;
-    throw error;
-  }
+  const active = await readJsonOr<ActiveReturnBinding | undefined>(activePath, undefined);
+  if (active === undefined) return;
 
   if (options.onlyOwnerPid !== undefined && active.ownerPid !== options.onlyOwnerPid) return;
   if (options.refuseLiveForeignOwner && active.ownerPid !== process.pid && isProcessAlive(active.ownerPid)) {

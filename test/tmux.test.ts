@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { darkTmuxChrome } from "../src/core/chrome.js";
@@ -370,8 +370,40 @@ test("sidebar return cleanup supports legacy state without keys", async () => {
     ownerPid: process.pid, dashboardSession: "pi-agent-hub", sidebarPane: "%1", returnKey: "C-q", restorePath,
   }));
   const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+  const status = await inspectSidebarReturnBinding({ stateDir });
+  assert.deepEqual(status.active && status.keys, ["C-q"]);
   await removeSidebarReturnBinding({ stateDir }, exec);
   assert.deepEqual(exec.calls.map((call) => call.args), [["unbind-key", "-T", "root", "C-q"]]);
+});
+
+test("binding state readers propagate malformed JSON and release sidebar locks", async () => {
+  const switchStateDir = await mkdtemp(join(tmpdir(), "pi-agent-hub-return-"));
+  const sidebarStateDir = await mkdtemp(join(tmpdir(), "pi-agent-hub-sidebar-return-"));
+  await writeFile(join(switchStateDir, "active.json"), "{");
+  await writeFile(join(sidebarStateDir, "active.json"), "{");
+
+  await assert.rejects(() => inspectSwitchReturnBinding({ stateDir: switchStateDir }), SyntaxError);
+  await assert.rejects(() => inspectSidebarReturnBinding({ stateDir: sidebarStateDir }), SyntaxError);
+
+  const sidebarExec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+  await assert.rejects(() => removeSidebarReturnBinding({ stateDir: sidebarStateDir }, sidebarExec), SyntaxError);
+  await assert.rejects(() => access(join(sidebarStateDir, "active.json.lock")), { code: "ENOENT" });
+  assert.deepEqual(sidebarExec.calls, []);
+
+  const restoreExec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+  await assert.rejects(() => restoreSwitchReturnBinding({ stateDir: switchStateDir }, restoreExec), SyntaxError);
+  assert.deepEqual(restoreExec.calls, []);
+});
+
+test("binding cleanup treats missing active state as a no-op", async () => {
+  const switchStateDir = await mkdtemp(join(tmpdir(), "pi-agent-hub-return-"));
+  const sidebarStateDir = await mkdtemp(join(tmpdir(), "pi-agent-hub-sidebar-return-"));
+  const exec = fakeTmux(() => ({ stdout: "", stderr: "" }));
+
+  await removeSidebarReturnBinding({ stateDir: sidebarStateDir }, exec);
+  await restoreSwitchReturnBinding({ stateDir: switchStateDir }, exec);
+
+  assert.deepEqual(exec.calls, []);
 });
 
 test("sidebar binding install failure rolls back the whole binding set", async () => {
