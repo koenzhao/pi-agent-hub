@@ -25,7 +25,8 @@ export class SessionsView implements Component {
   private message: string | undefined;
   private flash: { text: string; expiresAt: number } | undefined;
   private detailsExpanded = false;
-  private viewMode: "groups" | "board" = "groups";
+  private grouping: "project" | "stage";
+  private density: "compact" | "cards";
   private pendingRestart: { sessionId: string } | undefined;
   private pendingFocusSlot = false;
   private pendingCloseSlot = false;
@@ -38,7 +39,10 @@ export class SessionsView implements Component {
   private listScrollTop = 0;
   private expandedBoardParentIds = new Set<string>();
 
-  constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {}
+  constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {
+    this.grouping = actions.initialViewState?.grouping ?? "project";
+    this.density = actions.initialViewState?.density ?? "compact";
+  }
 
   setTheme(theme: SessionsTheme): void {
     this.theme = theme;
@@ -108,10 +112,11 @@ export class SessionsView implements Component {
         return;
       }
     }
-    if (this.viewMode === "board" && !this.boardRows().length) {
+    if (this.grouping === "stage" && !this.boardRows().length) {
       if (matchesKey(data, Key.slash)) this.startFilter();
       else if (data === "n") this.startNewDialog();
-      else if (data === "v") this.toggleViewMode();
+      else if (data === "v") this.toggleDensity();
+      else if (data === "S") this.toggleGrouping();
       else if (data === "?") this.dialog = { kind: "help" };
       else if (data === "q") this.stop();
       return;
@@ -140,7 +145,8 @@ export class SessionsView implements Component {
       else if (matchesKey(data, Key.slash)) this.startFilter();
       else if (data === "n") this.startNewDialog();
       else if (data === "i") this.detailsExpanded = !this.detailsExpanded;
-      else if (data === "v") this.toggleViewMode();
+      else if (data === "v") this.toggleDensity();
+      else if (data === "S") this.toggleGrouping();
       else if (data === "?") this.dialog = { kind: "help" };
       else if (data === "q") this.stop();
       return;
@@ -151,7 +157,7 @@ export class SessionsView implements Component {
       this.openSelectedSidePane(panelSlot);
       return;
     }
-    if (this.viewMode === "board" && data === " ") {
+    if (this.grouping === "stage" && data === " ") {
       if (!this.controller.snapshot().filter?.trim()) this.toggleBoardSubagents();
       return;
     }
@@ -190,7 +196,8 @@ export class SessionsView implements Component {
       this.clearFlash();
       this.detailsExpanded = !this.detailsExpanded;
     }
-    else if (data === "v") this.toggleViewMode();
+    else if (data === "v") this.toggleDensity();
+    else if (data === "S") this.toggleGrouping();
     else if (data === "a") {
       this.clearPendingRestart();
       this.clearFlash();
@@ -235,7 +242,8 @@ export class SessionsView implements Component {
       height,
       listScrollTop: this.listScrollTop,
       selectedSkillCount: selected ? this.actions.skillCount?.(selected.cwd) : undefined,
-      viewMode: this.viewMode,
+      grouping: this.grouping,
+      density: this.density,
       now,
       sidePaneSessionIds,
       sidePaneFocusedSlot: this.actions.sidePaneFocusedSlot?.(),
@@ -618,7 +626,7 @@ export class SessionsView implements Component {
   }
 
   private visibleListTargets(): SessionListTarget[] {
-    if (this.viewMode === "board") return this.boardRows().map((row) => ({ kind: "session", id: row.id }));
+    if (this.grouping === "stage") return this.boardRows().map((row) => ({ kind: "session", id: row.id }));
     const snapshot = this.controller.snapshot();
     const allRows = orderedSessionRows(snapshot.sessions, snapshot.filter);
     const archive = archiveSectionRows(allRows, { expanded: this.archiveExpanded, filterActive: snapshot.filter !== undefined });
@@ -639,7 +647,7 @@ export class SessionsView implements Component {
     }
     const selectedId = this.controller.snapshot().selectedId;
     if (targets.some((target) => target.kind === "session" && target.id === selectedId)) return;
-    const boardParentId = this.viewMode === "board" ? this.topLevelBoardParentId(selectedId) : undefined;
+    const boardParentId = this.grouping === "stage" ? this.topLevelBoardParentId(selectedId) : undefined;
     if (boardParentId && targets.some((target) => target.kind === "session" && target.id === boardParentId)) {
       if (this.controller.selectSession(boardParentId) && boardParentId !== selectedId) this.actions.selectionChanged?.();
       return;
@@ -689,14 +697,23 @@ export class SessionsView implements Component {
     this.listScrollTop = 0;
   }
 
-  private toggleViewMode() {
+  private toggleDensity() {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
-    this.viewMode = this.viewMode === "groups" ? "board" : "groups";
-    const previousId = this.controller.snapshot().selectedId;
+    this.density = this.density === "compact" ? "cards" : "compact";
+    this.actions.saveViewState?.({ grouping: this.grouping, density: this.density });
+  }
+
+  private toggleGrouping() {
+    this.clearPendingRestart();
+    this.clearFlash();
+    this.message = undefined;
+    this.grouping = this.grouping === "project" ? "stage" : "project";
     this.archiveDisclosureSelected = false;
-    if (this.viewMode !== "board") {
+    this.actions.saveViewState?.({ grouping: this.grouping, density: this.density });
+    const previousId = this.controller.snapshot().selectedId;
+    if (this.grouping !== "stage") {
       this.normalizeListSelection();
       return;
     }
@@ -713,8 +730,8 @@ export class SessionsView implements Component {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
-    if (this.viewMode === "board") {
-      this.message = "switch to groups view to reorder";
+    if (this.grouping === "stage") {
+      this.message = "switch to project grouping to reorder";
       return;
     }
     if (this.controller.snapshot().filter !== undefined) {
@@ -916,7 +933,8 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  1-4 assign panels         x then 1-4 close panel",
     "  F then 1-4 or Alt+1-4 focus panel     o reset to one panel",
     "  q quit                     Esc cancel/clear",
-    "  K/J reorder in group      v toggle groups/board view",
+    "  K/J reorder in group      v toggle compact/card rows",
+    "  S toggle project/stage grouping",
     "  mouse click select · double-click open/switch · wheel move",
     "",
     heading("Sessions"),

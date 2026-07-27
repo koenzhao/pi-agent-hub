@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { ProcessTerminal, TUI } from "@earendil-works/pi-tui";
+import { readJsonOr, writeJsonAtomic } from "../core/atomic-json.js";
+import { uiStatePath } from "../core/paths.js";
 import { SessionsController } from "./controller.js";
 import { startRefreshLoop, type RefreshLoopHandle } from "./refresh-loop.js";
 import { SessionsView } from "../tui/sessions-view.js";
@@ -23,6 +25,7 @@ import { addManagedSession, forkManagedSession, restartManagedSession, restartMa
 import { discardWorktreeSession, finishWorktreeSession } from "./worktree-session.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { ManagedSession } from "../core/types.js";
+import type { SessionsViewState } from "../tui/dialog.js";
 
 export function buildNewFormContext(input: { cwd: string; sessions: ManagedSession[]; selected?: ManagedSession; historyCwds?: string[]; worktreeDefault?: boolean }): NewFormContext {
   const selectedCwd = input.selected ? newSessionCwd(input.selected) : input.cwd;
@@ -174,6 +177,12 @@ export async function runTui(): Promise<void> {
   let skillPool = await listSkillPool();
   const mcpCatalog = await loadMcpCatalog();
   let historyCwds = rankedRepoCwds((await loadRepoHistory()).repos);
+  const savedViewState = await readJsonOr<unknown>(uiStatePath(), {});
+  const saved = savedViewState && typeof savedViewState === "object" ? savedViewState as Partial<SessionsViewState> : {};
+  const initialViewState: SessionsViewState = {
+    grouping: saved.grouping === "stage" ? "stage" : "project",
+    density: saved.density === "cards" ? "cards" : "compact",
+  };
   const skillCountCache = new Map<string, number>();
   const skillCountLoads = new Set<string>();
   const skillCount = (projectCwd: string): number | undefined => {
@@ -376,6 +385,8 @@ export async function runTui(): Promise<void> {
     }
   };
   const view = new SessionsView(controller, stop, {
+    initialViewState,
+    saveViewState(state) { void writeJsonAtomic(uiStatePath(), state); },
     attachOutsideTmux(tmuxSession) {
       const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
       if (session) pinDashboardThemeSession(session);

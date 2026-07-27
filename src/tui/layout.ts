@@ -35,7 +35,7 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
   }
 
   const split = model.showPreview
-    ? model.viewMode === "board"
+    ? model.density === "cards"
       ? Math.max(40, Math.min(60, Math.floor(bodyWidth * 0.38)))
       : Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38)))
     : bodyWidth;
@@ -146,7 +146,7 @@ function noBoardLines(width: number, model: RenderModel, styles: LayoutStyles): 
     "",
     styles.accent("No Active sessions."),
     "",
-    `${styles.accent("▶")} ${styles.accent("v")}  return to groups view`,
+    `${styles.accent("▶")} ${styles.accent("S")}  return to project view`,
     boardHiddenSummary(model, inner, styles),
     "",
   ].map((line) => truncate(line, inner));
@@ -161,7 +161,7 @@ const STATUS_ORDER = [
 ] as const;
 
 function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyles): string {
-  const board = model.viewMode === "board";
+  const board = model.grouping === "stage";
   const countLabel = board
     ? `${model.boardCardCount} Active ${model.boardCardCount === 1 ? "session" : "sessions"}`
     : model.filter === undefined
@@ -170,7 +170,7 @@ function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyle
   const parts = [styles.accent(countLabel)];
   const counts = formatStatusCounts(board ? model.boardStatusCounts : model.summary.statusCounts, styles);
   if (counts) parts.push(counts);
-  if (board) parts.push(styles.dim("view board"));
+  if (board) parts.push(styles.dim("view lanes"));
   if (model.filter !== undefined) parts.push(styles.dim(`filter: ${model.filter}`));
   return truncate(parts.join(" · "), width);
 }
@@ -193,7 +193,7 @@ interface SessionListContent {
 }
 
 function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): SessionListContent {
-  const board = model.viewMode === "board";
+  const board = model.grouping === "stage";
   const lines: string[] = [];
   const targets: (SessionListTarget | undefined)[] = [];
   const continuationPriorities = new Map<number, number>();
@@ -204,11 +204,11 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
     targets.push(target);
   };
   const pushRow = (session: RenderSession) => {
-    if (board && session.selected) {
+    if (model.density === "cards" && session.selected) {
       const innerWidth = Math.max(0, width - 2);
       selectedIndex = lines.length;
-      const header = renderSessionRow(session, innerWidth, styles, true, model.sidePaneFocusedSlot, false);
-      pushLine(`${styles.accent("┌")}${pad(header, innerWidth)}${styles.accent("┐")}`, { kind: "session", id: session.id });
+      const header = renderSelectedCardHeader(session, innerWidth, styles, model.grouping === "stage", model.sidePaneFocusedSlot);
+      pushLine(header, { kind: "session", id: session.id });
       for (const continuation of selectedCardLines(session, innerWidth, styles)) {
         pushLine(`${styles.accent("│")}${pad(continuation.line, innerWidth)}${styles.accent("│")}`);
         continuationPriorities.set(lines.length - 1, continuation.priority);
@@ -264,7 +264,7 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
 function boardHiddenSummary(model: RenderModel, width: number, styles: LayoutStyles): string {
   const parts = [
     model.boardHidden.nonActive ? `${model.boardHidden.nonActive} backlog/archived` : "",
-    "v groups",
+    "S projects",
   ].filter(Boolean);
   return styles.dim(truncate(parts.join(" · "), width));
 }
@@ -388,19 +388,94 @@ function windowSelectedCard(list: SessionListContent, capacity: number, styles: 
   };
 }
 
+const CARD = {
+  stepDone: "✓", stepActive: "◉", stepPending: "·",
+  taskDone: "▰", taskPending: "▱", phaseSep: "│",
+  shipped: "✓",
+} as const;
+
+function workflowVisualLine(session: RenderSession, width: number, styles: LayoutStyles): string | undefined {
+  const workflow = session.workflow;
+  if (!workflow) return undefined;
+  const active = workflow.steps[workflow.activeIndex];
+  if (!active) return undefined;
+  if (workflow.activeIndex === workflow.steps.length - 1 && session.attention?.kind === "ready") {
+    return truncate(styles.success(`${CARD.shipped} ${workflow.ticketId ?? "workflow"} shipped`), width);
+  }
+  const dots = workflow.steps.map((step, index) => styles[index < workflow.activeIndex ? "success" : index === workflow.activeIndex ? (step.id === "review" ? "warning" : "accent") : "dim"](index < workflow.activeIndex ? CARD.stepDone : index === workflow.activeIndex ? CARD.stepActive : CARD.stepPending)).join("");
+  const plan = session.selectedPlan;
+  const phases = plan?.phases;
+  const executeIndex = workflow.steps.findIndex((step) => step.id === "execute");
+  const isExecute = active.id === "execute";
+  const isReview = active.id === "review";
+  let zone = "";
+  if (executeIndex >= 0 && (isExecute || isReview || workflow.activeIndex < executeIndex)) {
+    if (phases?.length) {
+      zone = phases.map((phase) => `${Array.from({ length: phase.total }, (_, index) => {
+        const done = index < phase.completed;
+        if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
+        return isExecute && done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
+      }).join("")}`).join(styles.border(CARD.phaseSep));
+    } else if (plan?.tasks) {
+      zone = Array.from({ length: plan.tasks.total }, (_, index) => {
+        const done = index < plan.tasks!.completed;
+        if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
+        return isExecute && done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
+      }).join("");
+      if (plan.phase) zone += styles.dim(` p${plan.phase.index}/${plan.phase.count}`);
+    }
+  }
+  const fallbackText = session.sessionMetadata?.status
+    ?? (session.attention && session.selectedPlan?.nextSource === "metadata" ? "" : session.sessionMetadata?.nextStep)
+    ?? "";
+  if (!zone) return truncate(`${dots}  ${styles.dim(fallbackText)}`, width);
+
+  const flatZone = phases?.length
+    ? phases.flatMap((phase) => Array.from({ length: phase.total }, (_, index) => {
+      const done = index < phase.completed;
+      if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
+      return isExecute && done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
+    })).join("")
+    : zone;
+  const total = phases?.reduce((sum, phase) => sum + phase.total, 0) ?? plan?.tasks?.total ?? 0;
+  const completed = isExecute || isReview
+    ? phases?.reduce((sum, phase) => sum + phase.completed, 0) ?? plan?.tasks?.completed ?? 0
+    : 0;
+  const ratioDone = total ? Math.round((completed / total) * 10) : 0;
+  const ratioZone = Array.from({ length: 10 }, (_, index) => {
+    const done = index < ratioDone;
+    if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
+    return done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
+  }).join("");
+  const status = isReview && fallbackText ? styles.dim(`  ${fallbackText}`) : "";
+  const base = `${dots}  `;
+  const candidates = [
+    `${base}${zone}${status}`,
+    `${base}${zone}`,
+    `${base}${flatZone}`,
+    total ? `${base}${ratioZone} ${completed}/${total}` : "",
+  ];
+  return truncate(candidates.find((candidate) => candidate && displayWidth(candidate) <= width) ?? dots, width);
+}
+
 function selectedCardLines(session: RenderSession, width: number, styles: LayoutStyles): { line: string; priority: number }[] {
   const indent = "  ";
   const lines: { line: string; priority: number }[] = [];
+  const plan = session.selectedPlan;
+  const workflowVisual = workflowVisualLine(session, width - indent.length, styles);
+  if (session.workflow?.ticketId) lines.push({ line: truncate(`${indent}ticket: ${session.workflow.ticketId}`, width), priority: 1 });
+  if (workflowVisual) lines.push({ line: truncate(`${indent}${workflowVisual}`, width), priority: 1 });
   if (session.attention) {
     const marker = attentionGlyph(session.attention.kind, styles);
     lines.push({ line: truncate(`${indent}${marker} ${session.attention.text}`, width), priority: 0 });
   }
-  const plan = session.selectedPlan;
   if (!plan) return lines;
   const inExecute = session.workflow?.steps[session.workflow.activeIndex]?.id === "execute";
-  const progress = planProgressText(plan, inExecute, styles);
+  const progress = workflowVisual ? "" : planProgressText(plan, inExecute, styles);
   if (progress) lines.push({ line: truncate(`${indent}${progress}`, width), priority: 1 });
+  const visualConsumesNext = Boolean(workflowVisual && plan.nextStep && normalizedText(stripAnsi(workflowVisual)).includes(normalizedText(plan.nextStep)));
   const showNext = plan.nextStep
+    && !visualConsumesNext
     && !(session.attention && plan.nextSource === "metadata")
     && normalizedText(plan.nextStep) !== normalizedText(plan.feature)
     && normalizedText(plan.nextStep) !== normalizedText(session.attention?.text);
@@ -409,8 +484,9 @@ function selectedCardLines(session: RenderSession, width: number, styles: Layout
 }
 
 function planProgressText(plan: NonNullable<RenderSession["selectedPlan"]>, inExecute: boolean, styles: LayoutStyles): string {
-  const phase = plan.phase ? `${inExecute ? "Phase" : "plan"} ${plan.phase.index}/${plan.phase.count}` : undefined;
-  const tasks = plan.tasks ? `${plan.tasks.completed}/${plan.tasks.total} tasks` : undefined;
+  const phaseTasks = plan.phase ? plan.phases?.[plan.phase.index - 1] : undefined;
+  const phase = plan.phase ? `${inExecute ? "Phase" : "plan"} ${plan.phase.index}/${plan.phase.count}${phaseTasks ? ` · ${phaseTasks.completed}/${phaseTasks.total}` : ""}` : undefined;
+  const tasks = plan.tasks ? `${plan.tasks.completed}/${plan.tasks.total} tasks${plan.phases ? " (plan)" : ""}` : undefined;
   const text = [phase, tasks].filter(Boolean).join(" · ");
   if (!text) return "";
   return inExecute ? text : styles.dim(phase ? text : `plan ${text}`);
@@ -458,8 +534,8 @@ function rowRightAdornment(session: RenderSession, styles: LayoutStyles, board: 
   const mode = activeWorkflowMode(session);
   const fits = (right: string): boolean => Boolean(right) && width - displayWidth(right) - 1 >= 12;
   if (board) {
-    if (session.kind === "subagent" || !mode) return "";
-    const short = styles.accent(mode.short);
+    if (session.kind === "subagent" || !session.workflow) return "";
+    const short = styles.accent(activeStepShort(session.workflow, mode));
     return fits(short) ? short : "";
   }
 
@@ -549,8 +625,11 @@ function workBlock(session: RenderSession, width: number, styles: LayoutStyles):
   if (!plan && !session.attention) return [];
   const fields: [string, string, string?][] = [];
   if (plan?.feature) fields.push(["feature", plan.feature]);
-  if (plan?.phase) fields.push(["phase", `${plan.phase.index}/${plan.phase.count} · ${plan.phase.title}`]);
-  if (plan?.tasks) fields.push(["progress", `${plan.tasks.completed}/${plan.tasks.total} tasks`]);
+  if (plan?.phase) {
+    const phaseTasks = plan.phases?.[plan.phase.index - 1];
+    fields.push(["phase", `${plan.phase.index}/${plan.phase.count} · ${plan.phase.title}${phaseTasks ? ` · ${phaseTasks.completed}/${phaseTasks.total}` : ""}`]);
+  }
+  if (plan?.tasks) fields.push(["progress", `${plan.tasks.completed}/${plan.tasks.total} tasks${plan.phases ? " (plan)" : ""}`]);
   if (session.attention) fields.push(["attention", session.attention.text, attentionGlyph(session.attention.kind, styles)]);
   if (plan?.nextStep && plan.nextSource === "plan") fields.push(["next", plan.nextStep, styles.accent("→")]);
   if (!fields.length) return [];
@@ -681,7 +760,17 @@ function attentionGlyph(kind: NonNullable<RenderSession["attention"]>["kind"], s
   return styles.error("!");
 }
 
-function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, board = false, focusedSlot?: number, selectionMarker = true): string {
+function renderSelectedCardHeader(session: RenderSession, width: number, styles: LayoutStyles, board: boolean, focusedSlot?: number): string {
+  const right = rowRightAdornment(session, styles, board, width);
+  const rightWidth = displayWidth(right);
+  const leftWidth = Math.max(0, width - (right ? rightWidth + 3 : 2));
+  const left = renderSessionRow(session, leftWidth, styles, board, focusedSlot, false, false);
+  const fillWidth = Math.max(0, width - 1 - displayWidth(left) - (right ? rightWidth + 2 : 1));
+  const rightPart = `${right ? `${styles.accent("─")}${right}` : ""}${styles.accent("─")}`;
+  return `${styles.accent("┌─")}${left}${styles.accent("─".repeat(fillWidth))}${rightPart}${styles.accent("┐")}`;
+}
+
+function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, board = false, focusedSlot?: number, selectionMarker = true, includeRightAdornment = true): string {
   const attention = board && selectionMarker && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
   const prefix = session.selected && selectionMarker ? styles.accent("▌") : attention || (session.status === "stopped" ? styles.dim("·") : " ");
   const symbol = styles.status(session.displayStatus, session.symbol);
@@ -697,9 +786,9 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
     ? ` ${styles.success(`⚙︎${session.runningSubagentCount}`)}`
     : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
-  const leftPrefix = `${prefix} ${indent}${symbol} ${sidePaneMarker}`;
+  const leftPrefix = `${board && !selectionMarker && prefix === " " ? prefix : `${prefix} `}${indent}${symbol} ${sidePaneMarker}`;
   const leftSuffix = `${disclosureBadge}${runningBadge}${repoBadge}${worktreeBadge}`;
-  const right = rowRightAdornment(session, styles, board, width);
+  const right = includeRightAdornment ? rowRightAdornment(session, styles, board, width) : "";
   const rightSpace = right ? displayWidth(right) + 1 : 0;
   const titleWidth = Math.max(0, width - displayWidth(leftPrefix) - displayWidth(leftSuffix) - rightSpace);
   const text = `${leftPrefix}${styleTitle(truncate(titleText, titleWidth))}${leftSuffix}`;

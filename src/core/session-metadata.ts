@@ -77,7 +77,17 @@ function parsePlanSummary(value: unknown): SessionPlanSummary | undefined {
       plan.tasks = { completed, total };
     }
   }
-  return plan.feature || plan.phase || plan.tasks || plan.nextStep ? plan : undefined;
+  if (Array.isArray(value.phases) && value.phases.length <= 12) {
+    const phases = value.phases.map((phase) => {
+      if (!isRecord(phase)) return undefined;
+      const completed = phase.completed;
+      const total = phase.total;
+      return isInteger(completed) && isInteger(total) && total > 0 && completed >= 0 && completed <= total
+        ? { completed, total } : undefined;
+    });
+    if (phases.every((phase): phase is { completed: number; total: number } => phase !== undefined)) plan.phases = phases;
+  }
+  return plan.feature || plan.phase || plan.tasks || plan.phases || plan.nextStep ? plan : undefined;
 }
 
 function hasDisplayableMetadata(metadata: SessionMetadata): boolean {

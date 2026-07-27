@@ -18,6 +18,10 @@ export function registryPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(sessionsStateDir(env), "registry.json");
 }
 
+export function uiStatePath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(sessionsStateDir(env), "ui-state.json");
+}
+
 export function heartbeatDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(sessionsStateDir(env), "heartbeats");
 }

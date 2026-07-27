@@ -44,6 +44,7 @@ export interface SessionPlanSummary {
     completed: number;
     total: number;
   };
+  phases?: { completed: number; total: number }[];
   nextStep?: string;
 }
 

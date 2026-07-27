@@ -8,6 +8,8 @@ Use this section while developing. Move entries into a versioned section before 
 
 ### Added
 
+- Add independent `v` card-density and `S` project/stage-grouping toggles, persisted in Hub UI state, plus iconographic selected workflow cards with ticket, step, and task-phase visuals.
+- Add producer `plan.phases` metadata support for phase-aware workflow progress.
 - Add explicit `x` then `1`–`4` panel close commands, guarded `Alt+1`–`Alt+4` focus jumps, and `Alt+Q` sidebar return from anywhere in the dashboard tmux session.
 
 ### Changed

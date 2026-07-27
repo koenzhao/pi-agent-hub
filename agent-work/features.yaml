@@ -486,3 +486,14 @@
   created_at: '2026-07-25'
   id: workflow-board-002
   completed_at: '2026-07-25'
+- epic: workflow-board
+  description: Split sidebar view toggles (v density, S grouping) and redesign selected
+    card with iconographic workflow step dots + phase-separated task grid; extend
+    pi-session-summary metadata with plan.phases
+  priority: 1
+  id: workflow-board-003
+  title: Workflow board cards
+  status: done
+  created_at: '2026-07-25'
+  plan_file: agent-work/history/20260726_workflow-board-003_split_view_workflow_cards.md
+  completed_at: '2026-07-26'

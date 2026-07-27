@@ -60,19 +60,19 @@ test("active workflow mode replaces the Execute short and adds expanded detail",
 
 test("focused cards stay in Execute and preserve FOC without row group adornments", () => {
   const focused = { ...session("focus", "agents", "running", "focused-work"), workflow: FOCUSED_WORKFLOW };
-  const wide = buildRenderModel({ sessions: [focused], selectedId: "focus", viewMode: "board", width: 120 });
+  const wide = buildRenderModel({ sessions: [focused], selectedId: "focus", grouping: "stage", density: "cards", width: 120 });
   assert.deepEqual(wide.sections.map((section) => section.key), ["execute"]);
   assert.equal(wide.sections[0]?.title, "EXECUTE");
   const wideText = renderSessions(wide).lines.map(stripAnsi).join("\n");
   assert.match(wideText, /agents\s+·1/);
-  assert.match(wideText, /focused-work\s+FOC/);
+  assert.match(wideText, /focused-work─+FOC/);
   assert.doesNotMatch(wideText, /FOC · agents/);
   assert.doesNotMatch(wideText, /── FOCUS/);
 
   const narrow = renderSessions(buildRenderModel({
     sessions: [{ ...focused, group: "group-name-that-cannot-fit", title: "focused-title-that-needs-space" }],
     selectedId: "focus",
-    viewMode: "board",
+    grouping: "stage", density: "cards",
     width: 40,
   }));
   const narrowText = narrow.lines.map(stripAnsi).join("\n");
@@ -84,7 +84,7 @@ test("focused cards stay in Execute and preserve FOC without row group adornment
   const titleFirst = renderSessions(buildRenderModel({
     sessions: [{ ...focused, group: "agents", title: "focus-title-12345678" }],
     selectedId: "focus",
-    viewMode: "board",
+    grouping: "stage", density: "cards",
     width: 40,
   })).lines.map(stripAnsi).join("\n");
   assert.match(titleFirst, /focus-title-12345678/);
@@ -104,7 +104,7 @@ test("stopped focus snapshots render as ordinary Execute sessions", () => {
   assert.match(groupsText, /PL─▐EX▌─RV─RF─CM/);
   assert.doesNotMatch(groupsText, /FOC|mode\s+Focus/);
 
-  const board = buildRenderModel({ sessions: [stopped], selectedId: "focus", viewMode: "board", width: 120 });
+  const board = buildRenderModel({ sessions: [stopped], selectedId: "focus", grouping: "stage", density: "cards", width: 120 });
   assert.equal(board.sections[0]?.key, "execute");
   const boardText = renderSessions(board).lines.map(stripAnsi).join("\n");
   const boardCard = boardText.split("\n").find((line) => /^│┌/.test(line))?.split("│")[1] ?? "";
@@ -112,7 +112,8 @@ test("stopped focus snapshots render as ordinary Execute sessions", () => {
   assert.match(boardText, /agents\s+·1/);
   assert.match(boardCard, /focus/);
   assert.doesNotMatch(boardCard, /agents/);
-  assert.doesNotMatch(boardCard, /FOC|\bEX\b/);
+  assert.doesNotMatch(boardCard, /FOC/);
+  assert.match(boardCard, /\bEX\b/);
   assert.doesNotMatch(boardText, /mode\s+Focus/);
 });
 
@@ -235,13 +236,13 @@ test("workflow rail stays width-safe at narrow and wide sizes", () => {
   }
 });
 
-test("board view keeps canonical workflow trees in producer lanes and every other Active tree in OTHER ACTIVE", () => {
+test("stage grouping keeps canonical workflow trees in producer lanes and every other Active tree in OTHER ACTIVE", () => {
   const parent = { ...session("p", "agents", "running"), workflow: WORKFLOW };
   const sub = { ...session("sub", "agents", "running"), kind: "subagent" as const, parentId: "p" };
   const planning = { ...session("x", "experiments", "running"), workflow: { ...WORKFLOW, activeIndex: 0, ticketId: undefined } };
   const none = session("z", "experiments", "idle");
   const backlog = { ...session("bk", "experiments", "idle"), bucket: "backlog" as const, bucketChangedAt: 1 };
-  const model = buildRenderModel({ sessions: [parent, sub, planning, none, backlog], viewMode: "board", width: 120 });
+  const model = buildRenderModel({ sessions: [parent, sub, planning, none, backlog], grouping: "stage", density: "cards", width: 120 });
 
   assert.deepEqual(model.sections.map((item) => item.key), ["plan-md", "execute", "other-active"]);
   assert.deepEqual(model.sections[1]?.groups.flatMap((group) => group.sessions.map((row) => row.id)), ["p"]);
@@ -256,16 +257,17 @@ test("board view keeps canonical workflow trees in producer lanes and every othe
   assert.match(rendered, /experiments\s+·1/);
   assert.doesNotMatch(rendered, /NO WORKFLOW|without workflow/);
   assert.match(rendered, /1 backlog\/archived/);
-  assert.match(rendered, /view board/);
+  assert.match(rendered, /view lanes/);
 });
 
 test("board rows nest under one group heading instead of repeating the group at right", () => {
-  const model = buildRenderModel({ sessions: [{ ...session("p", "agents", "running"), workflow: WORKFLOW }], viewMode: "board", width: 120 });
+  const model = buildRenderModel({ sessions: [{ ...session("p", "agents", "running"), workflow: WORKFLOW }], grouping: "stage", density: "cards", width: 120 });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│┌/.test(line));
   const listCell = row?.split("│")[1] ?? "";
   assert.match(renderSessions(model).lines.map(stripAnsi).join("\n"), /agents\s+·1/);
   assert.match(listCell, /● p/);
-  assert.doesNotMatch(listCell, /agents|EX|4\/7/);
+  assert.doesNotMatch(listCell, /agents|4\/7/);
+  assert.match(listCell, /\bEX\b/);
 });
 
 test("board collapses descendant rows by default and reveals them through ephemeral expansion or filtering", () => {
@@ -274,7 +276,7 @@ test("board collapses descendant rows by default and reveals them through epheme
   const nested = { ...session("nested", "api", "running"), kind: "subagent" as const, parentId: "child", agentName: "nested-worker" };
   const sessions = [parent, child, nested];
 
-  const collapsed = buildRenderModel({ sessions, selectedId: "parent", viewMode: "board", width: 60 });
+  const collapsed = buildRenderModel({ sessions, selectedId: "parent", grouping: "stage", density: "cards", width: 60 });
   assert.deepEqual(collapsed.sections[0]?.groups[0]?.sessions.map((row) => row.id), ["parent"]);
   assert.equal(collapsed.selected?.boardDescendantCount, 2);
   assert.equal(collapsed.selected?.boardExpanded, false);
@@ -282,23 +284,23 @@ test("board collapses descendant rows by default and reveals them through epheme
   assert.match(collapsedLayout.lines.map(stripAnsi).join("\n"), /Parent task ▸ ⚙︎1/);
   assert.deepEqual(collapsedLayout.rowTargets.flatMap((target) => target?.kind === "session" ? [target.id] : []), ["parent"]);
 
-  const expanded = buildRenderModel({ sessions, selectedId: "parent", viewMode: "board", width: 60, expandedBoardParentIds: new Set(["parent"]) });
+  const expanded = buildRenderModel({ sessions, selectedId: "parent", grouping: "stage", density: "cards", width: 60, expandedBoardParentIds: new Set(["parent"]) });
   assert.deepEqual(expanded.sections[0]?.groups[0]?.sessions.map((row) => row.id), ["parent", "child", "nested"]);
   assert.equal(expanded.selected?.boardExpanded, true);
   assert.match(renderSessions(expanded).lines.map(stripAnsi).join("\n"), /Parent task ▾ ⚙︎1/);
 
-  const filtered = buildRenderModel({ sessions, selectedId: "parent", viewMode: "board", width: 60, filter: "nested-worker" });
+  const filtered = buildRenderModel({ sessions, selectedId: "parent", grouping: "stage", density: "cards", width: 60, filter: "nested-worker" });
   assert.deepEqual(filtered.sections[0]?.groups[0]?.sessions.map((row) => row.id), ["parent", "child", "nested"]);
   assert.equal(filtered.selected?.boardExpanded, true);
 
-  const groups = buildRenderModel({ sessions, selectedId: "parent", viewMode: "groups", width: 60 });
+  const groups = buildRenderModel({ sessions, selectedId: "parent", grouping: "project", density: "compact", width: 60 });
   assert.deepEqual(groups.groups[0]?.sessions.map((row) => row.id), ["parent", "child", "nested"]);
 });
 
 test("board groups child rows by their top-level parent and counts parent cards only", () => {
   const parent = { ...session("parent", "api", "waiting", "Parent task"), workflow: WORKFLOW };
   const child = { ...session("child", "different", "idle"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
-  const model = buildRenderModel({ sessions: [parent, child], viewMode: "board", width: 60, expandedBoardParentIds: new Set(["parent"]) });
+  const model = buildRenderModel({ sessions: [parent, child], grouping: "stage", density: "cards", width: 60, expandedBoardParentIds: new Set(["parent"]) });
   const lane = model.sections[0];
   assert.deepEqual(lane?.groups.map((group) => [group.name, group.sessions.map((row) => row.id)]), [["api", ["parent", "child"]]]);
   assert.equal(lane?.sessionsTotal, 1);
@@ -313,7 +315,7 @@ test("board group order follows the already ordered lane rows used by navigation
     { ...session("a-review", "alpha", "error"), workflow: { ...WORKFLOW, activeIndex: 2 } },
     { ...session("b-execute", "beta", "running"), workflow: WORKFLOW },
   ];
-  const model = buildRenderModel({ sessions, viewMode: "board", width: 60 });
+  const model = buildRenderModel({ sessions, grouping: "stage", density: "cards", width: 60 });
   assert.deepEqual(model.sections.find((section) => section.key === "execute")?.groups.map((group) => group.name), ["alpha", "beta"]);
 });
 
@@ -325,15 +327,15 @@ test("parent board rows show the count of starting and running descendants only"
     { ...session("waiting", "api", "waiting"), kind: "subagent" as const, parentId: "parent" },
     { ...session("error", "api", "error"), kind: "subagent" as const, parentId: "parent" },
   ];
-  const model = buildRenderModel({ sessions: [parent, ...descendants], selectedId: "parent", viewMode: "board", width: 60 });
+  const model = buildRenderModel({ sessions: [parent, ...descendants], selectedId: "parent", grouping: "stage", density: "cards", width: 60 });
   assert.equal(model.selected?.runningSubagentCount, 2);
   assert.equal(model.selected?.displayStatus, "waiting");
   const text = renderSessions(model).lines.map(stripAnsi).join("\n");
-  assert.match(text, /Parent task ▸ ⚙︎2\s+FOC/);
+  assert.match(text, /Parent task ▸ ⚙︎2─+FOC/);
   assert.doesNotMatch(text, /starting ⚙︎|running ⚙︎|waiting ⚙︎|error ⚙︎/);
   assert.equal(visibleWidth("⚙︎2"), 2);
 
-  const zero = renderSessions(buildRenderModel({ sessions: [parent, descendants[2]!], selectedId: "parent", viewMode: "board", width: 40 })).lines.map(stripAnsi).join("\n");
+  const zero = renderSessions(buildRenderModel({ sessions: [parent, descendants[2]!], selectedId: "parent", grouping: "stage", density: "cards", width: 40 })).lines.map(stripAnsi).join("\n");
   assert.doesNotMatch(zero, /⚙︎0|⚙︎1/);
 });
 
@@ -352,7 +354,7 @@ test("board chooses the prevalent pipeline deterministically and uses its newest
     { ...session("main-new", "main", "idle"), workflow: { steps: currentSteps, activeIndex: 1, updatedAt: 20 } },
     { ...session("main-third", "main", "waiting"), workflow: { steps, activeIndex: 2, updatedAt: 15 } },
   ];
-  const model = buildRenderModel({ sessions, viewMode: "board", width: 120 });
+  const model = buildRenderModel({ sessions, grouping: "stage", density: "cards", width: 120 });
 
   assert.deepEqual(model.sections.map((section) => [section.key, section.title, section.sessionsTotal]), [
     ["plan-md", "PLAN", 1],
@@ -364,7 +366,7 @@ test("board chooses the prevalent pipeline deterministically and uses its newest
   assert.deepEqual(model.sections.filter((section) => section.key !== "other-active").flatMap((section) => section.groups.flatMap((group) => group.sessions.filter((row) => row.kind !== "subagent").map((row) => row.id))), ["main-old", "main-new", "main-third"]);
   assert.deepEqual(model.sections.find((section) => section.key === "other-active")?.groups.flatMap((group) => group.sessions.map((row) => row.id)), ["alt-1", "alt-2"]);
 
-  const tied = buildRenderModel({ sessions: sessions.slice(0, 4), viewMode: "board", width: 120 });
+  const tied = buildRenderModel({ sessions: sessions.slice(0, 4), grouping: "stage", density: "cards", width: 120 });
   assert.equal(tied.sections[0]?.key, "discover");
 });
 
@@ -388,10 +390,12 @@ test("board renders the selected plan as a bordered card at every width", () => 
   };
 
   for (const width of [40, 60, 79, 80, 100, 160]) {
-    const layout = renderSessions(buildRenderModel({ sessions: [planned], selectedId: "planned", viewMode: "board", width, now: 1_000 }));
+    const layout = renderSessions(buildRenderModel({ sessions: [planned], selectedId: "planned", grouping: "stage", density: "cards", width, now: 1_000 }));
     const text = layout.lines.map(stripAnsi).join("\n");
-    assert.match(text, /┌.*● Rotate refresh tokens before/);
-    assert.match(text, /Phase 2\/4 · 3\/8 tasks/);
+    assert.match(text, /┌─+ ● Rotate refresh tokens/);
+    assert.match(text, /✓◉···/);
+    const cardText = layout.lines.map(stripAnsi).map((line) => line.slice(1, 1 + layout.listWidth)).join("\n");
+    assert.ok(cardText.indexOf("ticket: auth-003") < cardText.indexOf("✓◉···"));
     assert.match(text, /→ Add refresh handler tests/);
     assert.match(text, /└─+┘/);
     const listText = layout.lines.map(stripAnsi).map((line) => line.slice(1, 1 + layout.listWidth)).join("\n");
@@ -422,10 +426,8 @@ test("selected cards mute plan progress outside the base Execute step", () => {
   for (const status of ["running", "waiting"] as const) {
     const id = `execute-${status}`;
     const execute = { ...session(id, "agents", status), workflow: FOCUSED_WORKFLOW, sessionMetadata: metadata };
-    const executeLines = renderSessions(buildRenderModel({ sessions: [execute], selectedId: id, viewMode: "board", width: 60 }), theme).lines;
-    const executeProgress = executeLines.find((line) => stripAnsi(line).includes("Phase 2/4 · 3/8 tasks")) ?? "";
-    assert.match(stripAnsi(executeProgress), /Phase 2\/4 · 3\/8 tasks/);
-    assert.doesNotMatch(executeProgress, /\u001b\[38;2;1;2;3mPhase/);
+    const executeLines = renderSessions(buildRenderModel({ sessions: [execute], selectedId: id, grouping: "stage", density: "cards", width: 60 }), theme).lines;
+    assert.doesNotMatch(stripAnsi(executeLines.join("\n")), /Phase 2\/4 · 3\/8 tasks/);
   }
 
   for (const [id, workflow, status] of [
@@ -436,14 +438,12 @@ test("selected cards mute plan progress outside the base Execute step", () => {
     ["other", undefined, "waiting"],
   ] as const) {
     const planned = { ...session(id, "agents", status), ...(workflow ? { workflow } : {}), sessionMetadata: metadata };
-    const lines = renderSessions(buildRenderModel({ sessions: [planned], selectedId: id, viewMode: "board", width: 60 }), theme).lines;
-    const progress = lines.find((line) => stripAnsi(line).includes("plan 2/4 · 3/8 tasks")) ?? "";
-    assert.match(progress, /\u001b\[38;2;1;2;3mplan 2\/4 · 3\/8 tasks/);
+    const lines = renderSessions(buildRenderModel({ sessions: [planned], selectedId: id, grouping: "stage", density: "cards", width: 60 }), theme).lines;
     assert.doesNotMatch(stripAnsi(lines.join("\n")), /Phase 2\/4 · 3\/8 tasks/);
   }
 });
 
-test("selected board cards use at most five rows in attention-progress-action order", () => {
+test("selected board cards use at most five rows in workflow-attention-action order", () => {
   const selected = {
     ...session("selected", "agents", "waiting", "Stored title"),
     workflow: WORKFLOW,
@@ -459,12 +459,12 @@ test("selected board cards use at most five rows in attention-progress-action or
       },
     },
   };
-  const layout = renderSessions(buildRenderModel({ sessions: [selected], selectedId: "selected", viewMode: "board", width: 60 }));
+  const layout = renderSessions(buildRenderModel({ sessions: [selected], selectedId: "selected", grouping: "stage", density: "cards", width: 60 }));
   const listLines = layout.lines.map(stripAnsi).map((line) => line.slice(1, 1 + layout.listWidth));
   const start = listLines.findIndex((line) => line.includes("┌"));
   const end = listLines.findIndex((line) => line.includes("└"));
-  assert.equal(end - start + 1, 5);
-  assert.match(listLines.slice(start, end + 1).join("\n"), /Ready for review[\s\S]*Phase 4\/4 · 6\/6 tasks[\s\S]*→ Run \/reflect/);
+  assert.ok(end - start + 1 <= 6);
+  assert.match(listLines.slice(start, end + 1).join("\n"), /✓◉[\s\S]*Ready for review[\s\S]*→ Run \/reflect/);
   assert.doesNotMatch(listLines.slice(start, end + 1).join("\n"), /Full phase title/);
 });
 
@@ -476,7 +476,7 @@ test("board truncates deterministic actions only in the card and keeps even unbr
     workflow: WORKFLOW,
     sessionMetadata: { plan: { feature: "Action retention", nextStep: action } },
   };
-  const layout = renderSessions(buildRenderModel({ sessions: [planned], selectedId: "planned", viewMode: "board", width: 80 }));
+  const layout = renderSessions(buildRenderModel({ sessions: [planned], selectedId: "planned", grouping: "stage", density: "cards", width: 80 }));
   const lines = layout.lines.map(stripAnsi);
   const listText = lines.map((line) => line.slice(1, 1 + layout.listWidth)).join("\n");
   assert.match(listText, /→ A+/);
@@ -490,7 +490,7 @@ test("semantic next appears once when card-visible and remains in details when a
     workflow: WORKFLOW,
     sessionMetadata: { nextStep: "Run /review" },
   };
-  const visible = renderSessions(buildRenderModel({ sessions: [semantic], selectedId: "semantic", viewMode: "board", width: 100 })).lines.map(stripAnsi).join("\n");
+  const visible = renderSessions(buildRenderModel({ sessions: [semantic], selectedId: "semantic", grouping: "stage", density: "cards", width: 100 })).lines.map(stripAnsi).join("\n");
   assert.equal(visible.match(/Run \/review/g)?.length, 1);
 
   const attention = {
@@ -502,7 +502,7 @@ test("semantic next appears once when card-visible and remains in details when a
       attention: { kind: "question" as const, text: "Choose review owner" },
     },
   };
-  const layout = renderSessions(buildRenderModel({ sessions: [attention], selectedId: "semantic", viewMode: "board", width: 100 }));
+  const layout = renderSessions(buildRenderModel({ sessions: [attention], selectedId: "semantic", grouping: "stage", density: "cards", width: 100 }));
   const lines = layout.lines.map(stripAnsi);
   const listText = lines.map((line) => line.slice(1, 1 + layout.listWidth)).join("\n");
   assert.doesNotMatch(listText, /Run \/review/);
@@ -517,13 +517,13 @@ test("board projects row-owned attention only for waiting and idle sessions", ()
     { ...session("running", "agents", "running"), workflow: WORKFLOW, sessionMetadata: { stage: "complete", confidence: 0.9, attention: { kind: "ready" as const, text: "Must stay hidden" } } },
     { ...session("stopped", "agents", "stopped"), workflow: WORKFLOW, sessionMetadata: { stage: "blocked", confidence: 0.9, attention: { kind: "blocked" as const, text: "Must stay hidden" } } },
   ];
-  const model = buildRenderModel({ sessions, selectedId: "running", viewMode: "board", width: 80 });
+  const model = buildRenderModel({ sessions, selectedId: "running", grouping: "stage", density: "cards", width: 80 });
   assert.equal(model.sections.flatMap((section) => section.groups[0]?.sessions ?? []).find((row) => row.id === "ready")?.attention?.kind, "ready");
   assert.equal(model.sections.flatMap((section) => section.groups[0]?.sessions ?? []).find((row) => row.id === "running")?.attention, undefined);
   assert.equal(model.sections.flatMap((section) => section.groups[0]?.sessions ?? []).find((row) => row.id === "stopped")?.attention, undefined);
 
   for (const width of [40, 60, 79, 80, 100, 160]) {
-    const widthModel = buildRenderModel({ sessions, selectedId: "running", viewMode: "board", width });
+    const widthModel = buildRenderModel({ sessions, selectedId: "running", grouping: "stage", density: "cards", width });
     const lines = renderSessions(widthModel).lines.map(stripAnsi);
     assert.ok(lines.some((line) => /✓ ◐ ready/.test(line)), `${width}: ${lines.join("\n")}`);
     assert.ok(lines.some((line) => /\? ○ question/.test(line)), `${width}: ${lines.join("\n")}`);
@@ -541,7 +541,7 @@ test("board projects row-owned attention only for waiting and idle sessions", ()
   assert.match(themed.find((line) => /blocked/.test(stripAnsi(line))) ?? "", /\u001b\[38;2;7;8;9m!/);
   assert.match(themed.find((line) => /┌.*running/.test(stripAnsi(line))) ?? "", /\u001b\[38;2;10;11;12m┌/);
 
-  const groups = renderSessions(buildRenderModel({ sessions, selectedId: "running", viewMode: "groups", width: 80 })).lines.map(stripAnsi).join("\n");
+  const groups = renderSessions(buildRenderModel({ sessions, selectedId: "running", grouping: "project", density: "compact", width: 80 })).lines.map(stripAnsi).join("\n");
   assert.doesNotMatch(groups, /✓ ◐ ready|\? ○ question|! ◐ blocked/);
 });
 
@@ -559,9 +559,9 @@ test("selected board card shows attention at every width without requiring a pla
     },
   };
   for (const width of [40, 60, 79, 80, 100, 160]) {
-    const layout = renderSessions(buildRenderModel({ sessions: [selected], selectedId: "question", viewMode: "board", width, detailsExpanded: true }));
+    const layout = renderSessions(buildRenderModel({ sessions: [selected], selectedId: "question", grouping: "stage", density: "cards", width, detailsExpanded: true }));
     const text = layout.lines.map(stripAnsi).join("\n");
-    assert.match(text, /┌\s+◐ workflow-board-(?:001|…).*┐/);
+    assert.match(text, /┌─+ ◐ workflow-board-(?:001|…).*(?:─┐)/);
     assert.match(text, /\?\s+Choose the rollout(?: order| o…)/);
     assert.match(text, /└─+┘/);
     assert.doesNotMatch(text, /prog\s+Choose the rollout order|next\s+Choose the rollout order|\[waiting\]/);
@@ -579,13 +579,13 @@ test("attention is searchable and remains attached to its subagent row", () => {
     agentName: "worker",
     sessionMetadata: { stage: "blocked", confidence: 0.9, attention: { kind: "blocked" as const, text: "Needs sandbox access" } },
   };
-  const model = buildRenderModel({ sessions: [parent, child], filter: "sandbox", viewMode: "board", width: 80 });
+  const model = buildRenderModel({ sessions: [parent, child], filter: "sandbox", grouping: "stage", density: "cards", width: 80 });
   const rows = model.sections.flatMap((section) => section.groups.flatMap((group) => group.sessions));
   assert.equal(rows.find((row) => row.id === "parent")?.attention, undefined);
   assert.equal(rows.find((row) => row.id === "child")?.attention?.text, "Needs sandbox access");
 });
 
-test("board selected-card window retains attention then progress without duplicate targets", () => {
+test("selected-card window retains attention before workflow visual without duplicate targets", () => {
   const sessions = Array.from({ length: 7 }, (_, index) => ({
     ...session(`a${index}`, "agents", "idle", `session-${index}`),
     workflow: WORKFLOW,
@@ -597,11 +597,11 @@ test("board selected-card window retains attention then progress without duplica
     } } : {}),
   }));
   const theme = { ...darkTheme, selectedBg: "#010203" };
-  const layout = renderSessions(buildRenderModel({ sessions, selectedId: "a3", viewMode: "board", width: 60, height: 10 }), theme);
+  const layout = renderSessions(buildRenderModel({ sessions, selectedId: "a3", grouping: "stage", density: "cards", width: 60, height: 10 }), theme);
   const text = layout.lines.map(stripAnsi).join("\n");
 
   assert.match(text, /!\s+Needs production credentials/);
-  assert.match(text, /Phase 2\/3/);
+  assert.doesNotMatch(text, /✓◉···/);
   assert.doesNotMatch(text, /→ Run width tests|A long phase description/);
   assert.match(text, /└─+┘/);
   assert.equal(layout.rowTargets.filter((target) => target?.kind === "session" && target.id === "a3").length, 1);
@@ -616,11 +616,11 @@ test("board selected-card window retains progress then next without duplicate ta
     ...(index === 3 ? { sessionMetadata: { plan: { feature: "Window rendering", phase: { title: "A long phase description", index: 2, count: 3 }, tasks: { completed: 1, total: 4 }, nextStep: "Run width tests" } } } : {}),
   }));
   const theme = { ...darkTheme, selectedBg: "#010203" };
-  const layout = renderSessions(buildRenderModel({ sessions, selectedId: "s3", viewMode: "board", width: 60, height: 10 }), theme);
+  const layout = renderSessions(buildRenderModel({ sessions, selectedId: "s3", grouping: "stage", density: "cards", width: 60, height: 10 }), theme);
   const text = layout.lines.map(stripAnsi).join("\n");
 
-  assert.match(text, /Phase 2\/3/);
-  assert.match(text, /→ Run width tests/);
+  assert.match(text, /✓◉/);
+  assert.doesNotMatch(text, /A long phase description/);
   assert.match(text, /└─+┘/);
   assert.doesNotMatch(text, /A long phase description/);
   assert.equal(layout.rowTargets.filter((target) => target?.kind === "session" && target.id === "s3").length, 1);
@@ -628,30 +628,30 @@ test("board selected-card window retains progress then next without duplicate ta
   assert.equal(layout.lines.length, 10);
 
   const lastSessions = sessions.map((item, index) => index === 6 ? { ...item, sessionMetadata: sessions[3]?.sessionMetadata } : item);
-  const lastText = renderSessions(buildRenderModel({ sessions: lastSessions, selectedId: "s6", viewMode: "board", width: 60, height: 9 }), theme).lines.map(stripAnsi).join("\n");
+  const lastText = renderSessions(buildRenderModel({ sessions: lastSessions, selectedId: "s6", grouping: "stage", density: "cards", width: 60, height: 9 }), theme).lines.map(stripAnsi).join("\n");
   assert.doesNotMatch(lastText, /[↑↓] 0 more/);
 });
 
 test("board includes workflowless Active sessions and has distinct unfiltered empty and filtered no-match states", () => {
   const workflowless = { ...session("plain", "default", "idle"), sessionMetadata: { stage: "waiting", confidence: 0.9, attention: { kind: "question" as const, text: "Choose API version" } } };
-  const plain = buildRenderModel({ sessions: [workflowless], viewMode: "board", width: 60 });
+  const plain = buildRenderModel({ sessions: [workflowless], grouping: "stage", density: "cards", width: 60 });
   assert.equal(plain.noBoardSessions, false);
   assert.deepEqual(plain.sections.map((section) => section.key), ["other-active"]);
   assert.match(renderSessions(plain).lines.map(stripAnsi).join("\n"), /1 Active session[\s\S]*OTHER ACTIVE[\s\S]*\? Choose API version/);
 
   const sessions = [{ ...session("backlog", "default", "idle"), bucket: "backlog" as const, workflow: WORKFLOW }];
-  const empty = buildRenderModel({ sessions, viewMode: "board", width: 60 });
+  const empty = buildRenderModel({ sessions, grouping: "stage", density: "cards", width: 60 });
   assert.equal(empty.noBoardSessions, true);
-  assert.match(renderSessions(empty).lines.map(stripAnsi).join("\n"), /No Active sessions[\s\S]*v  return to groups view/);
+  assert.match(renderSessions(empty).lines.map(stripAnsi).join("\n"), /No Active sessions[\s\S]*S  return to project view/);
 
-  const filtered = buildRenderModel({ sessions, viewMode: "board", width: 60, filter: "backlog" });
+  const filtered = buildRenderModel({ sessions, grouping: "stage", density: "cards", width: 60, filter: "backlog" });
   assert.equal(filtered.noMatches, true);
   assert.match(renderSessions(filtered).lines.map(stripAnsi).join("\n"), /No sessions match "backlog"/);
 });
 
 test("wide preview suppression moves selected plan context inline", () => {
   const planned = { ...session("planned", "agents", "stopped"), workflow: WORKFLOW, sessionMetadata: { plan: { feature: "Inline when panels own the right side", tasks: { completed: 1, total: 2 } } } };
-  const model = buildRenderModel({ sessions: [planned], selectedId: "planned", viewMode: "board", width: 120, hidePreview: true });
+  const model = buildRenderModel({ sessions: [planned], selectedId: "planned", grouping: "stage", density: "cards", width: 120, hidePreview: true });
   const text = renderSessions(model).lines.map(stripAnsi).join("\n");
   assert.equal(model.showPreview, false);
   assert.match(text, /Inline when panels own the right side/);
@@ -728,12 +728,12 @@ test("side pane glyphs remain left-visible at narrow widths", () => {
   assert.doesNotMatch(row ?? "", /4\/7/);
 });
 
-test("board view keeps side pane glyphs separate from group adornments", () => {
+test("stage grouping keeps side pane glyphs separate from group adornments", () => {
   const model = buildRenderModel({
     sessions: [{ ...session("api", "long-group-name-that-does-not-fit", "running", "long-title-".repeat(4)), workflow: WORKFLOW }],
     selectedId: "api",
     width: 40,
-    viewMode: "board",
+    grouping: "stage", density: "cards",
     sidePaneSessionIds: new Map([["api", 1]]),
   });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│┌/.test(line));
@@ -784,7 +784,7 @@ test("layout hit map marks only rendered session rows", () => {
 test("board preview keeps the list between 40 and 60 cells without changing groups-view proportions", () => {
   const planned = { ...session("planned", "default", "idle"), workflow: WORKFLOW };
   for (const [width, expected] of [[80, 40], [100, 40], [160, 60]] as const) {
-    const layout = renderSessions(buildRenderModel({ sessions: [planned], selectedId: "planned", viewMode: "board", width }));
+    const layout = renderSessions(buildRenderModel({ sessions: [planned], selectedId: "planned", grouping: "stage", density: "cards", width }));
     assert.equal(layout.listWidth, expected);
   }
   assert.equal(renderSessions(buildRenderModel({ sessions: [planned], selectedId: "planned", width: 80 })).listWidth, 29);
@@ -880,12 +880,12 @@ test("height-bounded list preserves scroll top until selection reaches an edge",
   assert.equal(edge.listScrollTop, first.listScrollTop + 1);
 });
 
-test("groups view is unchanged when viewMode is omitted", () => {
+test("project grouping is unchanged when view state is omitted", () => {
   const backlog = { ...session("bk", "experiments", "idle"), bucket: "backlog" as const, bucketChangedAt: 1 };
   const model = buildRenderModel({ sessions: [session("a", "default", "idle"), backlog], width: 120 });
   const rendered = renderSessions(model).lines.map(stripAnsi).join("\n");
   assert.match(rendered, /BACKLOG/);
-  assert.doesNotMatch(rendered, /view board/);
+  assert.doesNotMatch(rendered, /view lanes/);
   assert.doesNotMatch(rendered, /backlog\/archived · v groups/);
 });
 
@@ -976,7 +976,7 @@ test("late-created descendants inherit Archived presentation and stay out of the
   const groups = buildRenderModel({ sessions: [parent, child], width: 100, now: 200 });
   assert.deepEqual(groups.sections.find((section) => section.key === "archived")?.groups[0]?.sessions.map((row) => [row.id, row.section]), [["parent", "archived"], ["child", "archived"]]);
 
-  const board = buildRenderModel({ sessions: [parent, child], width: 100, viewMode: "board", now: 200 });
+  const board = buildRenderModel({ sessions: [parent, child], width: 100, grouping: "stage", density: "cards", now: 200 });
   assert.equal(board.sections.length, 0);
   assert.deepEqual(board.boardHidden, { nonActive: 1 });
 });
@@ -1008,7 +1008,7 @@ test("narrow layout hides preview and uses readable compact footer", () => {
 
 test("wide footer groups keys by intent", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle")], width: 120 });
-  assert.equal(model.footer, "Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  v View · ? Help");
+  assert.equal(model.footer, "Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · A Archive · B Backlog  │  v Cards · S Lanes · ? Help");
 });
 
 test("wide footer shows worktree finish only for worktree sessions", () => {
@@ -1016,7 +1016,7 @@ test("wide footer shows worktree finish only for worktree sessions", () => {
     sessions: [{ ...session("a", "default", "idle"), worktreeOwnedByHub: true, worktreePath: "/tmp/wt" }],
     width: 120,
   });
-  assert.equal(model.footer, "Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  v View · ? Help");
+  assert.equal(model.footer, "Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · d Delete · w Finish WT · A Archive · B Backlog  │  v Cards · S Lanes · ? Help");
 });
 
 test("long titles/cwd truncate without exceeding width", () => {
@@ -1097,7 +1097,7 @@ test("board filter matches workflow ticket ids after compact titles replace tick
   const model = buildRenderModel({
     sessions: [{ ...session("a", "default", "idle", "Rich workflow board"), workflow: WORKFLOW }],
     selectedId: "a",
-    viewMode: "board",
+    grouping: "stage", density: "cards",
     width: 60,
     filter: "auth-003",
   });

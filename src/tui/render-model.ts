@@ -94,6 +94,7 @@ export interface RenderPlanSummary {
   feature?: string;
   phase?: { title: string; index: number; count: number };
   tasks?: { completed: number; total: number };
+  phases?: { completed: number; total: number }[];
   nextStep?: string;
   nextSource?: "plan" | "metadata";
 }
@@ -123,7 +124,8 @@ export interface RenderModel {
   filter?: string;
   preview: string;
   detailsExpanded: boolean;
-  viewMode: "groups" | "board";
+  grouping: "project" | "stage";
+  density: "compact" | "cards";
   panelStrip?: PanelStripItem[];
   sidePaneFocusedSlot?: number;
 }
@@ -139,7 +141,8 @@ export interface BuildRenderModelInput {
   preview?: string;
   detailsExpanded?: boolean;
   selectedSkillCount?: number;
-  viewMode?: "groups" | "board";
+  grouping?: "project" | "stage";
+  density?: "compact" | "cards";
   now?: number;
   sidePaneSessionIds?: ReadonlyMap<string, number>;
   sidePaneFocusedSlot?: number;
@@ -150,7 +153,9 @@ export interface BuildRenderModelInput {
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
-  const board = input.viewMode === "board";
+  const grouping = input.grouping ?? "project";
+  const density = input.density ?? "compact";
+  const board = grouping === "stage";
   const allRows = orderedSessionRows(input.sessions, input.filter);
   const activeRows = allRows.filter((session) => effectiveSessionLifecycle(session, allRows).section === "active");
   const completeBoardProjection = projectBoardRows(activeRows, allRows);
@@ -173,8 +178,8 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     ? ([1, 2, 3, 4] as const).map((slot) => ({ slot, ...(occupiedSlots.has(slot) ? { title: occupiedSlots.get(slot) } : {}) }))
     : undefined;
   const boardExpanded = (id: string) => input.filter !== undefined || input.expandedBoardParentIds?.has(id) === true;
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, subagentStats.get(session.id), boardExpanded(session.id)));
-  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, subagentStats.get(session.id), boardExpanded(session.id)));
+  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
+  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
   const groups = groupsForSessions(mapped);
   const sections = board
     ? lanesForBoard(mapped, boardProjection)
@@ -217,11 +222,12 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
       ? "1-4 Set · x# Close · F# Focus · ? Help"
       : input.width < 120
         ? "Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · / Filter · i Info · ? Help"
-        : `Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  v View · ? Help`,
+        : `Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  v Cards · S Lanes · ? Help`,
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,
-    viewMode: board ? "board" : "groups",
+    grouping,
+    density,
     ...(panelStrip ? { panelStrip } : {}),
     ...(input.sidePaneFocusedSlot !== undefined ? { sidePaneFocusedSlot: input.sidePaneFocusedSlot } : {}),
   };
@@ -490,7 +496,7 @@ function descendantSubagentStats(sessions: RuntimeSession[]): Map<string, Descen
   return stats;
 }
 
-function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined, projectPlan: boolean, subagentStats: DescendantSubagentStats | undefined, boardExpanded: boolean): RenderSession {
+function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined, board: boolean, projectPlan: boolean, subagentStats: DescendantSubagentStats | undefined, boardExpanded: boolean): RenderSession {
   const displayStatus = displayStatusFor(session.status);
   const worktree = primaryWorktree(session);
   const worktrees = sessionWorktrees(session);
@@ -525,8 +531,8 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     resultSummary: session.resultSummary,
     sessionMetadata: session.sessionMetadata,
     metadataUpdatedAge: metadataUpdatedAge(session.sessionMetadata, now),
-    ...(projectPlan && session.kind !== "subagent" ? { boardTitle: session.sessionMetadata?.plan?.feature ?? session.title } : {}),
-    ...(projectPlan && session.kind !== "subagent" && subagentStats?.total ? {
+    ...(board && session.kind !== "subagent" ? { boardTitle: session.sessionMetadata?.plan?.feature ?? session.title } : {}),
+    ...(board && session.kind !== "subagent" && subagentStats?.total ? {
       boardDescendantCount: subagentStats.total,
       boardExpanded,
       ...(subagentStats.running ? { runningSubagentCount: subagentStats.running } : {}),
@@ -572,10 +578,11 @@ function selectedPlanSummary(metadata: SessionMetadata | undefined): RenderPlanS
     feature: metadata.plan?.feature,
     phase: metadata.plan?.phase,
     tasks: metadata.plan?.tasks,
+    phases: metadata.plan?.phases,
     nextStep,
     ...(nextStep ? { nextSource: metadata.plan?.nextStep ? "plan" : "metadata" } : {}),
   };
-  return summary.feature || summary.phase || summary.tasks || summary.nextStep ? summary : undefined;
+  return summary.feature || summary.phase || summary.tasks || summary.phases || summary.nextStep ? summary : undefined;
 }
 
 function ageLabel(ageMs: number): string {

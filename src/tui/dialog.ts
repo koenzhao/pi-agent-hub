@@ -25,7 +25,14 @@ export type SidePaneActionResult =
 export type CloseSidePaneResult = { kind: "closed" } | { kind: "unavailable" };
 export type FocusSidePaneResult = { kind: "focused" } | { kind: "unavailable" };
 
+export interface SessionsViewState {
+  grouping: "project" | "stage";
+  density: "compact" | "cards";
+}
+
 export interface SessionsViewActions {
+  initialViewState?: SessionsViewState;
+  saveViewState?: (state: SessionsViewState) => void;
   attachOutsideTmux?: (tmuxSession: string) => void | Promise<void>;
   switchInsideTmux?: (tmuxSession: string) => void | Promise<void>;
   assignSidePaneSlot?: (sessionId: string, slot: 1 | 2 | 3 | 4) => SidePaneActionResult | Promise<SidePaneActionResult>;
