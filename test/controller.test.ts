@@ -424,6 +424,33 @@ test("archive pruning removes expired archived rows only when tmux is missing", 
   });
 });
 
+test("refresh reuses the main presence snapshot for expired archive pruning", async () => {
+  await withTempSessionsDir(async () => {
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    const registry = {
+      version: 1 as const,
+      sessions: [
+        session("idle", { id: "active", title: "active" }),
+        session("idle", { id: "archived-present", title: "present", bucket: "archived", bucketChangedAt: 1 }),
+        session("idle", { id: "child-present", title: "present child", kind: "subagent", parentId: "archived-present", bucket: "archived", bucketChangedAt: 1 }),
+        session("idle", { id: "archived-missing", title: "missing", bucket: "archived", bucketChangedAt: 1 }),
+        session("idle", { id: "child-missing", title: "missing child", kind: "subagent", parentId: "archived-missing", bucket: "archived", bucketChangedAt: 1 }),
+      ],
+    };
+    await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    let calls = 0;
+    const controller = new SessionsController(registry, async () => "", async (tmuxSession) => {
+      calls += 1;
+      return tmuxSession.includes("present") ? "present" : "missing";
+    });
+
+    await controller.refresh(1 + sevenDays);
+
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => item.id), ["active", "archived-present", "child-present"]);
+    assert.equal(calls, 5);
+  });
+});
+
 test("moving parent group moves direct child rows too", async () => {
   await withTempSessionsDir(async () => {
     const controller = new SessionsController({

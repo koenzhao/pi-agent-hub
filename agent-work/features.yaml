@@ -552,8 +552,10 @@
   - agent-work/plans/cleanup-000.md
   discovered_from: 2026-07-25 behavior-preserving cleanup audit
   id: cleanup-004
-  status: pending
+  status: done
   created_at: '2026-07-26'
+  plan_file: agent-work/history/20260726_cleanup-004_presence_snapshot.md
+  completed_at: '2026-07-26'
 - epic: cleanup
   title: Deduplicate tmux chrome commands
   description: Extract the shared dashboard and managed-session tmux status/window

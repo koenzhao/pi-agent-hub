@@ -9,7 +9,7 @@ import { orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../cor
 import { readPiSessionName } from "../core/pi-session-name.js";
 import { readSessionMetadata } from "../core/session-metadata.js";
 import { applyComputedStatus, computeStatus, isFreshHeartbeat, markAcknowledged, readHeartbeat } from "../core/status.js";
-import { capturePane, sessionPresence } from "../core/tmux.js";
+import { capturePane, sessionPresence, type TmuxPresence } from "../core/tmux.js";
 import type { SessionsRegistry, ManagedSession, RuntimeSession, SessionMetadata, SessionBucket, WorkflowModeDisplay } from "../core/types.js";
 
 export interface SessionsSnapshot {
@@ -47,9 +47,11 @@ export class SessionsController {
     this.registry = await loadRegistry();
     this.selectedId = keepSelection(this.registry.sessions, this.selectedId);
     const sessions: ManagedSession[] = [];
+    const presenceById = new Map<string, TmuxPresence>();
     const prunedIds = new Set<string>();
     for (const session of this.registry.sessions) {
       const presence = await this.presence(session.tmuxSession);
+      presenceById.set(session.id, presence);
       const exists = presence === "present";
       if (isSubagentSession(session) && presence === "missing") {
         prunedIds.add(session.id);
@@ -69,7 +71,7 @@ export class SessionsController {
       sessions.push(updated);
     }
     const updatedById = new Map(sessions.map((session) => [session.id, session]));
-    const expiredArchivedIds = await expiredArchivedCascadeIds(this.registry.sessions, now);
+    const expiredArchivedIds = expiredArchivedCascadeIds(this.registry.sessions, now, presenceById);
     for (const id of expiredArchivedIds) {
       prunedIds.add(id);
       this.sessionMetadata.delete(id);
@@ -303,15 +305,18 @@ function visibleSessions(sessions: RuntimeSession[], filter: string | undefined)
   return orderedSessionRows(sessions, filter);
 }
 
-async function expiredArchivedCascadeIds(sessions: ManagedSession[], now: number): Promise<Set<string>> {
+function expiredArchivedCascadeIds(
+  sessions: ManagedSession[],
+  now: number,
+  presenceById: ReadonlyMap<string, TmuxPresence>,
+): Set<string> {
   const pruneIds = new Set<string>();
   for (const session of sessions) {
     if (isSubagentSession(session) || session.bucket !== "archived" || typeof session.bucketChangedAt !== "number") continue;
     if (now - session.bucketChangedAt < ARCHIVE_PRUNE_AFTER_MS) continue;
     const ids = sessionCascadeIds(sessions, session.id);
     const cascade = sessions.filter((item) => ids.has(item.id));
-    const presences = await Promise.all(cascade.map((item) => sessionPresence(item.tmuxSession)));
-    if (presences.every((presence) => presence === "missing")) for (const id of ids) pruneIds.add(id);
+    if (cascade.every((item) => presenceById.get(item.id) === "missing")) for (const id of ids) pruneIds.add(id);
   }
   return pruneIds;
 }
