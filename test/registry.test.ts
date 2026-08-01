@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { writeJsonAtomic } from "../src/core/atomic-json.js";
-import { createSessionRecord, loadRegistry, normalizeGroup, removeSession, renameGroup, saveRegistry } from "../src/core/registry.js";
+import { createSessionRecord, loadRegistry, normalizeGroup, removeSession, renameGroup, updateRegistry } from "../src/core/registry.js";
 
 async function tempPath(name: string) {
   const dir = await mkdtemp(join(tmpdir(), "pi-agent-hub-"));
@@ -35,11 +35,25 @@ test("concurrent atomic writes keep valid JSON", async () => {
   assert.equal(typeof state.value, "number");
 });
 
-test("registry save/load round trip", async () => {
+test("registry update/load round trip", async () => {
   const path = await tempPath("registry.json");
   const session = createSessionRecord({ cwd: "/tmp/project", title: "api", group: "work", now: 10 });
-  await saveRegistry({ version: 1, sessions: [session] }, path);
+  await updateRegistry(() => ({ version: 1, sessions: [session] }), path);
   assert.deepEqual(await loadRegistry(path), { version: 1, sessions: [session] });
+});
+
+test("concurrent registry updates preserve both transformations", async () => {
+  const path = await tempPath("registry.json");
+  const a = createSessionRecord({ cwd: "/tmp/a", now: 1 });
+  const b = createSessionRecord({ cwd: "/tmp/b", now: 1 });
+
+  const [first, second] = await Promise.all([
+    updateRegistry((latest) => ({ ...latest, sessions: [...latest.sessions, a] }), path),
+    updateRegistry((latest) => ({ ...latest, sessions: [...latest.sessions, b] }), path),
+  ]);
+
+  assert.deepEqual(new Set((await loadRegistry(path)).sessions.map((item) => item.id)), new Set([a.id, b.id]));
+  assert.deepEqual(new Set([first.sessions.length, second.sessions.length]), new Set([1, 2]));
 });
 
 test("group rename only affects matching sessions", () => {

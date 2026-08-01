@@ -7,11 +7,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { discardWorktreeSession, finishWorktreeSession } from "../src/app/worktree-session.js";
 import { createOwnedWorktree, createOwnedWorktrees, finishOwnedWorktree, branchSlug } from "../src/core/worktree.js";
-import { createSessionRecord, loadRegistry, saveRegistry } from "../src/core/registry.js";
+import { createSessionRecord, loadRegistry, updateRegistry } from "../src/core/registry.js";
 import { heartbeatPath, registryPath, worktreesDir } from "../src/core/paths.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 const execFileAsync = promisify(execFile);
+
+function seedRegistry(registry: import("../src/core/types.js").SessionsRegistry, path: string): Promise<import("../src/core/types.js").SessionsRegistry> {
+  return updateRegistry(() => registry, path);
+}
 
 async function git(cwd: string, args: string[]): Promise<string> {
   const result = await execFileAsync("git", args, { cwd, encoding: "utf8" });
@@ -133,7 +137,7 @@ test("discardWorktreeSession removes a clean worktree branch without merging", a
   await git(created.worktreePath, ["add", "discard.txt"]);
   await git(created.worktreePath, ["commit", "-m", "discard"]);
   const session = { ...worktreeSession(created), id: "discard", tmuxSession: "pi-agent-hub-discard" };
-  await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
 
   const discarded = await discardWorktreeSession(session.id, { env });
 
@@ -156,7 +160,7 @@ test("finishWorktreeSession merges and removes all multi-repo worktrees", async 
   await git(created.worktrees[1]!.path, ["add", "web.txt"]);
   await git(created.worktrees[1]!.path, ["commit", "-m", "web"]);
   const session = { ...multiWorktreeSession(created), id: "finish-multi", tmuxSession: "pi-agent-hub-finish-multi" };
-  await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
 
   const finished = await finishWorktreeSession(session.id, { env });
 
@@ -180,7 +184,7 @@ test("discardWorktreeSession removes all multi-repo worktrees without merging", 
   await git(created.worktrees[1]!.path, ["add", "web.txt"]);
   await git(created.worktrees[1]!.path, ["commit", "-m", "web"]);
   const session = { ...multiWorktreeSession(created), id: "discard-multi", tmuxSession: "pi-agent-hub-discard-multi" };
-  await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
 
   const discarded = await discardWorktreeSession(session.id, { env });
 
@@ -190,6 +194,41 @@ test("discardWorktreeSession removes all multi-repo worktrees without merging", 
   await assert.rejects(lstat(created.worktrees[0]!.path), /ENOENT/);
   await assert.rejects(lstat(created.worktrees[1]!.path), /ENOENT/);
   assert.deepEqual(await loadRegistry(registryPath(env)), { version: 1, sessions: [] });
+});
+
+test("partial worktree recovery updates the latest surviving registry row", async () => {
+  const { root, env } = await tempEnv();
+  const api = await createRepo(root, "partial-api");
+  const web = await createRepo(root, "partial-web");
+  const created = await createOwnedWorktrees({ cwds: [api, web], sessionId: "partial", branch: "feature/partial", env });
+  const session = { ...multiWorktreeSession(created), id: "partial", tmuxSession: "pi-agent-hub-partial", title: "captured" };
+  const unrelated = createSessionRecord({ cwd: "/tmp/unrelated", title: "unrelated", now: 1 });
+  const path = registryPath(env);
+  await seedRegistry({ version: 1, sessions: [session, unrelated] }, path);
+
+  const bin = join(root, "bin");
+  const updater = join(root, "update-registry.mjs");
+  const realGit = (await execFileAsync("which", ["git"], { encoding: "utf8" })).stdout.trim();
+  await mkdir(bin);
+  await writeFile(updater, `import { updateRegistry } from ${JSON.stringify(new URL("../src/core/registry.js", import.meta.url).href)};\nconst path = process.argv[2];\nawait updateRegistry((latest) => ({ ...latest, sessions: latest.sessions.map((item) => item.id === "partial" ? { ...item, title: "latest", status: "running" } : item) }), path);\n`, "utf8");
+  await writeFile(join(bin, "git"), `#!/bin/sh\nif [ "$1" = "worktree" ] && [ "$2" = "remove" ] && [ "$3" = ${JSON.stringify(created.worktrees[0]!.path)} ]; then\n  node ${JSON.stringify(updater)} ${JSON.stringify(path)}\n  exit 1\nfi\nexec ${JSON.stringify(realGit)} "$@"\n`, "utf8");
+  await chmod(join(bin, "git"), 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    await assert.rejects(discardWorktreeSession(session.id, { env }), /Remove failed/);
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+
+  const latest = await loadRegistry(path);
+  const recovered = latest.sessions.find((item) => item.id === session.id)!;
+  assert.equal(recovered.title, "latest");
+  assert.equal(recovered.status, "running");
+  assert.equal(recovered.worktrees?.length, 1);
+  assert.equal(recovered.worktrees?.[0]?.role, "primary");
+  assert.deepEqual(latest.sessions.map((item) => item.id), [session.id, unrelated.id]);
 });
 
 test("finishWorktreeSession does not kill tmux when base repo is dirty", async () => {
@@ -205,7 +244,7 @@ test("finishWorktreeSession does not kill tmux when base repo is dirty", async (
     const created = await createOwnedWorktree({ cwd: repo, sessionId: "dirty-base-session", branch: "feature/base-dirty", env });
     await writeFile(join(repo, "base-dirty.txt"), "dirty\n", "utf8");
     const session = { ...worktreeSession(created), id: "dirty-base", tmuxSession: "pi-agent-hub-dirty-base" };
-    await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+    await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
 
     await assert.rejects(finishWorktreeSession(session.id, { env }), /Base repo has uncommitted changes/);
 
@@ -232,7 +271,7 @@ test("finishWorktreeSession removes parent, subagent rows, and heartbeats after 
     parentId: parent.id,
     agentName: "smoke",
   };
-  await saveRegistry({ version: 1, sessions: [parent, child] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [parent, child] }, registryPath(env));
   await mkdir(join(env.PI_AGENT_HUB_DIR, "heartbeats"), { recursive: true });
   await writeFile(heartbeatPath(parent.id, env), JSON.stringify({ ok: true }), "utf8");
   await writeFile(heartbeatPath(child.id, env), JSON.stringify({ ok: true }), "utf8");

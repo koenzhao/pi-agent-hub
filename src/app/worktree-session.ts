@@ -1,6 +1,6 @@
 import { assertWorktreesClean, assertWorktreesReady, finishOwnedWorktrees, isWorktreeSession, PartialWorktreeFailure, remainingWorktreeSession, removeOwnedWorktrees, sessionWorktrees, type FinishedWorktree } from "../core/worktree.js";
 import { registryPath } from "../core/paths.js";
-import { loadRegistry, saveRegistry, upsertSession } from "../core/registry.js";
+import { loadRegistry, updateRegistry, upsertSession } from "../core/registry.js";
 import { sessionCascadeIds, isSubagentSession } from "../core/session-tree.js";
 import { killSession, sessionExists } from "../core/tmux.js";
 import { removeSessions, resolveSession } from "./delete-session.js";
@@ -37,12 +37,15 @@ export async function finishWorktreeSession(id: string, options: FinishWorktreeS
   for (const item of sessions) if (await sessionExists(item.tmuxSession)) await killSession(item.tmuxSession);
   try {
     const finished = await finishOwnedWorktrees({ session, env });
-    await removeSessions(registry, sessions, path, env);
+    await removeSessions(sessions, path, env);
     const primary = sessionWorktrees(session)[0]!;
     return { id: session.id, title: session.title, branch: primary.branch, baseBranch: primary.baseBranch, worktreePath: primary.path, branchDeleted: true, count: finished.finished.length };
   } catch (error) {
     if (error instanceof PartialWorktreeFailure) {
-      await saveRegistry(upsertSession(registry, remainingWorktreeSession(session, error.finished)), path);
+      await updateRegistry((latest) => {
+        const current = latest.sessions.find((item) => item.id === session.id);
+        return current ? upsertSession(latest, remainingWorktreeSession(current, error.finished)) : latest;
+      }, path);
     }
     throw error;
   }
@@ -63,12 +66,15 @@ export async function discardWorktreeSession(id: string, options: FinishWorktree
   const worktrees = sessionWorktrees(session);
   try {
     const removed = await removeOwnedWorktrees(session, env);
-    await removeSessions(registry, sessions, path, env);
+    await removeSessions(sessions, path, env);
     const primary = worktrees[0]!;
     return { id: session.id, title: session.title, branch: primary.branch, worktreePath: primary.path, count: removed.length };
   } catch (error) {
     if (error instanceof PartialWorktreeFailure) {
-      await saveRegistry(upsertSession(registry, remainingWorktreeSession(session, error.finished)), path);
+      await updateRegistry((latest) => {
+        const current = latest.sessions.find((item) => item.id === session.id);
+        return current ? upsertSession(latest, remainingWorktreeSession(current, error.finished)) : latest;
+      }, path);
     }
     throw error;
   }

@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, writeFile } from "
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { loadRegistry, saveRegistry } from "../src/core/registry.js";
+import { loadRegistry, updateRegistry } from "../src/core/registry.js";
 import { heartbeatPath } from "../src/core/paths.js";
 import {
   addManagedSession,
@@ -141,6 +141,10 @@ test("addManagedSession creates multi-repo worktree sessions in a source-pi work
   }
 });
 
+function seedRegistry(registry: import("../src/core/types.js").SessionsRegistry, path?: string): Promise<import("../src/core/types.js").SessionsRegistry> {
+  return updateRegistry(() => registry, path);
+}
+
 function session(overrides: Partial<ManagedSession> = {}): ManagedSession {
   return {
     id: "source-session",
@@ -154,6 +158,98 @@ function session(overrides: Partial<ManagedSession> = {}): ManagedSession {
     ...overrides,
   };
 }
+
+test("startManagedSession merges prepared workspace outputs into the latest row", async () => {
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-start-fresh-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  await mkdir(bin);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nif [ "$1" = "has-session" ]; then exit 1; fi\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  process.env.PI_AGENT_HUB_DIR = root;
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    const original = session({ cwd: "/tmp/input", additionalCwds: ["/tmp/extra"] });
+    await seedRegistry({ version: 1, sessions: [original] });
+
+    await startManagedSession("source-session", async (prepared) => {
+      await updateRegistry((latest) => ({
+        ...latest,
+        sessions: latest.sessions.map((item) => item.id === prepared.id ? { ...item, title: "latest title", group: "latest group", status: "running" as const } : item),
+      }));
+      return { ...prepared, cwd: "/tmp/canonical", additionalCwds: ["/tmp/canonical-extra"], workspaceCwd: join(root, "workspace") };
+    });
+
+    const committed = (await loadRegistry()).sessions[0]!;
+    assert.equal(committed.title, "latest title");
+    assert.equal(committed.group, "latest group");
+    assert.equal(committed.status, "running");
+    assert.equal(committed.cwd, "/tmp/canonical");
+    assert.deepEqual(committed.additionalCwds, ["/tmp/canonical-extra"]);
+    assert.match(await readFile(log, "utf8"), /new-session/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});
+
+test("startManagedSession aborts when workspace identity changes during preparation", async () => {
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-start-conflict-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  await mkdir(bin);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nif [ "$1" = "has-session" ]; then exit 1; fi\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  process.env.PI_AGENT_HUB_DIR = root;
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    const original = session({ cwd: "/tmp/input", additionalCwds: ["/tmp/extra"] });
+    await seedRegistry({ version: 1, sessions: [original] });
+
+    await assert.rejects(
+      () => startManagedSession("source-session", async (prepared) => {
+        await updateRegistry((latest) => ({
+          ...latest,
+          sessions: latest.sessions.map((item) => item.id === prepared.id ? { ...item, cwd: "/tmp/reconfigured" } : item),
+        }));
+        return { ...prepared, workspaceCwd: join(root, "workspace") };
+      }),
+      /Session changed while starting; retry/,
+    );
+
+    assert.equal((await loadRegistry()).sessions[0]?.cwd, "/tmp/reconfigured");
+
+    for (const mutate of [
+      (latest: import("../src/core/types.js").SessionsRegistry) => ({ ...latest, sessions: [] }),
+      (latest: import("../src/core/types.js").SessionsRegistry) => ({
+        ...latest,
+        sessions: latest.sessions.map((item) => ({ ...item, kind: "subagent" as const, parentId: "parent" })),
+      }),
+    ]) {
+      await seedRegistry({ version: 1, sessions: [original] });
+      await assert.rejects(
+        () => startManagedSession("source-session", async (prepared) => {
+          await updateRegistry(mutate);
+          return prepared;
+        }),
+        /Session changed while starting; retry/,
+      );
+    }
+
+    assert.doesNotMatch(await readFile(log, "utf8"), /new-session/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});
 
 test("restartManagedSessionFresh clears saved Pi state and starts a new tmux session", async () => {
   const oldDir = process.env.PI_AGENT_HUB_DIR;
@@ -169,7 +265,7 @@ test("restartManagedSessionFresh clears saved Pi state and starts a new tmux ses
   process.env.PI_AGENT_HUB_DIR = root;
   process.env.PATH = `${bin}:${oldPath ?? ""}`;
   try {
-    await saveRegistry({
+    await seedRegistry({
       version: 1,
       sessions: [session({
         status: "waiting",
@@ -213,7 +309,7 @@ test("lifecycle commands reject subagent registry rows", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-agent-hub-subagent-lifecycle-"));
   process.env.PI_AGENT_HUB_DIR = dir;
   try {
-    await saveRegistry({ version: 1, sessions: [session({ kind: "subagent", parentId: "parent", agentName: "worker" })] });
+    await seedRegistry({ version: 1, sessions: [session({ kind: "subagent", parentId: "parent", agentName: "worker" })] });
 
     await assert.rejects(() => startManagedSession("source-session"), /Cannot start subagent row: source/);
     await assert.rejects(() => stopManagedSession("source-session"), /Cannot stop subagent row: source/);
@@ -229,7 +325,7 @@ test("forkManagedSession does not register a fork when source history is not sav
   const dir = await mkdtemp(join(tmpdir(), "pi-agent-hub-fork-"));
   process.env.PI_AGENT_HUB_DIR = dir;
   try {
-    await saveRegistry({ version: 1, sessions: [session({ sessionFile: join(dir, "missing.jsonl") })] });
+    await seedRegistry({ version: 1, sessions: [session({ sessionFile: join(dir, "missing.jsonl") })] });
 
     await assert.rejects(
       () => forkManagedSession("source-session", { title: "source fork", group: "default" }),

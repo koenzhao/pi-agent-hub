@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
-import { loadStore, updateStore, writeJsonAtomic, type JsonStore } from "./atomic-json.js";
+import { loadStore, updateStore, type JsonStore } from "./atomic-json.js";
 import { multiRepoWorkspaceDir, normalizeAdditionalCwds } from "./multi-repo.js";
 import { MANAGED_SESSION_PREFIX } from "./names.js";
 import { registryPath } from "./paths.js";
@@ -23,10 +23,6 @@ function registryStore(path: string): JsonStore<SessionsRegistry> {
 
 export async function loadRegistry(path = registryPath()): Promise<SessionsRegistry> {
   return loadStore(registryStore(path));
-}
-
-export async function saveRegistry(registry: SessionsRegistry, path = registryPath()): Promise<void> {
-  await writeJsonAtomic(path, registry);
 }
 
 export async function updateRegistry(
