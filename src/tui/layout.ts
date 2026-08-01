@@ -233,7 +233,8 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
   let firstSection = true;
   for (const section of model.sections) {
     if (!firstSection) pushLine("");
-    const headingRight = board ? styles.dim(`·${section.sessionsTotal}`) : formatStatusCounts(section.statusCounts, styles);
+    const mutedStatuses = section.key !== "active";
+    const headingRight = board ? styles.dim(`·${section.sessionsTotal}`) : formatStatusCounts(section.statusCounts, styles, mutedStatuses);
     pushLine(sectionHeader(section.title, headingRight, width, styles));
     firstSection = false;
     for (const group of section.groups) {
@@ -241,7 +242,7 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
         const parentCount = group.sessions.filter((session) => session.kind !== "subagent").length;
         pushLine(twoColumn(styles.muted(group.name), styles.dim(`·${parentCount}`), width));
       } else if (group.name) {
-        pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
+        pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles, mutedStatuses), width));
       }
       for (const session of group.sessions) pushRow(session);
     }
@@ -745,9 +746,9 @@ function sectionHeader(title: string, right: string, width: number, styles: Layo
   return twoColumn(left, right, width);
 }
 
-function formatStatusCounts(counts: StatusCounts, styles: LayoutStyles): string {
+function formatStatusCounts(counts: StatusCounts, styles: LayoutStyles, muted = false): string {
   return STATUS_ORDER
-    .flatMap(([status, symbol]) => counts[status] ? [styles.status(status, `${symbol}${counts[status]}`)] : [])
+    .flatMap(([status, symbol]) => counts[status] ? [muted ? styles.muted(`${symbol}${counts[status]}`) : styles.status(status, `${symbol}${counts[status]}`)] : [])
     .join(" ");
 }
 
@@ -774,7 +775,9 @@ function renderSelectedCardHeader(session: RenderSession, width: number, styles:
 function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, board = false, focusedSlot?: number, selectionMarker = true, includeRightAdornment = true): string {
   const attention = board && selectionMarker && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
   const prefix = session.selected && selectionMarker ? styles.accent("▌") : attention || (session.status === "stopped" ? styles.dim("·") : " ");
-  const symbol = styles.status(session.displayStatus, session.symbol);
+  const symbol = session.section === "active"
+    ? styles.status(session.displayStatus, session.symbol)
+    : styles.muted(session.symbol);
   const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : board ? (session.boardTitle ?? session.title) : session.title;
   const styleTitle = (value: string) => session.status === "stopped" ? styles.dim(value) : value;
   const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, focusedSlot, styles);

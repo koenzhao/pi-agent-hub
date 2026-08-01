@@ -1102,6 +1102,28 @@ test("selected and stopped rows have distinct treatments with stopped rows last"
   assert.doesNotMatch(lines, /Stopped/);
 });
 
+test("backlog and archived status icons are muted while Active stays colored", () => {
+  const theme = { ...darkTheme, error: "#010203", muted: "#040506" };
+  const sessions = [
+    session("active", "default", "error", "active-error"),
+    { ...session("backlog", "default", "error", "backlog-error"), bucket: "backlog" as const },
+    { ...session("archived", "default", "error", "archived-error"), bucket: "archived" as const, bucketChangedAt: 1 },
+  ];
+  const lines = renderSessions(buildRenderModel({ sessions, width: 120 }), theme).lines;
+  const row = (title: string) => lines.find((line) => stripAnsi(line).includes(title)) ?? "";
+
+  assert.match(row("active-error"), /\u001b\[38;2;1;2;3m×/);
+  for (const title of ["backlog-error", "archived-error"]) {
+    assert.match(row(title), /\u001b\[38;2;4;5;6m×/);
+    assert.doesNotMatch(row(title), /\u001b\[38;2;1;2;3m×/);
+  }
+  for (const section of ["BACKLOG", "ARCHIVED"]) {
+    const heading = lines.find((line) => stripAnsi(line).includes(`── ${section}`)) ?? "";
+    assert.match(heading, /\u001b\[38;2;4;5;6m×1/);
+    assert.doesNotMatch(heading, /\u001b\[38;2;1;2;3m×1/);
+  }
+});
+
 test("preview renders captured tmux output with empty state", () => {
   const model = buildRenderModel({ sessions: [session("a", "default", "idle", "api")], selectedId: "a", width: 120, preview: "one\ntwo" });
   const lines = renderSessions(model).lines.join("\n");
