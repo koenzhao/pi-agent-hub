@@ -39,7 +39,7 @@ Ctrl+Q returns to the dashboard
 | --- | --- |
 | `n` | Create a new Pi session |
 | `Enter` | Open/switch to the selected live session, or restart a stopped/error session |
-| `1`–`4` | Assign, replace, move, swap, or focus the corresponding fixed quadrant panel |
+| `1`–`4` | Assign, replace, move, or swap the corresponding fixed quadrant panel while staying in the sidebar |
 | `x`, then `1`–`4` | Close the corresponding panel |
 | `F`, then `1`–`4`, or `Alt+1`–`Alt+4` | Focus the corresponding open panel |
 | `Alt+Q` or `Ctrl+Q` | Return from a focused panel to the sidebar |
@@ -112,13 +112,13 @@ When the dashboard is running inside tmux, `Enter` switches the current tmux cli
 
 ### Sidebar workspace
 
-Use `1`–`4` in the dashboard to place the selected live session in a fixed screen quadrant: `1` is top-left, `2` top-right, `3` bottom-left, and `4` bottom-right. Empty slots may be assigned in any order and holes remain stable. A bare digit never closes a panel: it assigns an empty quadrant, replaces its session, moves or swaps an already shown session, or focuses the panel when it already shows the selected session. Close explicitly with `x` then `1`–`4`.
+Use `1`–`4` in the dashboard to place the selected live session in a fixed screen quadrant: `1` is top-left, `2` top-right, `3` bottom-left, and `4` bottom-right. Empty slots may be assigned in any order and holes remain stable. A bare digit never closes or focuses a panel: it assigns an empty quadrant, replaces its session, moves or swaps an already shown session, and leaves keyboard focus in the sidebar. Close explicitly with `x` then `1`–`4`.
 
 The dashboard remains a narrow left sidebar while panel geometry expands from the occupied quadrants. A single panel fills the content region. `1`+`2` produces side-by-side columns, while `1`+`3` produces stacked rows. Opposite corners such as `1`+`4` expand into two full-height columns rather than leaving blank screen regions. Three occupied quadrants split only the column containing two panels, and all four form an even 2×2 grid. Closing a panel re-expands survivors without changing their numbers. `[n]` pane-title badges keep quadrant identity visible when expansion moves a pane away from its literal corner.
 
 Press `F` then `1`–`4` to focus an open quadrant from the sidebar. Guarded `Alt+1`–`Alt+4` tmux bindings provide the same jump from anywhere in the dashboard session, including inside another panel; an empty target is a no-op. Press `Alt+Q` to return to the sidebar, with `Ctrl+Q` retained as a fallback. Press `o` to reset any current arrangement to one panel showing the selected session. If that session is already the sole panel in any quadrant, `o` closes it. A persistent strip below the dashboard summary maps all four slots to panel titles, including holes and sessions hidden by the current filter. The focused slot and its row `◫1`–`◫4` indicator use the theme accent; inactive indicators are muted. Panel borders use matching `[n] <title>` labels, with an accent border and reverse-color title badge on the focused pane. While any side panel is open, the sidebar omits its built-in details/preview column so the live panels remain the only content preview.
 
-Successful `1`–`4` assignment, replacement, move, and swap actions focus the resulting panel. Explicit close, narrow-width refusal, and `o` reset leave focus on the sidebar. A single mouse click selects a session row; a double-click opens/switches to a live session or restarts a stopped/error session. The mouse wheel moves selection. Hub enables tmux mouse mode only on the dashboard session while it is running and unsets that session override on quit.
+All `1`–`4` assignment, replacement, move, and swap actions leave focus on the sidebar so several sessions can be placed without returning between each action. Use `F` then `1`–`4` or `Alt+1`–`Alt+4` when you want to focus a panel. Explicit close, narrow-width refusal, and `o` reset also leave focus on the sidebar. A single mouse click selects a session row; a double-click opens/switches to a live session or restarts a stopped/error session. The mouse wheel moves selection. Hub enables tmux mouse mode only on the dashboard session while it is running and unsets that session override on quit.
 
 Native tmux keys also handle the layout: `prefix+←/→/↑/↓` moves focus, `prefix+z` zooms the focused pane to hide/show neighbors, `prefix+x` closes a pane, and `prefix+{` / `prefix+}` swaps panes. If `Enter` opens a session currently shown in any side pane, Hub closes that pane first to avoid tmux size flapping. Hub refuses to grow a layout when the resulting panels would be narrower than 40 columns.
 

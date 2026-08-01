@@ -81,39 +81,42 @@ test("sidePaneStatus ignores user panes", async () => {
   assert.deepEqual(exec.calls[0]?.args, listPanesCall);
 });
 
-test("assign opens the requested fixed slot and tags it", async () => {
+test("assign opens the requested fixed slot, tags it, and keeps sidebar focus", async () => {
   const exec = sidePaneExec(dashboard, "");
   assert.deepEqual(await assignSidePaneSlot({ target: "pi-agent-hub-api", ownPane: "%1", slot: 4 }, exec), { kind: "opened", slot: 4 });
   assert.equal(exec.calls.some((call) => JSON.stringify(call.args) === JSON.stringify(tag("%10", 4))), true);
-  assert.deepEqual(exec.calls.at(-1)?.args, ["select-pane", "-t", "%10"]);
+  assert.deepEqual(exec.calls.at(-1)?.args, ["select-pane", "-t", "%1"]);
 });
 
-test("assigning the shown session's slot focuses without rebuilding", async () => {
+test("assigning the shown session's slot keeps sidebar focus without rebuilding", async () => {
   const exec = sidePaneExec(one, clients([2, "pi-agent-hub-api"]));
-  assert.deepEqual(await assignSidePaneSlot({ target: "pi-agent-hub-api", ownPane: "%1", slot: 1 }, exec), { kind: "focused", slot: 1 });
+  assert.deepEqual(await assignSidePaneSlot({ target: "pi-agent-hub-api", ownPane: "%1", slot: 1 }, exec), { kind: "unchanged", slot: 1 });
   assert.equal(exec.calls.some((call) => call.args[0] === "kill-pane"), false);
+  assert.deepEqual(exec.calls.at(-1)?.args, ["select-pane", "-t", "%1"]);
 });
 
-test("assign moves a shown session into a hole", async () => {
+test("assign moves a shown session into a hole and keeps sidebar focus", async () => {
   const exec = sidePaneExec(one, clients([2, "pi-agent-hub-api"]));
   assert.deepEqual(await assignSidePaneSlot({ target: "pi-agent-hub-api", ownPane: "%1", slot: 3 }, exec), { kind: "moved", slot: 3 });
   assert.equal(exec.calls.some((call) => JSON.stringify(call.args) === JSON.stringify(tag("%10", 3))), true);
+  assert.deepEqual(exec.calls.at(-1)?.args, ["select-pane", "-t", "%1"]);
 });
 
-test("assign swaps two shown sessions", async () => {
+test("assign swaps two shown sessions and keeps sidebar focus", async () => {
   const exec = sidePaneExec(pair12, sessions12);
   assert.deepEqual(await assignSidePaneSlot({ target: "pi-agent-hub-api", ownPane: "%1", slot: 2 }, exec), { kind: "moved", slot: 2 });
   assert.equal(exec.calls.some((call) => JSON.stringify(call.args) === JSON.stringify(tag("%10", 1))), true);
   assert.equal(exec.calls.some((call) => JSON.stringify(call.args) === JSON.stringify(tag("%11", 2))), true);
+  assert.deepEqual(exec.calls.at(-1)?.args, ["select-pane", "-t", "%1"]);
 });
 
-test("assign retargets an occupied slot in place", async () => {
+test("assign retargets an occupied slot in place and keeps sidebar focus", async () => {
   const exec = sidePaneExec(one, clients([2, "pi-agent-hub-api"]));
   assert.deepEqual(await assignSidePaneSlot({ target: "pi-agent-hub-web", ownPane: "%1", slot: 1 }, exec), { kind: "retargeted", slot: 1 });
   assert.deepEqual(exec.calls.map((call) => call.args).slice(-5), [
     presize("pi-agent-hub-web", 117, 58),
     ["switch-client", "-c", "/dev/ttys002", "-t", "pi-agent-hub-web"],
-    resetSize("pi-agent-hub-web"), tag("%2", 1), ["select-pane", "-t", "%2"],
+    resetSize("pi-agent-hub-web"), tag("%2", 1), ["select-pane", "-t", "%1"],
   ]);
 });
 

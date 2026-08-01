@@ -94,7 +94,7 @@ test("help overlay opens and closes", () => {
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
   assert.match(help, /zero counts are hidden/);
-  assert.match(help, /1-4 assign panels/);
+  assert.match(help, /1-4 assign \(stay here\)/);
   assert.match(help, /x then 1-4 close panel/);
   assert.match(help, /F then 1-4 or Alt\+1-4 focus panel/);
   assert.match(help, /o reset to one panel/);
@@ -632,15 +632,16 @@ test("o resets side panels to the selected session", async () => {
   assert.match(stripAnsi(view.render(100).join("\n")), /panel: api/);
 });
 
-test("panel shortcuts flash focused and assigned fixed slots", () => {
-  const results = [{ kind: "focused" as const, slot: 1 as const }, { kind: "opened" as const, slot: 3 as const }];
+test("panel shortcuts flash unchanged and assigned fixed slots without implying focus", () => {
+  const results = [{ kind: "unchanged" as const, slot: 1 as const }, { kind: "opened" as const, slot: 3 as const }];
   const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
   const view = new SessionsView(controller, () => {}, {
     assignSidePaneSlot: () => results.shift() ?? { kind: "opened", slot: 1 },
   });
 
   view.handleInput("1");
-  assert.match(stripAnsi(view.render(100).join("\n")), /panel 1 focused/);
+  assert.match(stripAnsi(view.render(100).join("\n")), /panel 1: api/);
+  assert.doesNotMatch(stripAnsi(view.render(100).join("\n")), /focused/);
   view.handleInput("3");
   assert.match(stripAnsi(view.render(100).join("\n")), /panel 3: api/);
 });

@@ -14,7 +14,7 @@ Use this section while developing. Move entries into a versioned section before 
 
 ### Changed
 
-- Make side-panel numbers stable screen quadrants with occupancy-derived row/column layouts and non-destructive assignment keys; remove `Shift+1`–`Shift+4` panel focus aliases.
+- Make side-panel numbers stable screen quadrants with occupancy-derived row/column layouts and non-destructive assignment keys that keep focus in the sidebar; remove `Shift+1`–`Shift+4` panel focus aliases.
 - Removed unused public exports `McpTool`, `PiToolDefinition`, `buildPiCommand`, `sessionDir`, `tmuxMissing`, and `mcpCatalogPath`; removed the unused singular worktree-removal wrapper. The SemVer decision for the narrowed package surface remains deferred to publishing.
 
 ### Fixed

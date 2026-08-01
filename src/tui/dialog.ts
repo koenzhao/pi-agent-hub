@@ -19,7 +19,7 @@ export interface SessionDialogInput {
 }
 
 export type SidePaneActionResult =
-  | { kind: "opened" | "retargeted" | "moved" | "focused"; slot: 1 | 2 | 3 | 4 }
+  | { kind: "opened" | "retargeted" | "moved" | "unchanged"; slot: 1 | 2 | 3 | 4 }
   | { kind: "closed" }
   | { kind: "too-narrow"; panels: number };
 export type CloseSidePaneResult = { kind: "closed" } | { kind: "unavailable" };

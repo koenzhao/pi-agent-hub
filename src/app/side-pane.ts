@@ -8,7 +8,7 @@ const MIN_CONTENT_WIDTH = 40;
 
 export type SidePaneSlot = 1 | 2 | 3 | 4;
 export type SidePaneResult =
-  | { kind: "opened" | "retargeted" | "moved" | "focused"; slot: SidePaneSlot }
+  | { kind: "opened" | "retargeted" | "moved" | "unchanged"; slot: SidePaneSlot }
   | { kind: "closed" }
   | { kind: "too-narrow"; panels: number };
 export type CloseSidePaneResult = { kind: "closed" } | { kind: "unavailable" };
@@ -57,8 +57,8 @@ export async function assignSidePaneSlot(options: {
   const occupied = inspected.slots.get(options.slot);
 
   if (existing === options.slot && occupied) {
-    await selectPane(occupied.pane.id, exec);
-    return { kind: "focused", slot: options.slot };
+    await selectPane(options.ownPane, exec);
+    return { kind: "unchanged", slot: options.slot };
   }
 
   if (existing !== undefined) {
@@ -67,8 +67,8 @@ export async function assignSidePaneSlot(options: {
     else sessions.delete(existing);
     sessions.set(options.slot, options.target);
     if (!occupied && !panelsFit(inspected, new Set(sessions.keys()))) return { kind: "too-narrow", panels: sessions.size };
-    const panes = await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
-    await selectPane(panes.get(options.slot)!, exec);
+    await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
+    await selectPane(options.ownPane, exec);
     return { kind: "moved", slot: options.slot };
   }
 
@@ -87,15 +87,15 @@ export async function assignSidePaneSlot(options: {
     }
     await setPaneSlot(occupied.pane.id, options.slot, exec);
     await setSidePaneTitle(occupied.pane.id, options.target, options.slot, options.titleFor, exec);
-    await selectPane(occupied.pane.id, exec);
+    await selectPane(options.ownPane, exec);
     return { kind: "retargeted", slot: options.slot };
   }
 
   const sessions = sessionSlots(inspected.slots);
   sessions.set(options.slot, options.target);
   if (!panelsFit(inspected, new Set(sessions.keys()))) return { kind: "too-narrow", panels: sessions.size };
-  const panes = await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
-  await selectPane(panes.get(options.slot)!, exec);
+  await rebuildSidePanes(options.ownPane, inspected, sessions, exec, options.titleFor);
+  await selectPane(options.ownPane, exec);
   return { kind: "opened", slot: options.slot };
 }
 

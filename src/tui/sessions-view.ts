@@ -384,7 +384,6 @@ export class SessionsView implements Component {
     const apply = (result: SidePaneActionResult) => {
       if (result.kind === "too-narrow") this.flashMessage(`window too narrow for ${result.panels} panels`);
       else if (result.kind === "closed") this.flashMessage("panel closed");
-      else if (result.kind === "focused") this.flashMessage(`panel ${result.slot} focused`);
       else this.flashMessage(slot ? `panel ${result.slot}: ${selected.title}` : `panel: ${selected.title}`);
     };
     const applyError = (error: unknown) => {
@@ -927,7 +926,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "",
     heading("Navigation"),
     "  ↑↓/j/k move selection     Enter open/switch     / filter",
-    "  1-4 assign panels         x then 1-4 close panel",
+    "  1-4 assign (stay here)    x then 1-4 close panel",
     "  F then 1-4 or Alt+1-4 focus panel     o reset to one panel",
     "  q quit                     Esc cancel/clear",
     "  K/J reorder in group      v toggle compact/card rows",
