@@ -629,3 +629,16 @@
   id: theme-001
   plan_file: agent-work/history/20260801_theme-001_stable_theme_picker.md
   completed_at: '2026-08-01'
+- epic: architecture
+  status: done
+  description: Consolidate dashboard side-pane inspection, mutation, focus, attach,
+    and teardown sequencing behind one explicit lifecycle interface without changing
+    tmux commands, ordering, geometry, or TUI behavior.
+  priority: 2
+  depends_on:
+  - theme-001
+  created_at: '2026-07-31'
+  discovered_from: 'architecture review 2026-07-26: dashboard side-pane lifecycle'
+  id: architecture-002
+  plan_file: agent-work/history/20260801_architecture-002_side_pane_lifecycle.md
+  completed_at: '2026-08-01'

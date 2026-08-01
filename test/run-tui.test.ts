@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNewFormContext, createRegistryMutator, mapSidePaneSessionIds, persistDashboardThemeSelection, restartAllTargets, startSidePanePresenceRefreshLoop, syncSidePaneSessionFooters } from "../src/app/run-tui.js";
+import { buildNewFormContext, createRegistryMutator, mapSidePaneSessionIds, persistDashboardThemeSelection, restartAllTargets } from "../src/app/run-tui.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function deferred<T = void>() {
@@ -136,45 +136,6 @@ test("side pane session ids preserve sparse quadrant numbers", () => {
   assert.deepEqual([...mapSidePaneSessionIds([api.tmuxSession, undefined, undefined, docs.tmuxSession], [api, docs])], [
     ["api", 1], ["docs", 4],
   ]);
-});
-
-test("side pane footer sync tolerates a session disappearing during refresh", async () => {
-  const calls: [string, boolean][] = [];
-  await syncSidePaneSessionFooters(
-    ["pi-agent-hub-current", "pi-agent-hub-stale"],
-    ["pi-agent-hub-current", "pi-agent-hub-next"],
-    async (name, visible) => {
-      calls.push([name, visible]);
-      if (name === "pi-agent-hub-stale") throw new Error("can't find session");
-    },
-  );
-
-  assert.deepEqual(calls, [
-    ["pi-agent-hub-stale", true],
-    ["pi-agent-hub-next", false],
-  ]);
-});
-
-test("side pane presence loop stop drains an in-flight refresh", async () => {
-  let finishLoad: ((changed: boolean) => void) | undefined;
-  let rendered = false;
-  const stop = startSidePanePresenceRefreshLoop({
-    ownPane: "%1",
-    load: () => new Promise<boolean>((resolve) => { finishLoad = resolve; }),
-    render: () => { rendered = true; },
-  }, 10_000);
-  await new Promise((resolve) => setImmediate(resolve));
-
-  let drained = false;
-  const stopping = stop().then(() => { drained = true; });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(drained, false);
-
-  finishLoad?.(true);
-  await stopping;
-
-  assert.equal(drained, true);
-  assert.equal(rendered, false);
 });
 
 test("registry mutator queue survives rejections", async () => {
