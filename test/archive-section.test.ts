@@ -78,3 +78,27 @@ test("orphan subagents retain their own lifecycle without consuming a parent slo
   assert.equal(result.hiddenParents, 1);
   assert.ok(result.rows.some((row) => row.id === "orphan"));
 });
+
+test("archive lifecycle preserves self closed and entering-cycle ownership", () => {
+  const self = session("self", { kind: "subagent", parentId: "self", bucket: "archived", bucketChangedAt: 10 });
+  const cycleA = session("cycle-a", { kind: "subagent", parentId: "cycle-b" });
+  const cycleB = session("cycle-b", { kind: "subagent", parentId: "cycle-a", bucket: "archived", bucketChangedAt: 20 });
+  const entering = session("entering", { kind: "subagent", parentId: "cycle-a" });
+
+  assert.deepEqual(effectiveSessionLifecycle(self, [self]), { section: "archived", bucketChangedAt: 10 });
+  assert.deepEqual(effectiveSessionLifecycle(cycleA, [cycleA, cycleB]), { section: "active" });
+  assert.deepEqual(effectiveSessionLifecycle(cycleB, [cycleA, cycleB]), { section: "archived", bucketChangedAt: 20 });
+  assert.deepEqual(effectiveSessionLifecycle(entering, [entering, cycleA, cycleB]), { section: "archived", bucketChangedAt: 20 });
+});
+
+test("archive lifecycle preserves missing-link fallback and last duplicate id precedence", () => {
+  const entering = session("entering", { kind: "subagent", parentId: "partial", bucket: "archived", bucketChangedAt: 30 });
+  const partial = session("partial", { kind: "subagent", parentId: "missing" });
+  assert.deepEqual(effectiveSessionLifecycle(entering, [entering, partial]), { section: "archived", bucketChangedAt: 30 });
+
+  const child = session("child", { kind: "subagent", parentId: "duplicate" });
+  const duplicateActive = session("duplicate");
+  const duplicateArchived = archived("duplicate", 40);
+  assert.deepEqual(effectiveSessionLifecycle(child, [child, duplicateActive, duplicateArchived]), { section: "archived", bucketChangedAt: 40 });
+  assert.deepEqual(effectiveSessionLifecycle(child, [child, duplicateArchived, duplicateActive]), { section: "active" });
+});

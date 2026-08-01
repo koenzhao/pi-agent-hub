@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { buildRenderModel, retainSelectionAfterRefresh } from "../src/tui/render-model.js";
+import { boardLaneRows, buildRenderModel, retainSelectionAfterRefresh } from "../src/tui/render-model.js";
 import { renderSessions } from "../src/tui/layout.js";
 import { darkTheme, stripAnsi } from "../src/tui/theme.js";
 import type { ManagedSession, SessionStatus } from "../src/core/types.js";
@@ -260,6 +260,20 @@ test("stage grouping keeps canonical workflow trees in producer lanes and every 
   assert.match(rendered, /view lanes/);
 });
 
+test("board projection omits orphan and cyclic subagent rows from every lane", () => {
+  const parent = { ...session("parent", "api", "running"), workflow: WORKFLOW };
+  const orphan = { ...session("orphan", "orphans", "idle"), kind: "subagent" as const, parentId: "missing" };
+  const cycleA = { ...session("cycle-a", "cycles", "idle"), kind: "subagent" as const, parentId: "cycle-b" };
+  const cycleB = { ...session("cycle-b", "cycles", "idle"), kind: "subagent" as const, parentId: "cycle-a" };
+  const rows = [parent, orphan, cycleA, cycleB];
+
+  const lanes = boardLaneRows(rows, rows, { revealAll: true });
+  assert.deepEqual(lanes.map((lane) => [lane.key, lane.rows.map((row) => row.id)]), [["execute", ["parent"]]]);
+
+  const model = buildRenderModel({ sessions: rows, grouping: "stage", density: "cards", width: 80, expandedBoardParentIds: new Set(["parent"]) });
+  assert.deepEqual(model.sections.flatMap((section) => section.groups.flatMap((group) => group.sessions.map((row) => row.id))), ["parent"]);
+});
+
 test("board rows nest under one group heading instead of repeating the group at right", () => {
   const model = buildRenderModel({ sessions: [{ ...session("p", "agents", "running"), workflow: WORKFLOW }], grouping: "stage", density: "cards", width: 120 });
   const row = renderSessions(model).lines.map(stripAnsi).find((line) => /^│┌/.test(line));
@@ -337,6 +351,18 @@ test("parent board rows show the count of starting and running descendants only"
 
   const zero = renderSessions(buildRenderModel({ sessions: [parent, descendants[2]!], selectedId: "parent", grouping: "stage", density: "cards", width: 40 })).lines.map(stripAnsi).join("\n");
   assert.doesNotMatch(zero, /⚙︎0|⚙︎1/);
+});
+
+test("descendant counts preserve parent links that continue through a main row", () => {
+  const ancestor = { ...session("ancestor", "api", "waiting"), workflow: WORKFLOW };
+  const parent = { ...session("parent", "api", "waiting"), parentId: "ancestor", workflow: WORKFLOW };
+  const child = { ...session("child", "api", "running"), kind: "subagent" as const, parentId: "parent" };
+  const model = buildRenderModel({ sessions: [ancestor, parent, child], grouping: "stage", density: "cards", width: 80 });
+  const rows = model.sections.flatMap((section) => section.groups.flatMap((group) => group.sessions));
+
+  assert.equal(rows.find((row) => row.id === "parent")?.boardDescendantCount, 1);
+  assert.equal(rows.find((row) => row.id === "ancestor")?.boardDescendantCount, 1);
+  assert.equal(rows.find((row) => row.id === "ancestor")?.runningSubagentCount, 1);
 });
 
 test("board chooses the prevalent pipeline deterministically and uses its newest vocabulary", () => {

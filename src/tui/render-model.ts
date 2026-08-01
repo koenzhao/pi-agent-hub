@@ -1,6 +1,6 @@
 import { ARCHIVE_PRUNE_AFTER_MS, type SessionSection } from "../core/session-bucket.js";
 import { compareGroupPriority, groupOrder, orderedSessions } from "../core/session-order.js";
-import { orderedSessionRows, sessionDepth } from "../core/session-tree.js";
+import { createSessionTreeIndex, orderedSessionRows, sessionDepth, type SessionTreeIndex } from "../core/session-tree.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { RuntimeSession, SessionAttention, SessionStatus, SessionMetadata, WorkflowRuntimeSnapshot, WorkflowSnapshot } from "../core/types.js";
 import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
@@ -157,18 +157,19 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const density = input.density ?? "compact";
   const board = grouping === "stage";
   const allRows = orderedSessionRows(input.sessions, input.filter);
-  const activeRows = allRows.filter((session) => effectiveSessionLifecycle(session, allRows).section === "active");
+  const allTree = createSessionTreeIndex(allRows);
+  const activeRows = allRows.filter((session) => effectiveSessionLifecycle(session, allRows, allTree).section === "active");
   const completeBoardProjection = projectBoardRows(activeRows, allRows);
   const boardProjection = projectExpandedBoardRows(
     completeBoardProjection,
     input.expandedBoardParentIds ?? new Set(),
     input.filter !== undefined,
   );
-  const archive = archiveSectionRows(allRows, { expanded: input.archiveExpanded ?? false, filterActive: input.filter !== undefined });
+  const archive = archiveSectionRows(allRows, { expanded: input.archiveExpanded ?? false, filterActive: input.filter !== undefined }, allTree);
   const visible = board ? boardProjection.rows : archive.rows;
   const selectedId = pickSelectedId(input.archiveDisclosureSelected ? allRows : visible, input.selectedId);
   const sidePaneSessionIds = input.sidePaneSessionIds;
-  const subagentStats = descendantSubagentStats(input.sessions);
+  const subagentStats = descendantSubagentStats(input.sessions, createSessionTreeIndex(input.sessions));
   const occupiedSlots = new Map<number, string>();
   for (const session of input.sessions) {
     const slot = sidePaneSessionIds?.get(session.id);
@@ -178,8 +179,8 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     ? ([1, 2, 3, 4] as const).map((slot) => ({ slot, ...(occupiedSlots.has(slot) ? { title: occupiedSlots.get(slot) } : {}) }))
     : undefined;
   const boardExpanded = (id: string) => input.filter !== undefined || input.expandedBoardParentIds?.has(id) === true;
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
-  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
+  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
+  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
   const groups = groupsForSessions(mapped);
   const sections = board
     ? lanesForBoard(mapped, boardProjection)
@@ -276,22 +277,17 @@ function projectBoardRows<T extends BoardLaneRow>(activeRows: T[], allRows: T[])
     .sort((a, b) => (b.workflow?.updatedAt ?? 0) - (a.workflow?.updatedAt ?? 0) || a.id.localeCompare(b.id))[0];
   const steps = vocabularyOwner?.workflow?.steps ?? [];
   const compatibleIds = new Set(compatibleParents.map((parent) => parent.id));
-  const byId = new Map(activeRows.map((row) => [row.id, row]));
-  const ownerOf = (row: T): T | undefined => {
-    let owner: T | undefined = row;
-    const seen = new Set<string>();
-    while (owner?.kind === "subagent" && owner.parentId && !seen.has(owner.parentId)) {
-      seen.add(owner.parentId);
-      owner = byId.get(owner.parentId);
-    }
-    return owner?.kind === "subagent" ? undefined : owner;
-  };
+  const tree = createSessionTreeIndex(activeRows);
+  const ownerOf = (row: T): T | undefined => tree.trace(row).owner;
   const workflowRows = activeRows.filter((row) => {
     const owner = ownerOf(row);
     return owner ? compatibleIds.has(owner.id) : false;
   });
   const lanes = steps.flatMap((step) => {
-    const laneRows = workflowRows.filter((row) => ownerOf(row)?.workflow?.steps[ownerOf(row)?.workflow?.activeIndex ?? -1]?.id === step.id);
+    const laneRows = workflowRows.filter((row) => {
+      const owner = ownerOf(row);
+      return owner?.workflow?.steps[owner.workflow.activeIndex]?.id === step.id;
+    });
     if (!laneRows.length) return [];
     return [{
       key: step.id,
@@ -328,16 +324,8 @@ function projectExpandedBoardRows<T extends BoardLaneRow>(
   expandedParentIds: ReadonlySet<string>,
   revealAll: boolean,
 ): BoardProjection<T> {
-  const byId = new Map(projection.rows.map((row) => [row.id, row]));
-  const topLevelParentId = (row: T): string | undefined => {
-    let owner: T | undefined = row;
-    const seen = new Set<string>();
-    while (owner?.kind === "subagent" && owner.parentId && !seen.has(owner.parentId)) {
-      seen.add(owner.parentId);
-      owner = byId.get(owner.parentId);
-    }
-    return owner?.kind === "subagent" ? undefined : owner?.id;
-  };
+  const tree = createSessionTreeIndex(projection.rows);
+  const topLevelParentId = (row: T): string | undefined => tree.trace(row).owner?.id;
   const lanes = projection.lanes.map((lane) => ({
     ...lane,
     rows: lane.rows.filter((row) => {
@@ -410,18 +398,8 @@ function groupsForSessions(sessions: RenderSession[]): RenderGroup[] {
 }
 
 function boardGroupsForSessions(sessions: RenderSession[]): RenderGroup[] {
-  const byId = new Map(sessions.map((session) => [session.id, session]));
-  const ownerGroup = (session: RenderSession): string => {
-    let owner = session;
-    const seen = new Set<string>();
-    while (owner.kind === "subagent" && owner.parentId && !seen.has(owner.parentId)) {
-      seen.add(owner.parentId);
-      const parent = byId.get(owner.parentId);
-      if (!parent) break;
-      owner = parent;
-    }
-    return owner.group;
-  };
+  const tree = createSessionTreeIndex(sessions);
+  const ownerGroup = (session: RenderSession): string => tree.trace(session).terminal.group;
   const groupsByName = new Map<string, RenderSession[]>();
   for (const session of sessions) {
     const name = ownerGroup(session);
@@ -477,30 +455,28 @@ interface DescendantSubagentStats {
   running: number;
 }
 
-function descendantSubagentStats(sessions: RuntimeSession[]): Map<string, DescendantSubagentStats> {
-  const byId = new Map(sessions.map((session) => [session.id, session]));
+function descendantSubagentStats(
+  sessions: RuntimeSession[],
+  tree: SessionTreeIndex<RuntimeSession>,
+): Map<string, DescendantSubagentStats> {
   const stats = new Map<string, DescendantSubagentStats>();
   for (const session of sessions) {
     if (session.kind !== "subagent") continue;
-    const seen = new Set<string>();
-    let parentId = session.parentId;
-    while (parentId && !seen.has(parentId)) {
-      seen.add(parentId);
+    for (const parentId of tree.trace(session).linkedParentIds) {
       const current = stats.get(parentId) ?? { total: 0, running: 0 };
       current.total += 1;
       if (session.status === "starting" || session.status === "running") current.running += 1;
       stats.set(parentId, current);
-      parentId = byId.get(parentId)?.parentId;
     }
   }
   return stats;
 }
 
-function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined, board: boolean, projectPlan: boolean, subagentStats: DescendantSubagentStats | undefined, boardExpanded: boolean): RenderSession {
+function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], tree: SessionTreeIndex<RuntimeSession>, skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined, board: boolean, projectPlan: boolean, subagentStats: DescendantSubagentStats | undefined, boardExpanded: boolean): RenderSession {
   const displayStatus = displayStatusFor(session.status);
   const worktree = primaryWorktree(session);
   const worktrees = sessionWorktrees(session);
-  const lifecycle = effectiveSessionLifecycle(session, sessions);
+  const lifecycle = effectiveSessionLifecycle(session, sessions, tree);
   const archiveTiming = archiveTimingFor(lifecycle.section, lifecycle.bucketChangedAt, now);
   return {
     id: session.id,
@@ -524,7 +500,7 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     enabledMcpServers: session.enabledMcpServers ?? [],
     ...(skillCount !== undefined ? { skillCount } : {}),
     kind: session.kind ?? "main",
-    depth: sessionDepth(session, sessions),
+    depth: sessionDepth(session, sessions, tree),
     parentId: session.parentId,
     agentName: session.agentName,
     taskPreview: session.taskPreview,

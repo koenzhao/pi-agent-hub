@@ -1,7 +1,7 @@
 import { Key, matchesKey, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { attachPlan } from "../app/actions.js";
 import type { SessionsController, SyncPiNameResult } from "../app/controller.js";
-import { orderedSessionRows } from "../core/session-tree.js";
+import { createSessionTreeIndex, orderedSessionRows } from "../core/session-tree.js";
 import type { ManagedSession } from "../core/types.js";
 import { matchesDashboardShortcut } from "./dashboard-shortcuts.js";
 import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
@@ -665,7 +665,8 @@ export class SessionsView implements Component {
   private boardRows() {
     const snapshot = this.controller.snapshot();
     const rows = orderedSessionRows(snapshot.sessions, snapshot.filter);
-    const active = rows.filter((session) => effectiveSessionLifecycle(session, rows).section === "active");
+    const tree = createSessionTreeIndex(rows);
+    const active = rows.filter((session) => effectiveSessionLifecycle(session, rows, tree).section === "active");
     return boardLaneRows(active, rows, {
       expandedParentIds: this.expandedBoardParentIds,
       revealAll: snapshot.filter !== undefined,
@@ -674,14 +675,9 @@ export class SessionsView implements Component {
 
   private topLevelBoardParentId(sessionId: string | undefined): string | undefined {
     if (!sessionId) return undefined;
-    const byId = new Map(this.controller.snapshot().sessions.map((session) => [session.id, session]));
-    let session = byId.get(sessionId);
-    const seen = new Set<string>();
-    while (session?.kind === "subagent" && session.parentId && !seen.has(session.parentId)) {
-      seen.add(session.parentId);
-      session = byId.get(session.parentId);
-    }
-    return session?.kind === "subagent" ? undefined : session?.id;
+    const tree = createSessionTreeIndex(this.controller.snapshot().sessions);
+    const session = tree.get(sessionId);
+    return session ? tree.trace(session).owner?.id : undefined;
   }
 
   private toggleBoardSubagents() {

@@ -2,24 +2,88 @@ import { sessionSection } from "./session-bucket.js";
 import { orderedSessions } from "./session-order.js";
 import type { ManagedSession, RuntimeSession } from "./types.js";
 
-export function isSubagentSession(session: ManagedSession): boolean {
+export interface SessionTreeRow {
+  id: string;
+  kind?: "main" | "subagent";
+  parentId?: string;
+}
+
+export interface SessionTreeTrace<T extends SessionTreeRow> {
+  owner: T | undefined;
+  terminal: T;
+  linkedParentIds: readonly string[];
+  parents: readonly T[];
+  missingParent: boolean;
+  cycle: boolean;
+}
+
+export interface SessionTreeIndex<T extends SessionTreeRow> {
+  get(id: string): T | undefined;
+  trace(session: T): SessionTreeTrace<T>;
+}
+
+export function isSubagentSession(session: Pick<ManagedSession, "kind">): boolean {
   return session.kind === "subagent";
 }
 
-export function sessionDepth(session: RuntimeSession, sessions: RuntimeSession[]): number {
-  if (!isSubagentSession(session) || !session.parentId) return 0;
-  const byId = new Map(sessions.map((candidate) => [candidate.id, candidate]));
-  const seen = new Set<string>();
-  let depth = 0;
-  let parentId: string | undefined = session.parentId;
-  while (parentId && !seen.has(parentId)) {
-    seen.add(parentId);
-    const parent = byId.get(parentId);
-    if (!parent) break;
-    depth += 1;
-    parentId = isSubagentSession(parent) ? parent.parentId : undefined;
-  }
-  return depth;
+export function createSessionTreeIndex<T extends SessionTreeRow>(sessions: readonly T[]): SessionTreeIndex<T> {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const traces = new Map<T, SessionTreeTrace<T>>();
+  return {
+    get(id) {
+      return byId.get(id);
+    },
+    trace(session) {
+      const cached = traces.get(session);
+      if (cached) return cached;
+      const linkedParentIds: string[] = [];
+      const linked = new Set<string>();
+      let linkedParentId = session.parentId;
+      while (linkedParentId && !linked.has(linkedParentId)) {
+        linked.add(linkedParentId);
+        linkedParentIds.push(linkedParentId);
+        linkedParentId = byId.get(linkedParentId)?.parentId;
+      }
+
+      const seen = new Set<string>();
+      const parents: T[] = [];
+      let terminal = session;
+      let missingParent = false;
+      let cycle = false;
+      while (isSubagentSession(terminal) && terminal.parentId) {
+        if (seen.has(terminal.parentId)) {
+          cycle = true;
+          break;
+        }
+        seen.add(terminal.parentId);
+        const parent = byId.get(terminal.parentId);
+        if (!parent) {
+          missingParent = true;
+          break;
+        }
+        parents.push(parent);
+        terminal = parent;
+      }
+      const trace: SessionTreeTrace<T> = {
+        owner: isSubagentSession(terminal) ? undefined : terminal,
+        terminal,
+        linkedParentIds,
+        parents,
+        missingParent,
+        cycle,
+      };
+      traces.set(session, trace);
+      return trace;
+    },
+  };
+}
+
+export function sessionDepth(
+  session: RuntimeSession,
+  sessions: readonly RuntimeSession[],
+  tree: SessionTreeIndex<RuntimeSession> = createSessionTreeIndex(sessions),
+): number {
+  return tree.trace(session).parents.length;
 }
 
 export function sessionCascadeIds(sessions: ManagedSession[], id: string): Set<string> {
