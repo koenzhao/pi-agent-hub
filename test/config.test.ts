@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSessionPrelude, setSkillPoolDirs, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "../src/core/config.js";
+import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemePreference, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemePreference, setSessionPrelude, setSkillPoolDirs, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "../src/core/config.js";
 import { loadMcpCatalog } from "../src/mcp/config.js";
 import { listSkillPool } from "../src/skills/catalog.js";
 
@@ -23,7 +23,7 @@ test("config defaults to the built-in skill pool and MCP catalog", async () => {
   assert.equal(await effectiveMcpCatalogPath(env), join(root, "mcp.json"));
   assert.equal(await effectiveSessionPrelude(env), undefined);
   assert.equal(await effectiveWorktreeDefault(env), false);
-  assert.equal(await effectiveDashboardThemeSessionId(env), undefined);
+  assert.deepEqual(await effectiveDashboardThemePreference(env), { syncPi: true });
   assert.deepEqual(await effectiveDashboardShortcuts(env), []);
 });
 
@@ -104,26 +104,39 @@ test("session prelude setters preserve unrelated config", async () => {
   assert.equal(await effectiveMcpCatalogPath(env), catalogPath);
 });
 
-test("dashboard theme session config is trimmed validated and preserves unrelated config", async () => {
+test("dashboard theme preference defaults to Pi sync and detached saves scrub the old anchor", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
   const env = { PI_AGENT_HUB_DIR: root };
   const shared = join(root, "shared-skills");
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
     skills: { poolDirs: [shared] },
+    dashboard: { themeSessionId: "old-session" },
   }), "utf8");
 
-  await setDashboardThemeSessionId("  session-123  ", env);
+  await setDashboardThemePreference({ syncPi: false, theme: " light-theme/dark-theme " }, env);
 
-  assert.equal(await effectiveDashboardThemeSessionId(env), "session-123");
+  assert.deepEqual(await effectiveDashboardThemePreference(env), { syncPi: false, theme: "light-theme/dark-theme" });
   assert.deepEqual(await effectiveSkillPoolDirs(env), [shared]);
+  assert.deepEqual(JSON.parse(await readFile(configPath(env), "utf8")).dashboard, {
+    themeSync: false,
+    theme: "light-theme/dark-theme",
+  });
 
-  await writeFile(configPath(env), JSON.stringify({
-    version: 1,
-    dashboard: { themeSessionId: 42 },
-  }), "utf8");
+  await setDashboardThemePreference({ syncPi: true }, env);
+  assert.deepEqual(await effectiveDashboardThemePreference(env), { syncPi: true });
+  assert.equal(JSON.parse(await readFile(configPath(env), "utf8")).dashboard.theme, undefined);
+});
 
-  await assert.rejects(() => effectiveDashboardThemeSessionId(env), /Invalid dashboard\.themeSessionId/);
+test("dashboard theme preference validates sync and detached theme", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
+  const env = { PI_AGENT_HUB_DIR: root };
+
+  await assert.rejects(() => setDashboardThemePreference({ syncPi: false, theme: "  " }, env), /dashboard theme cannot be blank/);
+  await writeFile(configPath(env), JSON.stringify({ version: 1, dashboard: { themeSync: "yes" } }), "utf8");
+  await assert.rejects(() => effectiveDashboardThemePreference(env), /Invalid dashboard\.themeSync/);
+  await writeFile(configPath(env), JSON.stringify({ version: 1, dashboard: { themeSync: false, theme: 42 } }), "utf8");
+  await assert.rejects(() => effectiveDashboardThemePreference(env), /Invalid dashboard\.theme/);
 });
 
 test("dashboard shortcut config is normalized and validated", async () => {
@@ -132,7 +145,8 @@ test("dashboard shortcut config is normalized and validated", async () => {
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
     dashboard: {
-      themeSessionId: "session-1",
+      themeSync: false,
+      theme: "light",
       shortcuts: [
         { key: "ctrl+n", label: " summarize name ", send: " /session-summary name ", syncPiNameAfterMs: 8000 },
         { key: "alt+x", send: "/other" },
@@ -144,7 +158,7 @@ test("dashboard shortcut config is normalized and validated", async () => {
     { key: "C-n", label: "summarize name", send: "/session-summary name", syncPiNameAfterMs: 8000 },
     { key: "M-x", send: "/other" },
   ]);
-  assert.equal(await effectiveDashboardThemeSessionId(env), "session-1");
+  assert.deepEqual(await effectiveDashboardThemePreference(env), { syncPi: false, theme: "light" });
 });
 
 test("dashboard shortcut config allows non-reserved printable variants", async () => {
@@ -234,11 +248,11 @@ test("dashboard shortcut config rejects conflicts and invalid send values", asyn
   await assert.rejects(() => effectiveDashboardShortcuts(env), /must be one line/);
 });
 
-test("setDashboardThemeSessionId rejects blank ids", async () => {
+test("dashboard theme key is reserved from configurable shortcuts", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
   const env = { PI_AGENT_HUB_DIR: root };
-
-  await assert.rejects(() => setDashboardThemeSessionId("   ", env), /theme session id cannot be blank/);
+  await writeFile(configPath(env), JSON.stringify({ version: 1, dashboard: { shortcuts: [{ key: "t", send: "/theme" }] } }), "utf8");
+  await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 });
 
 test("setSessionPrelude rejects blank commands", async () => {
@@ -258,7 +272,7 @@ test("skill pool setter trims validates expands and preserves unrelated config",
     skills: { poolDirs: [join(root, "old-skills")] },
     mcp: { catalogPath },
     session: { prelude: "echo setup" },
-    dashboard: { themeSessionId: "session-1" },
+    dashboard: { themeSync: false, theme: "dark" },
   }), "utf8");
 
   await setSkillPoolDirs([`  ${pool}  `], env);
@@ -266,7 +280,7 @@ test("skill pool setter trims validates expands and preserves unrelated config",
   assert.deepEqual(await effectiveSkillPoolDirs(env), [pool]);
   assert.equal(await effectiveMcpCatalogPath(env), catalogPath);
   assert.equal(await effectiveSessionPrelude(env), "echo setup");
-  assert.equal(await effectiveDashboardThemeSessionId(env), "session-1");
+  assert.deepEqual(await effectiveDashboardThemePreference(env), { syncPi: false, theme: "dark" });
 });
 
 test("skill pool setter rejects blank paths", async () => {

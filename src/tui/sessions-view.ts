@@ -17,6 +17,7 @@ import { handleFormDialogInput, openForkDialog, openMoveGroupDialog, openRenameG
 import { handleConfirmInput, openDeleteDialog, openFinishDialog, renderConfirmDialog, renderRestartDialog } from "./confirm-dialogs.js";
 import { createPickerDialog, handlePickerDialogInput, renderPickerDialog } from "./picker-dialog.js";
 import { handleNewSessionInput, openNewSessionDialog, renderNewSessionDialog } from "./new-session-dialog.js";
+import { createThemeDialog, handleThemeDialogInput, renderThemeDialog } from "./theme-dialog.js";
 
 const MIN_RENDER_WIDTH = 40;
 const DOUBLE_CLICK_MS = 400;
@@ -39,6 +40,7 @@ export class SessionsView implements Component {
   private listWidth = 0;
   private listScrollTop = 0;
   private expandedBoardParentIds = new Set<string>();
+  private themeLoadRequest = 0;
 
   constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {
     this.grouping = actions.initialViewState?.grouping ?? "project";
@@ -71,12 +73,16 @@ export class SessionsView implements Component {
       else if (this.dialog.kind === "form") this.dialog = handleFormDialogInput(this.dialog, data, this.dialogContext());
       else if (this.dialog.kind === "confirm") this.dialog = handleConfirmInput(this.dialog, data, this.dialogContext());
       else if (this.dialog.kind === "picker") this.dialog = handlePickerDialogInput(this.dialog, data, this.dialogContext());
+      else if (this.dialog.kind === "theme") this.dialog = handleThemeDialogInput(this.dialog, data, this.dialogContext());
       else if (this.dialog.kind === "new" || this.dialog.kind === "repoPicker") this.dialog = handleNewSessionInput(this.dialog, data, this.dialogContext());
       return;
     }
 
     if (this.busy) {
-      if (data === "q") this.stop();
+      if (data === "q") {
+        this.themeLoadRequest += 1;
+        this.stop();
+      }
       return;
     }
 
@@ -112,6 +118,10 @@ export class SessionsView implements Component {
         this.closeSidePane(slot);
         return;
       }
+    }
+    if (data === "t") {
+      this.startThemeDialog();
+      return;
     }
     if (this.grouping === "stage" && !this.boardRows().length) {
       if (matchesKey(data, Key.slash)) this.startFilter();
@@ -222,6 +232,7 @@ export class SessionsView implements Component {
     }
     if (this.dialog?.kind === "help") return limitRows(renderHelp(width, this.theme), height, width, this.theme);
     if (this.dialog?.kind === "picker") return limitRows(renderPickerDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
+    if (this.dialog?.kind === "theme") return limitRows(renderThemeDialog(this.dialog, width, height, this.theme), height, width, this.theme);
     if (this.dialog?.kind === "new" || this.dialog?.kind === "repoPicker") return limitRows(renderNewSessionDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
     if (this.dialog?.kind === "form") return limitRows(renderFormDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
     if (this.dialog?.kind === "confirm") return limitRows(renderConfirmDialog(this.dialog, width, this.dialogContext()), height, width, this.theme);
@@ -518,6 +529,33 @@ export class SessionsView implements Component {
       if (target.kind === "archive-disclosure") this.toggleArchiveDisclosure();
       else this.attachSelected();
     }
+  }
+
+  private startThemeDialog() {
+    this.clearPendingRestart();
+    this.clearFlash();
+    const result = this.actions.themeSettings?.();
+    if (!result) {
+      this.message = "theme settings unavailable";
+      return;
+    }
+    if (isPromise(result)) {
+      const request = ++this.themeLoadRequest;
+      this.busy = true;
+      this.message = "loading themes...";
+      void result.then((input) => {
+        if (request !== this.themeLoadRequest) return;
+        this.busy = false;
+        this.message = undefined;
+        this.dialog = createThemeDialog(input);
+      }).catch((error: unknown) => {
+        if (request !== this.themeLoadRequest) return;
+        this.busy = false;
+        this.message = errorMessage(error);
+      });
+      return;
+    }
+    this.dialog = createThemeDialog(result);
   }
 
   private startPicker(mode: "skills" | "mcp") {
@@ -945,7 +983,8 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  Alt+A add repo     Alt+X remove extra",
     "",
     heading("Project state"),
-    "  s skills picker     m MCP picker     ←→/Tab switch picker columns",
+    "  s skills picker     m MCP picker     t theme settings",
+    "  pickers: ←→/Tab switch columns; theme: live preview, Enter apply, Esc cancel",
     "",
     heading("Return from managed sessions and panels"),
     "  Alt+Q panel to sidebar     Ctrl+Q return fallback     Alt+R rename session",

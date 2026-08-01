@@ -1,8 +1,10 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { KIND_ENV, PARENT_ID_ENV, SESSION_ID_ENV, STATE_ENV } from "../core/names.js";
 import { sessionsStateDir } from "../core/paths.js";
+import { loadThemeCommand } from "../core/theme-command.js";
+import { colorFromAnsi } from "../core/theme-color.js";
 import { HEARTBEAT_INTERVAL_MS } from "../core/status.js";
 import { registerMcpTools } from "../mcp/register-tools.js";
 import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, WorkflowModeDisplay, WorkflowRuntimeSnapshot, WorkflowStep } from "../core/types.js";
@@ -18,6 +20,8 @@ type PiContext = {
   hasUI?: boolean;
   ui?: {
     theme?: PiTheme;
+    getTheme?: (name: string) => Theme | undefined;
+    setTheme?: (theme: string | Theme) => unknown;
   };
   sessionManager?: {
     getSessionFile?: () => string | undefined;
@@ -37,17 +41,42 @@ const THEME_TOKENS: Exclude<ActiveThemeToken, "statusLineBg" | "selectedBg">[] =
 // base workflow metadata hides the rail; invalid mode decoration is omitted.
 const WORKFLOW_RUNTIME_ENTRY = "workflow-runtime";
 const STARTUP_HEARTBEAT_DELAYS_MS = [250, 1_000, 3_000];
+const THEME_COMMAND_INTERVAL_MS = 1_000;
 
 export default function piAgentHubExtension(pi: ExtensionAPI) {
   const globalState = globalThis as PiAgentHubGlobal;
   if (globalState[EXTENSION_KEY]) return;
   globalState[EXTENSION_KEY] = true;
 
+  const extensionStartedAt = Date.now();
   let currentState: Heartbeat["state"] = "starting";
-  let stateSince = Date.now();
+  let stateSince = extensionStartedAt;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let themeCommandTimer: ReturnType<typeof setInterval> | undefined;
   let startupHeartbeatTimers: ReturnType<typeof setTimeout>[] = [];
+  let lastThemeRevision: string | undefined;
   let mcpCleanup: (() => Promise<void>) | undefined;
+
+  async function applyThemeCommand(ctx: PiContext): Promise<boolean> {
+    if (!process.env[SESSION_ID_ENV] || process.env.PI_TMUX_SUBAGENTS_JOB_ID || ctx.hasUI === false || !ctx.ui?.getTheme || !ctx.ui.setTheme) return false;
+    try {
+      const command = await loadThemeCommand();
+      if (!command || command.revision === lastThemeRevision) return false;
+      lastThemeRevision = command.revision;
+      if (command.updatedAt <= extensionStartedAt) return false;
+      const theme = ctx.ui.getTheme(command.resolvedTheme);
+      if (!theme) return false;
+      ctx.ui.setTheme(theme);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function applyThemeAndHeartbeat(state: Heartbeat["state"], ctx: PiContext, message?: string) {
+    await applyThemeCommand(ctx);
+    await heartbeat(state, ctx, message);
+  }
 
   async function heartbeat(state: Heartbeat["state"], ctx: PiContext, message?: string) {
     // pi-tmux-subagents child bootstrap owns its richer Agent Hub heartbeat.
@@ -80,17 +109,19 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    await heartbeat("waiting", ctx as PiContext);
+    await applyThemeAndHeartbeat("waiting", ctx as PiContext);
     heartbeatTimer = setInterval(() => void heartbeat(currentState, ctx as PiContext), HEARTBEAT_INTERVAL_MS);
-    startupHeartbeatTimers = STARTUP_HEARTBEAT_DELAYS_MS.map((delay) => setTimeout(() => void heartbeat(currentState, ctx as PiContext), delay));
+    themeCommandTimer = setInterval(() => void applyThemeCommand(ctx as PiContext).then((applied) => applied ? heartbeat(currentState, ctx as PiContext) : undefined), THEME_COMMAND_INTERVAL_MS);
+    startupHeartbeatTimers = STARTUP_HEARTBEAT_DELAYS_MS.map((delay) => setTimeout(() => void applyThemeAndHeartbeat(currentState, ctx as PiContext), delay));
     mcpCleanup = await registerMcpTools(pi, (ctx as PiContext).cwd);
   });
 
-  pi.on("agent_start", async (_event, ctx) => heartbeat("running", ctx as PiContext));
-  pi.on("agent_end", async (_event, ctx) => heartbeat("waiting", ctx as PiContext));
+  pi.on("agent_start", async (_event, ctx) => applyThemeAndHeartbeat("running", ctx as PiContext));
+  pi.on("agent_end", async (_event, ctx) => applyThemeAndHeartbeat("waiting", ctx as PiContext));
   pi.on("session_shutdown", async (_event, ctx) => {
     try {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (themeCommandTimer) clearInterval(themeCommandTimer);
       for (const timer of startupHeartbeatTimers) clearTimeout(timer);
       startupHeartbeatTimers = [];
       await mcpCleanup?.();
@@ -199,21 +230,4 @@ function themeToken(theme: PiTheme, token: Exclude<ActiveThemeToken, "statusLine
   } catch {
     return undefined;
   }
-}
-
-function colorFromAnsi(ansi: string): string | number | undefined {
-  if (/\u001b\[39m/.test(ansi)) return "";
-  const truecolor = /\u001b\[38;2;(\d+);(\d+);(\d+)m/.exec(ansi);
-  if (truecolor) {
-    const rgb = truecolor.slice(1, 4).map((part) => Number(part));
-    if (rgb.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
-      return `#${rgb.map((part) => part.toString(16).padStart(2, "0")).join("")}`;
-    }
-  }
-  const indexed = /\u001b\[38;5;(\d+)m/.exec(ansi);
-  if (indexed) {
-    const value = Number(indexed[1]);
-    if (Number.isInteger(value) && value >= 0 && value <= 255) return value;
-  }
-  return undefined;
 }

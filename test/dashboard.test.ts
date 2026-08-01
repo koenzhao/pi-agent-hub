@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -52,14 +52,19 @@ test("openDashboard creates and attaches dashboard outside tmux", async () => {
   assert.ok(tmux.calls[2]?.args.includes("status-left"));
 });
 
-test("openDashboard configures dashboard chrome with Pi theme immediately", async () => {
-  const agent = await mkdtemp(join(tmpdir(), "pi-agent-hub-dashboard-"));
+test("openDashboard configures chrome from Pi global theme and ignores project-local settings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-dashboard-"));
+  const agent = join(root, "agent");
+  const project = join(root, "project");
   const tmux = fakeTmux(true);
   const runner = fakeRunner();
+  await mkdir(join(project, ".pi"), { recursive: true });
+  await mkdir(agent, { recursive: true });
   await writeFile(join(agent, "settings.json"), JSON.stringify({ theme: "light" }), "utf8");
+  await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
 
   await openDashboard({
-    cwd: "/repo",
+    cwd: project,
     command: "pi-agent-hub tui",
     insideTmux: false,
     env: { PI_CODING_AGENT_DIR: agent },
@@ -68,6 +73,27 @@ test("openDashboard configures dashboard chrome with Pi theme immediately", asyn
   const setOption = tmux.calls.find((call) => call.args[0] === "set-option" && call.args.includes("status-style"));
   assert.ok(setOption);
   assert.ok(setOption.args.includes("bg=#dce0e8,fg=#5a8080"));
+});
+
+test("openDashboard configures chrome from a detached Hub theme override", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-dashboard-"));
+  const agent = join(root, "agent");
+  const hub = join(root, "hub");
+  const tmux = fakeTmux(true);
+  await mkdir(agent, { recursive: true });
+  await mkdir(hub, { recursive: true });
+  await writeFile(join(agent, "settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
+  await writeFile(join(hub, "config.json"), JSON.stringify({ version: 1, dashboard: { themeSync: false, theme: "light" } }), "utf8");
+
+  await openDashboard({
+    cwd: "/repo",
+    command: "pi-agent-hub tui",
+    insideTmux: false,
+    env: { PI_CODING_AGENT_DIR: agent, PI_AGENT_HUB_DIR: hub },
+  }, tmux, fakeRunner());
+
+  const setOption = tmux.calls.find((call) => call.args[0] === "set-option" && call.args.includes("status-style"));
+  assert.ok(setOption?.args.includes("bg=#dce0e8,fg=#5a8080"));
 });
 
 test("openDashboard attaches existing dashboard outside tmux", async () => {

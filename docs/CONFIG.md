@@ -5,9 +5,10 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 ## Runtime state
 
 - Global state: `PI_AGENT_HUB_DIR` or `<PI_CODING_AGENT_DIR>/pi-agent-hub` or `~/.pi/agent/pi-agent-hub`
-- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, `session.worktreeDefault`, dashboard theme anchor, dashboard shortcuts)
+- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, `session.worktreeDefault`, dashboard theme sync/override, dashboard shortcuts)
 - Registry: `registry.json`
 - Heartbeats: `heartbeats/<session-id>.json`
+- Latest one-time managed-session theme request: `theme-command.json`
 - Optional session metadata: `session-metadata/<session-id>.json`
 - Multi-repo workspaces: `workspaces/<session-id>`
 - Hub-owned Git worktrees: `worktrees/<repo-name>/<session-id-prefix>-<branch-slug>`
@@ -118,7 +119,7 @@ Optional global config lives at `config.json` under the global state directory:
     "worktreeDefault": true
   },
   "dashboard": {
-    "themeSessionId": "last-entered-session-id",
+    "themeSync": true,
     "shortcuts": [
       {
         "key": "C-n",
@@ -161,7 +162,7 @@ pi-hub config unset worktree-default
 }
 ```
 
-Supported key spelling includes plain single characters, `C-x`/`ctrl+x`, and `M-x`/`alt+x`. Built-in dashboard keys and tmux return/focus keys are reserved, including the panel-close prefix `x`, sidebar return `M-q`, and `M-1` through `M-4`; shifted digit characters such as `!` are available for custom shortcuts. `send` must be a single nonblank line; this is not a shell-command or macro facility.
+Supported key spelling includes plain single characters, `C-x`/`ctrl+x`, and `M-x`/`alt+x`. Built-in dashboard keys and tmux return/focus keys are reserved, including theme settings `t`, the panel-close prefix `x`, sidebar return `M-q`, and `M-1` through `M-4`; shifted digit characters such as `!` are available for custom shortcuts. `send` must be a single nonblank line; this is not a shell-command or macro facility.
 
 `syncPiNameAfterMs` is a pi-agent-hub-specific post-action for `/session-summary name` workflows: after sending the shortcut, Hub waits that many milliseconds and then syncs the selected dashboard title from Pi's latest `session_info.name`, equivalent to pressing `N` later. `/session-summary name` is not built into Hub; it is provided by the optional [`pi-session-summary`](https://github.com/masta-g3/pi-session-summary) Pi extension.
 
@@ -248,10 +249,16 @@ pi-hub mcp-pool
 
 ## Theme behavior
 
-The dashboard uses the last-entered managed session as its theme anchor when that session still exists, falling back to the initially selected session. Managed sessions publish the active `ctx.ui.theme` name/path and resolved color tokens through the heartbeat, so manual theme changes and theme-sync extensions are reflected without package-specific integration. The last-entered theme anchor is stored as `dashboard.themeSessionId` in hub config.
+Press `t` to open dashboard theme settings. The list contains Pi's `dark` and `light` themes plus custom/package themes from global Pi resources. Project-local themes are deliberately excluded because a synchronized choice becomes Pi's global default. Pi 0.83 or newer is required for the matching Automatic light/dark setting.
 
-For the anchored session, a fresh live theme wins. When no fresh live theme is available, the standalone TUI reads Pi settings from that session project or dashboard project first (`.pi/settings.json`), then global Pi settings (`~/.pi/agent/settings.json` or `PI_CODING_AGENT_DIR/settings.json`). Custom themes are loaded from `.pi/themes/<name>.json`, `<agent-dir>/themes/<name>.json`, configured theme paths, or package theme resources.
+Moving through fixed themes previews the dashboard immediately. Selecting Automatic exposes separate light and dark choices; `←`/`→` changes the focused choice. `Space` toggles **Sync to Pi**, `Enter` saves, and `Escape` restores the theme active when the dialog opened. Preview updates dashboard ANSI, dashboard status chrome, and sidebar pane borders only—it does not write settings or alter managed Pi sessions.
 
-While open, the dashboard periodically reloads the effective theme state and updates its ANSI colors when tokens change.
+Synchronization defaults on when `dashboard.themeSync` is absent or `true`. Pi's global `theme` in `<PI_CODING_AGENT_DIR>/settings.json` is then the source of truth; Hub does not mirror it. Confirming saves through Pi's settings manager, clears any detached Hub override, and asks every currently live managed parent session to apply the resolved concrete theme once. New managed and unmanaged Pi processes inherit the saved global setting normally. Existing subagent processes are not targets, and a running session may change its own theme afterward because Hub does not continuously enforce the choice.
 
-Built-in Pi theme names `light` and `dark` map to compact theme token maps. Missing or invalid custom themes fall back to the built-in dark token map. The dashboard uses `selectedBg` for the selected session row, `accent` for the focused panel border, reverse-color title badge, and slot cues, and `border` or `dim` for inactive panel borders and titles. Dashboard pane chrome and dashboard/managed-session status bars are refreshed from the same effective theme while the dashboard is running.
+Set `dashboard.themeSync` to `false` by toggling Sync off in the dialog. Hub snapshots the visible Pi theme setting into `dashboard.theme` and thereafter uses that independent override without writing Pi settings or changing Pi sessions. Re-enabling sync pushes the visible Hub setting to Pi globally. The old `dashboard.themeSessionId` anchor is obsolete and is removed the next time theme preferences are saved.
+
+Pi represents Automatic as `<light-theme>/<dark-theme>`. Hub resolves the pair once when the dashboard starts using `COLORFGBG` when available and a dark fallback otherwise; it stays visually stable for that dashboard run instead of following later terminal appearance changes. Existing live processes receive the currently resolved concrete theme once, while new/restarted Pi processes retain Pi's normal Automatic behavior from the saved pair.
+
+The dashboard periodically checks the lightweight effective setting and selected source file, but does not rerun package resolution every second. Reopen/reload the dashboard after installing or removing global theme packages. Missing or invalid selected themes render with Hub's bounded dark theme fallback without rewriting the saved setting.
+
+Managed sessions continue publishing their actual `ctx.ui.theme` snapshot through heartbeats for their own tmux footer and chrome. Session entry, panel assignment, selection movement, and heartbeat freshness never choose or recolor the dashboard theme. The dashboard uses `selectedBg` for selected rows, `accent` for focused panel borders/title badges/slot cues, and `border` or `dim` for inactive panel chrome.

@@ -55,6 +55,66 @@ test("theme refresh loop ignores unchanged tokens", async () => {
   assert.deepEqual(applied, []);
 });
 
+test("theme refresh loop does not load or advance its key while preview is suspended", async () => {
+  const changed: SessionsTheme = { ...darkTheme, accent: "#010203" };
+  const applied: SessionsTheme[] = [];
+  let suspended = true;
+  let calls = 0;
+  const stop = startThemeRefreshLoop({
+    initialTheme: darkTheme,
+    intervalMs: 5,
+    suspended: () => suspended,
+    load: async () => { calls += 1; return changed; },
+    apply: (theme) => { applied.push(theme); },
+  });
+
+  try {
+    await wait(20);
+    assert.equal(calls, 0);
+    suspended = false;
+    await waitFor(() => applied.length === 1);
+  } finally {
+    stop();
+  }
+
+  assert.deepEqual(applied, [changed]);
+});
+
+test("theme refresh loop discards an in-flight load when preview becomes suspended", async () => {
+  const changed: SessionsTheme = { ...darkTheme, accent: "#040506" };
+  const applied: SessionsTheme[] = [];
+  let suspended = false;
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const firstLoad = new Promise<void>((resolve) => { release = resolve; });
+  const stop = startThemeRefreshLoop({
+    initialTheme: darkTheme,
+    intervalMs: 5,
+    suspended: () => suspended,
+    load: async () => {
+      calls += 1;
+      if (calls === 1) await firstLoad;
+      return changed;
+    },
+    apply: (theme) => { applied.push(theme); },
+  });
+
+  try {
+    await waitFor(() => calls === 1);
+    suspended = true;
+    release?.();
+    await wait(20);
+    assert.deepEqual(applied, []);
+    suspended = false;
+    await waitFor(() => applied.length === 1);
+  } finally {
+    stop();
+  }
+
+  assert.ok(calls >= 2);
+  assert.deepEqual(applied, [changed]);
+});
+
 test("theme refresh loop does not apply in-flight themes after stop", async () => {
   const applied: SessionsTheme[] = [];
   let release: (() => void) | undefined;

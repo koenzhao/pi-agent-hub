@@ -17,9 +17,15 @@ export interface SessionsConfig {
     worktreeDefault?: boolean;
   };
   dashboard?: {
-    themeSessionId?: string;
+    themeSync?: boolean;
+    theme?: string;
     shortcuts?: DashboardShortcut[];
   };
+}
+
+export interface DashboardThemePreference {
+  syncPi: boolean;
+  theme?: string;
 }
 
 export function configPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -52,9 +58,11 @@ export async function effectiveWorktreeDefault(env: NodeJS.ProcessEnv = process.
   return (await loadSessionsConfig(env)).session?.worktreeDefault ?? false;
 }
 
-export async function effectiveDashboardThemeSessionId(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
-  const id = (await loadSessionsConfig(env)).dashboard?.themeSessionId?.trim();
-  return id || undefined;
+export async function effectiveDashboardThemePreference(env: NodeJS.ProcessEnv = process.env): Promise<DashboardThemePreference> {
+  const dashboard = (await loadSessionsConfig(env)).dashboard;
+  const syncPi = dashboard?.themeSync ?? true;
+  const theme = dashboard?.theme?.trim();
+  return { syncPi, ...(theme ? { theme } : {}) };
 }
 
 export async function effectiveDashboardShortcuts(env: NodeJS.ProcessEnv = process.env): Promise<DashboardShortcut[]> {
@@ -101,11 +109,16 @@ export async function unsetWorktreeDefault(env: NodeJS.ProcessEnv = process.env)
   await writeJsonAtomic(configPath(env), withoutSessionProperty(config, "worktreeDefault"));
 }
 
-export async function setDashboardThemeSessionId(sessionId: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const trimmed = sessionId.trim();
-  if (!trimmed) throw new Error("theme session id cannot be blank");
+export async function setDashboardThemePreference(preference: DashboardThemePreference, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const theme = preference.theme?.trim();
+  if (!preference.syncPi && !theme) throw new Error("dashboard theme cannot be blank");
   const config = await loadSessionsConfig(env);
-  await writeJsonAtomic(configPath(env), { ...config, dashboard: { ...config.dashboard, themeSessionId: trimmed } });
+  const dashboard = { ...config.dashboard } as NonNullable<SessionsConfig["dashboard"]> & { themeSessionId?: unknown };
+  delete dashboard.themeSessionId;
+  dashboard.themeSync = preference.syncPi;
+  if (preference.syncPi) delete dashboard.theme;
+  else dashboard.theme = theme;
+  await writeJsonAtomic(configPath(env), { ...config, dashboard });
 }
 
 function validateConfig(config: SessionsConfig): void {
@@ -117,7 +130,8 @@ function validateConfig(config: SessionsConfig): void {
   if (config.session?.prelude !== undefined && typeof config.session.prelude !== "string") throw new Error("Invalid session.prelude in pi-agent-hub config");
   if (config.session?.worktreeDefault !== undefined && typeof config.session.worktreeDefault !== "boolean") throw new Error("Invalid session.worktreeDefault in pi-agent-hub config");
   if (config.dashboard !== undefined && !isPlainObject(config.dashboard)) throw new Error("Invalid dashboard config in pi-agent-hub config");
-  if (config.dashboard?.themeSessionId !== undefined && typeof config.dashboard.themeSessionId !== "string") throw new Error("Invalid dashboard.themeSessionId in pi-agent-hub config");
+  if (config.dashboard?.themeSync !== undefined && typeof config.dashboard.themeSync !== "boolean") throw new Error("Invalid dashboard.themeSync in pi-agent-hub config");
+  if (config.dashboard?.theme !== undefined && typeof config.dashboard.theme !== "string") throw new Error("Invalid dashboard.theme in pi-agent-hub config");
   validateDashboardShortcuts(config.dashboard?.shortcuts);
 }
 

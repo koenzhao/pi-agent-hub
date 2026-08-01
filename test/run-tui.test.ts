@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNewFormContext, createRegistryMutator, loadDashboardTheme, mapSidePaneSessionIds, resolveDashboardThemeSessionId, restartAllTargets, startSidePanePresenceRefreshLoop, syncSidePaneSessionFooters } from "../src/app/run-tui.js";
+import { buildNewFormContext, createRegistryMutator, mapSidePaneSessionIds, persistDashboardThemeSelection, restartAllTargets, startSidePanePresenceRefreshLoop, syncSidePaneSessionFooters } from "../src/app/run-tui.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 function deferred<T = void>() {
@@ -36,21 +36,39 @@ test("restartAllTargets includes only active parent sessions", () => {
   assert.deepEqual(restartAllTargets([active, backlog, archived, subagent]), [active]);
 });
 
-test("resolveDashboardThemeSessionId prefers persisted existing session", () => {
-  const first = session("first", "/repo/first", "one");
-  const second = session("second", "/repo/second", "two");
+test("persistDashboardThemeSelection saves Pi before Hub and publishes only while synced", async () => {
+  const events: string[] = [];
+  await persistDashboardThemeSelection("light/dark", true, {
+    savePi: async () => { events.push("pi"); },
+    savePreference: async (preference) => { events.push(`hub:${preference.syncPi}`); },
+    publish: async () => { events.push("publish"); },
+  });
+  assert.deepEqual(events, ["pi", "hub:true", "publish"]);
 
-  assert.equal(resolveDashboardThemeSessionId([first, second], "second", "first"), "second");
-  assert.equal(resolveDashboardThemeSessionId([first, second], "missing", "first"), "first");
+  events.length = 0;
+  await persistDashboardThemeSelection("dark", false, {
+    savePi: async () => { events.push("pi"); },
+    savePreference: async (preference) => { events.push(`hub:${preference.syncPi}:${preference.theme}`); },
+    publish: async () => { events.push("publish"); },
+  });
+  assert.deepEqual(events, ["hub:false:dark"]);
 });
 
-test("loadDashboardTheme follows the pinned session instead of selection movement", async () => {
-  const first = { ...session("first", "/repo/first", "one"), activeTheme: { tokens: { accent: "#111111" } } };
-  const second = { ...session("second", "/repo/second", "two"), activeTheme: { tokens: { accent: "#222222" } } };
+test("persistDashboardThemeSelection does not publish after Pi or Hub write failures", async () => {
+  let published = false;
+  await assert.rejects(() => persistDashboardThemeSelection("light", true, {
+    savePi: async () => { throw new Error("pi failed"); },
+    savePreference: async () => {},
+    publish: async () => { published = true; },
+  }), /pi failed/);
+  assert.equal(published, false);
 
-  const theme = await loadDashboardTheme("/dashboard", [first, second], "first");
-
-  assert.equal(theme.accent, "#111111");
+  await assert.rejects(() => persistDashboardThemeSelection("light", true, {
+    savePi: async () => {},
+    savePreference: async () => { throw new Error("hub failed"); },
+    publish: async () => { published = true; },
+  }), /Pi default changed; Hub preference not saved: hub failed/);
+  assert.equal(published, false);
 });
 
 test("registry mutator pauses runs refreshes renders and resumes in order", async () => {

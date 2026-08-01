@@ -100,12 +100,53 @@ test("help overlay opens and closes", () => {
   assert.match(help, /o reset to one panel/);
   assert.match(help, /mouse click select · double-click open\/switch/);
   assert.match(help, /v toggle compact\/card rows/);
+  assert.match(help, /t theme settings/);
   assert.match(help, /Active and Backlog keep project\/group headers/);
   assert.match(help, /Archived shows 5 parent cascades/);
   assert.match(help, /Board view lanes canonical workflow sessions by producer step, then OTHER ACTIVE/);
   assert.match(help, /subagents start collapsed: Space toggles a tree/);
   view.handleInput("\u001b");
   assert.doesNotMatch(view.render(80).join("\n"), /pi agent hub help/);
+});
+
+test("t opens theme settings from an empty dashboard and Escape restores preview", () => {
+  const previews: string[] = [];
+  const cancelled: string[] = [];
+  const view = new SessionsView(new SessionsController(), () => {}, {
+    themeSettings: () => ({ names: ["dark", "light"], setting: "dark", syncPi: true }),
+    previewDashboardTheme: (setting) => { previews.push(setting); },
+    cancelDashboardTheme: (setting) => { cancelled.push(setting); },
+  });
+
+  view.handleInput("t");
+  assert.match(view.render(80).join("\n"), /Theme/);
+  view.handleInput("\u001b[B");
+  assert.deepEqual(previews, ["light"]);
+  view.handleInput("\u001b");
+  assert.deepEqual(cancelled, ["dark"]);
+  assert.doesNotMatch(view.render(80).join("\n"), /Sync to Pi/);
+});
+
+test("theme settings stay bounded by short terminal height", () => {
+  const view = new SessionsView(new SessionsController(), () => {}, {
+    terminalRows: () => 5,
+    themeSettings: () => ({ names: ["dark", "light", "one", "two", "three"], setting: "dark", syncPi: true }),
+  });
+  view.handleInput("t");
+  assert.ok(view.render(80).length <= 5);
+});
+
+test("t opens theme settings with a selected session and suppresses session shortcuts", () => {
+  let sent = false;
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: [session("api", "api")] }), () => {}, {
+    themeSettings: () => ({ names: ["dark", "light"], setting: "dark", syncPi: true }),
+    sendMessage: () => { sent = true; },
+  });
+
+  view.handleInput("t");
+  view.handleInput("p");
+  assert.equal(sent, false);
+  assert.match(view.render(80).join("\n"), /Sync to Pi/);
 });
 
 test("q quits from help overlay", () => {

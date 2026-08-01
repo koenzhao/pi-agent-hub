@@ -9,6 +9,7 @@ import type { FormDialog } from "./form-dialogs.js";
 import type { ConfirmDialog } from "./confirm-dialogs.js";
 import type { PickerDialog } from "./picker-dialog.js";
 import type { NewSessionDialog, RepoPickerDialog } from "./new-session-dialog.js";
+import type { ThemeDialog, ThemeDialogInput } from "./theme-dialog.js";
 
 export interface SessionDialogInput {
   title: string;
@@ -68,6 +69,10 @@ export interface SessionsViewActions {
   saveSkillPoolDir?: (dir: string) => PickerItem[] | Promise<PickerItem[]>;
   mcpServers?: () => PickerItem[] | Promise<PickerItem[]>;
   applyMcpServers?: (items: PickerItem[]) => void | Promise<void>;
+  themeSettings?: () => ThemeDialogInput | Promise<ThemeDialogInput>;
+  previewDashboardTheme?: (setting: string) => void;
+  cancelDashboardTheme?: (setting: string) => void;
+  applyDashboardTheme?: (setting: string, syncPi: boolean) => void | Promise<void>;
   sendMessage?: (tmuxSession: string, message: string) => unknown;
   dashboardShortcuts?: readonly DashboardShortcut[];
   runDashboardShortcut?: (sessionId: string, shortcut: DashboardShortcut) => unknown;
@@ -77,7 +82,7 @@ export interface SessionsViewActions {
   terminalRows?: () => number;
 }
 
-export type SessionDialog = { kind: "help" } | PromptDialog | FormDialog | ConfirmDialog | PickerDialog | NewSessionDialog | RepoPickerDialog;
+export type SessionDialog = { kind: "help" } | PromptDialog | FormDialog | ConfirmDialog | PickerDialog | NewSessionDialog | RepoPickerDialog | ThemeDialog;
 
 export interface DialogContext {
   controller: SessionsController;

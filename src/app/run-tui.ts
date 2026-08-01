@@ -7,11 +7,12 @@ import { startRefreshLoop, type RefreshLoopHandle } from "./refresh-loop.js";
 import { SessionsView } from "../tui/sessions-view.js";
 import { MOUSE_DISABLE, MOUSE_ENABLE } from "../tui/mouse.js";
 import type { NewFormContext } from "../tui/new-form.js";
-import { loadManagedSessionTheme, loadSessionsTheme, type SessionsTheme } from "../tui/theme.js";
+import { dashboardThemeForSetting, detectTerminalAppearance, effectiveDashboardTheme, loadGlobalThemeCatalog, loadManagedSessionTheme, saveGlobalPiTheme, type SessionsTheme } from "../tui/theme.js";
 import { loadProjectSkillsState, setProjectSkills } from "../skills/attach.js";
 import { listSkillPool } from "../skills/catalog.js";
 import { loadMcpCatalog, loadProjectMcpState, setProjectMcpServers } from "../mcp/config.js";
-import { effectiveDashboardShortcuts, effectiveDashboardThemeSessionId, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemeSessionId, setSkillPoolDirs } from "../core/config.js";
+import { effectiveDashboardShortcuts, effectiveDashboardThemePreference, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemePreference, setSkillPoolDirs } from "../core/config.js";
+import { publishThemeCommand } from "../core/theme-command.js";
 import { projectStateCwd } from "../core/multi-repo.js";
 import { tmuxChromeFromTheme } from "../core/chrome.js";
 import { sessionSection } from "../core/session-bucket.js";
@@ -70,6 +71,7 @@ export interface ThemeRefreshLoopOptions {
   initialTheme: SessionsTheme;
   load: () => Promise<SessionsTheme>;
   apply: (theme: SessionsTheme) => void;
+  suspended?: () => boolean;
   intervalMs?: number;
 }
 
@@ -78,11 +80,11 @@ export function startThemeRefreshLoop(options: ThemeRefreshLoopOptions): () => v
   let inFlight: Promise<void> | undefined;
   let stopped = false;
   const run = () => {
-    if (stopped || inFlight) return;
+    if (stopped || inFlight || options.suspended?.()) return;
     inFlight = (async () => {
       try {
         const nextTheme = await options.load();
-        if (stopped) return;
+        if (stopped || options.suspended?.()) return;
         const nextThemeKey = themeKey(nextTheme);
         if (nextThemeKey === activeThemeKey) return;
         activeThemeKey = nextThemeKey;
@@ -101,6 +103,23 @@ export function startThemeRefreshLoop(options: ThemeRefreshLoopOptions): () => v
 
 function themeKey(theme: SessionsTheme): string {
   return JSON.stringify(theme);
+}
+
+export interface PersistDashboardThemeDeps {
+  savePi(setting: string): Promise<void>;
+  savePreference(preference: { syncPi: boolean; theme?: string }): Promise<void>;
+  publish(setting: string): Promise<void>;
+}
+
+export async function persistDashboardThemeSelection(setting: string, syncPi: boolean, deps: PersistDashboardThemeDeps): Promise<void> {
+  if (syncPi) await deps.savePi(setting);
+  try {
+    await deps.savePreference({ syncPi, ...(syncPi ? {} : { theme: setting }) });
+  } catch (error) {
+    if (syncPi) throw new Error(`Pi default changed; Hub preference not saved: ${errorMessage(error)}`);
+    throw error;
+  }
+  if (syncPi) await deps.publish(setting);
 }
 
 export interface RegistryMutatorDeps {
@@ -133,13 +152,13 @@ export async function runTui(): Promise<void> {
   const cwd = process.cwd();
   const controller = new SessionsController();
   await controller.refresh();
-  let dashboardThemeSessionId = resolveDashboardThemeSessionId(controller.snapshot().registry.sessions, await effectiveDashboardThemeSessionId(), controller.selected()?.id);
-  const pinDashboardThemeSession = (session: ManagedSession) => {
-    dashboardThemeSessionId = session.id;
-    void setDashboardThemeSessionId(session.id).catch(() => {});
-  };
-  const theme = await loadDashboardTheme(cwd, controller.snapshot().registry.sessions, dashboardThemeSessionId);
+  const terminalAppearance = detectTerminalAppearance();
+  const themeCatalog = await loadGlobalThemeCatalog();
+  let themePreference = await effectiveDashboardThemePreference();
+  let dashboardTheme = await effectiveDashboardTheme(themeCatalog, themePreference, terminalAppearance);
+  const theme = dashboardTheme.theme;
   let currentTheme = theme;
+  let themePreviewActive = false;
   let dashboardStatusVisible = true;
   const applyDashboardStatusVisibility = async (visible: boolean, force = false) => {
     if (!process.env.TMUX || (!force && dashboardStatusVisible === visible)) return;
@@ -151,13 +170,7 @@ export async function runTui(): Promise<void> {
     void configureDashboardStatusBar({ name: DASHBOARD_SESSION, cwd, theme: nextTheme, visible: dashboardStatusVisible }).catch(() => {});
   };
   const applyManagedSessionTheme = async (session: ManagedSession, visible = !sidePaneSlots.includes(session.tmuxSession)) => {
-    pinDashboardThemeSession(session);
     const sessionTheme = await loadManagedSessionTheme(session);
-    currentTheme = sessionTheme;
-    view.setTheme(sessionTheme);
-    syncDashboardChrome(sessionTheme);
-    tui.invalidate();
-    tui.requestRender();
     await configureManagedSessionStatusBar({
       name: session.tmuxSession,
       title: session.title,
@@ -165,8 +178,6 @@ export async function runTui(): Promise<void> {
       theme: sessionTheme,
       visible,
     });
-    const ownPane = process.env.TMUX_PANE;
-    if (ownPane && sidePaneSlots.some(Boolean)) await setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
   };
   syncDashboardChrome(theme);
   const terminal = new ProcessTerminal();
@@ -378,12 +389,31 @@ export async function runTui(): Promise<void> {
       resumeSidePanePresenceLoop();
     }
   };
+  const applyDashboardThemeLocal = (nextTheme: SessionsTheme) => {
+    currentTheme = nextTheme;
+    view.setTheme(nextTheme);
+    syncDashboardChrome(nextTheme);
+    const ownPane = process.env.TMUX_PANE;
+    if (ownPane && sidePaneSlots.some(Boolean)) void setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(nextTheme)).catch(() => {});
+    tui.invalidate();
+    tui.requestRender();
+  };
+  const applyThemeToLiveManagedChrome = async (nextTheme: SessionsTheme) => {
+    for (const session of controller.snapshot().registry.sessions) {
+      if (session.kind === "subagent" || session.status === "stopped" || session.status === "error") continue;
+      await configureManagedSessionStatusBar({
+        name: session.tmuxSession,
+        title: session.title,
+        cwd: session.cwd,
+        theme: nextTheme,
+        visible: !sidePaneSlots.includes(session.tmuxSession),
+      }).catch(() => {});
+    }
+  };
   const view = new SessionsView(controller, stop, {
     initialViewState,
     saveViewState(state) { void writeJsonAtomic(uiStatePath(), state); },
     attachOutsideTmux(tmuxSession) {
-      const session = controller.snapshot().registry.sessions.find((item) => item.tmuxSession === tmuxSession);
-      if (session) pinDashboardThemeSession(session);
       stop();
       const attach = attachSessionCommand(tmuxSession);
       spawn(attach.command, attach.args, { stdio: "inherit" });
@@ -567,6 +597,36 @@ export async function runTui(): Promise<void> {
     async applyMcpServers(items) {
       await setProjectMcpServers(selectedProjectCwd(controller.selected(), cwd), items.filter((item) => item.enabled).map((item) => item.name));
     },
+    async themeSettings() {
+      themePreference = await effectiveDashboardThemePreference();
+      dashboardTheme = await effectiveDashboardTheme(themeCatalog, themePreference, terminalAppearance);
+      return {
+        names: themeCatalog.options.map((option) => option.name),
+        setting: dashboardTheme.setting,
+        syncPi: themePreference.syncPi,
+      };
+    },
+    previewDashboardTheme(setting) {
+      themePreviewActive = true;
+      applyDashboardThemeLocal(dashboardThemeForSetting(themeCatalog, setting, terminalAppearance).theme);
+    },
+    cancelDashboardTheme(setting) {
+      applyDashboardThemeLocal(dashboardThemeForSetting(themeCatalog, setting, terminalAppearance).theme);
+      themePreviewActive = false;
+    },
+    async applyDashboardTheme(setting, syncPi) {
+      const next = dashboardThemeForSetting(themeCatalog, setting, terminalAppearance);
+      await persistDashboardThemeSelection(setting, syncPi, {
+        savePi: (value) => saveGlobalPiTheme(value),
+        savePreference: (preference) => setDashboardThemePreference(preference),
+        publish: (value) => publishThemeCommand(value, next.name).then(() => {}),
+      });
+      themePreference = { syncPi, ...(syncPi ? {} : { theme: setting }) };
+      dashboardTheme = next;
+      applyDashboardThemeLocal(next.theme);
+      if (syncPi) await applyThemeToLiveManagedChrome(next.theme);
+      themePreviewActive = false;
+    },
     copy(text) {
       if (process.platform !== "darwin") return;
       const child = spawn("pbcopy", [], { stdio: ["pipe", "ignore", "ignore"] });
@@ -579,16 +639,15 @@ export async function runTui(): Promise<void> {
   }, theme);
   stopThemeLoop = startThemeRefreshLoop({
     initialTheme: theme,
-    load: () => loadDashboardTheme(cwd, controller.snapshot().registry.sessions, dashboardThemeSessionId),
+    suspended: () => themePreviewActive,
+    async load() {
+      themePreference = await effectiveDashboardThemePreference();
+      dashboardTheme = await effectiveDashboardTheme(themeCatalog, themePreference, terminalAppearance);
+      return dashboardTheme.theme;
+    },
     apply(nextTheme) {
-      currentTheme = nextTheme;
-      view.setTheme(nextTheme);
-      syncDashboardChrome(nextTheme);
-      const ownPane = process.env.TMUX_PANE;
-      if (ownPane && sidePaneSlots.some(Boolean)) void setWindowPaneBorderStatus(ownPane, true, tmuxChromeFromTheme(currentTheme)).catch(() => {});
+      applyDashboardThemeLocal(nextTheme);
       void serializeSidePaneOperation(() => syncManagedSessionStatusBars(new Set(sidePaneSlots.filter((session): session is string => Boolean(session))))).catch(() => {});
-      tui.invalidate();
-      tui.requestRender();
     },
   });
   stopActionLoop = startDashboardActionLoop(async () => {
@@ -606,17 +665,6 @@ export async function runTui(): Promise<void> {
   terminal.write(MOUSE_ENABLE);
   if (process.env.TMUX) void setDashboardMouse({ name: DASHBOARD_SESSION, enabled: true }).catch(() => {});
   stopLoop = startRefreshLoop(controller, tui);
-}
-
-export function resolveDashboardThemeSessionId(sessions: ManagedSession[], configuredId: string | undefined, selectedId: string | undefined): string | undefined {
-  if (configuredId && sessions.some((session) => session.id === configuredId)) return configuredId;
-  return selectedId;
-}
-
-export async function loadDashboardTheme(cwd: string, sessions: ManagedSession[], sessionId: string | undefined): Promise<SessionsTheme> {
-  const session = sessions.find((item) => item.id === sessionId);
-  if (session) return loadManagedSessionTheme(session);
-  return loadSessionsTheme({ cwd });
 }
 
 function startDashboardActionLoop(processAction: () => Promise<void>, intervalMs = 250): () => void {

@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import piAgentHubExtension from "../src/extension/index.js";
 import { SESSION_ID_ENV, STATE_ENV } from "../src/core/names.js";
 import { heartbeatPath } from "../src/core/paths.js";
+import { publishThemeCommand } from "../src/core/theme-command.js";
 import type { Heartbeat } from "../src/core/types.js";
 
 const EXTENSION_KEY = Symbol.for("pi-agent-hub.extension.loaded");
@@ -49,6 +50,7 @@ test("piAgentHubExtension leaves tmux subagent heartbeats to child bootstrap", a
   const childHeartbeat = `${JSON.stringify({ owner: "child-bootstrap" })}\n`;
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, childHeartbeat, "utf8");
+  await publishThemeCommand("light", "light", { PI_AGENT_HUB_DIR: root }, { now: Date.now() + 10, revision: "subagent-command" });
   const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
   const pi = {
     on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) {
@@ -59,7 +61,14 @@ test("piAgentHubExtension leaves tmux subagent heartbeats to child bootstrap", a
 
   try {
     piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
-    await handlers.get("session_start")?.({}, { cwd: root, hasUI: false });
+    await handlers.get("session_start")?.({}, {
+      cwd: root,
+      hasUI: true,
+      ui: {
+        getTheme() { throw new Error("subagent theme command should not be read"); },
+        setTheme() { throw new Error("subagent theme command should not be applied"); },
+      },
+    });
 
     assert.equal(await readFile(file, "utf8"), childHeartbeat);
   } finally {
@@ -110,6 +119,212 @@ test("piAgentHubExtension refreshes active theme shortly after session start", a
     assert.equal(heartbeat.activeTheme?.tokens?.accent, "#020304");
   } finally {
     await handlers.get("session_shutdown")?.({}, { cwd: root });
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+});
+
+test("piAgentHubExtension does not apply theme commands in unmanaged Pi processes", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-theme-command-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  delete process.env[SESSION_ID_ENV];
+  process.env[STATE_ENV] = root;
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) { handlers.set(name, handler); },
+    registerTool() {},
+  };
+  const applied: string[] = [];
+  const ctx = {
+    cwd: root,
+    hasUI: true,
+    ui: {
+      theme: { name: "dark" },
+      getTheme: () => ({ name: "light" }),
+      setTheme: (theme: { name: string }) => { applied.push(theme.name); },
+    },
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await publishThemeCommand("light", "light", { PI_AGENT_HUB_DIR: root }, { now: Date.now() + 10, revision: "unmanaged-command" });
+    await handlers.get("session_start")?.({}, ctx);
+    assert.deepEqual(applied, []);
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx);
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+});
+
+test("piAgentHubExtension applies one theme command created before session_start and refreshes heartbeat", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-theme-command-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  process.env[SESSION_ID_ENV] = "session-theme-command";
+  process.env[STATE_ENV] = root;
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) { handlers.set(name, handler); },
+    registerTool() {},
+  };
+  const dark = { name: "dark", getFgAnsi: () => "\u001b[38;2;1;1;1m" };
+  const light = { name: "light", getFgAnsi: () => "\u001b[38;2;2;2;2m" };
+  const applied: string[] = [];
+  const ctx = {
+    cwd: root,
+    hasUI: true,
+    ui: {
+      theme: dark,
+      getTheme(name: string) { return name === "light" ? light : undefined; },
+      setTheme(theme: typeof light) { this.theme = theme; applied.push(theme.name); },
+    },
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await publishThemeCommand("light/dark", "light", { PI_AGENT_HUB_DIR: root }, { now: Date.now() + 10, revision: "new-command" });
+    await handlers.get("session_start")?.({}, ctx);
+    await handlers.get("agent_start")?.({}, ctx);
+    await publishThemeCommand("missing", "missing", { PI_AGENT_HUB_DIR: root }, { now: Date.now() + 20, revision: "missing-command" });
+    await handlers.get("agent_end")?.({}, ctx);
+
+    assert.deepEqual(applied, ["light"]);
+    const heartbeat = JSON.parse(await readFile(heartbeatPath("session-theme-command", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+    assert.equal(heartbeat.activeTheme?.name, "light");
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx);
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+});
+
+test("piAgentHubExtension polls a new theme command while the session is idle", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-theme-command-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  process.env[SESSION_ID_ENV] = "session-idle-theme-command";
+  process.env[STATE_ENV] = root;
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) { handlers.set(name, handler); },
+    registerTool() {},
+  };
+  const applied: string[] = [];
+  const ctx = {
+    cwd: root,
+    hasUI: true,
+    ui: {
+      theme: { name: "dark" },
+      getTheme: (name: string) => ({ name }),
+      setTheme(theme: { name: string }) { this.theme = theme; applied.push(theme.name); },
+    },
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await handlers.get("session_start")?.({}, ctx);
+    await publishThemeCommand("light", "light", { PI_AGENT_HUB_DIR: root }, { now: Date.now() + 10, revision: "idle-command" });
+    const heartbeat = await waitForHeartbeat(root, "session-idle-theme-command", (item) => item.activeTheme?.name === "light");
+    assert.deepEqual(applied, ["light"]);
+    assert.equal(heartbeat.activeTheme?.name, "light");
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx);
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+});
+
+test("piAgentHubExtension ignores a theme command created exactly at process start", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-theme-command-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  process.env[SESSION_ID_ENV] = "session-equal-theme-command";
+  process.env[STATE_ENV] = root;
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const applied: string[] = [];
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) { handlers.set(name, handler); },
+    registerTool() {},
+  };
+  const ctx = {
+    cwd: root,
+    hasUI: true,
+    ui: {
+      theme: { name: "dark" },
+      getTheme: () => ({ name: "light" }),
+      setTheme: (theme: { name: string }) => { applied.push(theme.name); },
+    },
+  };
+
+  try {
+    const originalNow = Date.now;
+    Date.now = () => 1_000;
+    try {
+      piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    } finally {
+      Date.now = originalNow;
+    }
+    await publishThemeCommand("light", "light", { PI_AGENT_HUB_DIR: root }, { now: 1_000, revision: "equal-command" });
+    await handlers.get("session_start")?.({}, ctx);
+    assert.deepEqual(applied, []);
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx);
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+});
+
+test("piAgentHubExtension ignores theme commands older than the extension process", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-theme-command-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  process.env[SESSION_ID_ENV] = "session-old-theme-command";
+  process.env[STATE_ENV] = root;
+  await publishThemeCommand("light", "light", { PI_AGENT_HUB_DIR: root }, { now: 1, revision: "old-command" });
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const applied: string[] = [];
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) { handlers.set(name, handler); },
+    registerTool() {},
+  };
+  const ctx = {
+    cwd: root,
+    hasUI: true,
+    ui: {
+      theme: { name: "dark" },
+      getTheme: () => ({ name: "light" }),
+      setTheme: (theme: { name: string }) => { applied.push(theme.name); },
+    },
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await handlers.get("session_start")?.({}, ctx);
+    assert.deepEqual(applied, []);
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx);
     if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
     else process.env[SESSION_ID_ENV] = previousSessionId;
     if (previousStateDir === undefined) delete process.env[STATE_ENV];
@@ -329,7 +544,7 @@ async function heartbeatWithSessionManager(sessionManager: Record<string, unknow
 async function waitForHeartbeat(root: string, sessionId: string, predicate: (heartbeat: Heartbeat) => boolean): Promise<Heartbeat> {
   const started = Date.now();
   let last: Heartbeat | undefined;
-  while (Date.now() - started < 1_000) {
+  while (Date.now() - started < 1_500) {
     try {
       last = JSON.parse(await readFile(heartbeatPath(sessionId, { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
       if (predicate(last)) return last;

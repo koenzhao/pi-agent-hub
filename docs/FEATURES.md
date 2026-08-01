@@ -25,6 +25,7 @@ Ctrl+Q returns to the dashboard
 | In-session rename | `Alt+R` inside a managed session | Open the dashboard rename dialog for the current session, then return to it after saving. |
 | Direct send | `p` in the dashboard | Paste and submit a one-line message into the selected live session without opening it. |
 | Custom dashboard shortcuts | `dashboard.shortcuts` in config | Bind safe Pi slash-command sends, such as `/session-summary name`, to dashboard keys. |
+| Stable dashboard theme | `t` opens theme settings | Preview Pi global themes, save globally by default, or keep a Hub-only override without following session changes. |
 | Stable grouping/order | `g`, `G`, `K`, `J` | Manually order Active/Backlog groups while Archived stays chronological. |
 | Multi-repo workspaces | `Alt+A` in the new-session form | Work across repos through a symlink workspace without moving or owning source repos. |
 | Hub-owned worktree sessions | `Ctrl+T` in the new-session form, `w` to finish | Create Git worktrees under hub state for one or more repos and explicitly finish, forget, or discard them. |
@@ -67,6 +68,7 @@ Ctrl+Q returns to the dashboard
 | `s` | Pick project skills |
 | `Alt+E` | Edit the Skill pool path while the `s` picker is open |
 | `m` | Pick project MCP servers |
+| `t` | Preview and configure the stable dashboard theme; `Enter` applies and `Escape` restores |
 | `v` | Toggle groups view ↔ workflow board |
 
 ## Status vocabulary
@@ -98,6 +100,12 @@ Only the selected board card expands. Its board-only parent title prefers the au
 Attention is a board-only overlay for every waiting/idle Active row, including `OTHER ACTIVE`: `✓` means a ready handoff, `?` an explicit question/choice, and `!` a blocker. Running/error/stopped rows keep operational presentation, and subagent attention is never promoted to its parent. Under height pressure, Hub preserves the card header and closing border, then attention, progress, and action. The right pane's `work` block retains the full published title, phase title, task fraction, attention, and deterministic action once; distinct semantic metadata and live preview follow. Workflow step, Hub runtime status, attention, and running-subagent count remain independent axes: the board never infers attention from waiting, promotes child state, advances workflow, dispatches skills, moves stages, or persists board state.
 
 The dashboard top line summarizes visible sessions and nonzero status counts in fixed order. Press `?` for the full help/legend and `i` to toggle compact vs full selected-session metadata. The details pane can also show extension-provided session metadata; see [Configuration](CONFIG.md#session-metadata).
+
+## Dashboard themes
+
+Press `t` for the same built-in and globally available theme choices used by Pi Settings → Theme. Moving over fixed choices previews immediately. Automatic expands separate light/dark choices; use `←`/`→` to change either choice. `Space` toggles **Sync to Pi**, `Enter` applies, and `Escape` restores the opening theme.
+
+Sync defaults on: confirmation updates Pi's global default, applies the resolved theme once to current managed parent sessions, and lets future Pi processes inherit it. Turn sync off to persist a Hub-only override without touching Pi. Re-enabling sync pushes the visible Hub choice back to Pi. Project-local themes are excluded, subagents are not propagation targets, and opening/selecting differently themed sessions never recolors the dashboard. See [Theme behavior](CONFIG.md#theme-behavior) for Automatic and persistence details.
 
 ## Dashboard tmux behavior
 
