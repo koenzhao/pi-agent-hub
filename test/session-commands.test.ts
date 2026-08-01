@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { loadRegistry, updateRegistry } from "../src/core/registry.js";
 import { heartbeatPath } from "../src/core/paths.js";
+import { SUBAGENT_PROMPT_APPEND_ENV, WORKTREE_GUIDANCE_ENV } from "../src/core/names.js";
 import {
   addManagedSession,
   forkManagedSession,
@@ -132,7 +133,40 @@ test("addManagedSession creates multi-repo worktree sessions in a source-pi work
     assert.equal(resolve(await readlink(join(saved.workspaceCwd!, ".pi"))), join(await realpath(api), ".pi"));
     assert.equal((await git(saved.worktrees![0]!.path, ["branch", "--show-current"])).trim(), "feature/multi");
     assert.equal((await git(saved.worktrees![1]!.path, ["branch", "--show-current"])).trim(), "feature/multi");
-    assert.match(await readFile(log, "utf8"), new RegExp(`new-session.*-c ${saved.workspaceCwd!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    const commands = await readFile(log, "utf8");
+    assert.match(commands, new RegExp(`new-session.*-c ${saved.workspaceCwd!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.match(commands, new RegExp(`${WORKTREE_GUIDANCE_ENV}=`));
+    assert.match(commands, new RegExp(`${SUBAGENT_PROMPT_APPEND_ENV}=`));
+    assert.match(commands, new RegExp(saved.worktrees![0]!.repoRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(commands, new RegExp(saved.worktrees![1]!.repoRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});
+
+test("addManagedSession injects worktree guidance for a single-repo worktree", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-add-single-wt-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  await mkdir(bin);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\n[ "$1" = "has-session" ] && exit 1\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  const repo = await createRepo(root, "api");
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  process.env.PI_AGENT_HUB_DIR = join(root, "hub");
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    const created = await addManagedSession({ cwd: repo, worktree: { branch: "feature/single" } });
+    const commands = await readFile(log, "utf8");
+
+    assert.equal(created.additionalCwds, undefined);
+    assert.match(commands, new RegExp(`${WORKTREE_GUIDANCE_ENV}=`));
+    assert.match(commands, new RegExp(`${SUBAGENT_PROMPT_APPEND_ENV}=`));
+    assert.match(commands, new RegExp((created.worktreeRepoRoot ?? "missing").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
     else process.env.PI_AGENT_HUB_DIR = oldDir;
@@ -294,6 +328,8 @@ test("restartManagedSessionFresh clears saved Pi state and starts a new tmux ses
     const commands = await readFile(log, "utf8");
     assert.match(commands, /kill-session -t pi-agent-hub-source/);
     assert.match(commands, /new-session .*PI_AGENT_HUB_SESSION_ID='source-session'/);
+    assert.doesNotMatch(commands, new RegExp(`${WORKTREE_GUIDANCE_ENV}=`));
+    assert.doesNotMatch(commands, new RegExp(`${SUBAGENT_PROMPT_APPEND_ENV}=`));
     assert.match(commands, /set-option -t pi-agent-hub-source status on/);
     assert.match(commands, /status-right .*black-aleph/);
   } finally {
