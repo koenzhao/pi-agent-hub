@@ -16,7 +16,7 @@ import { isSubagentSession } from "../core/session-tree.js";
 import { configureManagedSessionStatusBar, killSession, newSession, sessionExists, shellQuote } from "../core/tmux.js";
 import { loadManagedSessionTheme } from "../tui/theme.js";
 import { resolveSession } from "./delete-session.js";
-import type { ManagedSession } from "../core/types.js";
+import type { ManagedSession, ManagedWorktree } from "../core/types.js";
 
 export interface SessionInput {
   cwd: string;
@@ -87,7 +87,10 @@ export async function addManagedSession(input: SessionInput): Promise<ManagedSes
   return record;
 }
 
-export async function startManagedSession(id: string): Promise<void> {
+export async function startManagedSession(
+  id: string,
+  materializeWorkspace: (session: ManagedSession) => Promise<ManagedSession> = ensureMultiRepoWorkspace,
+): Promise<void> {
   const registry = await loadRegistry();
   let session = findSession(registry, id);
   if (isSubagentSession(session)) throw new Error(`Cannot start subagent row: ${session.title}`);
@@ -95,8 +98,20 @@ export async function startManagedSession(id: string): Promise<void> {
     await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await loadManagedSessionTheme(session) });
     return;
   }
-  session = await ensureMultiRepoWorkspace(session);
-  await updateRegistry((latest) => upsertSession(latest, session));
+  const prepared = await materializeWorkspace(session);
+  const committed = await updateRegistry((latest) => {
+    const current = latest.sessions.find((item) => item.id === session.id);
+    if (!current || isSubagentSession(current) || !sameWorkspaceIdentity(current, session)) {
+      throw new Error("Session changed while starting; retry");
+    }
+    return upsertSession(latest, {
+      ...current,
+      cwd: prepared.cwd,
+      additionalCwds: prepared.additionalCwds,
+      workspaceCwd: prepared.workspaceCwd,
+    });
+  });
+  session = findSession(committed, session.id);
   const piArgs = buildPiArgs({ extensionPath: extensionPath(), sessionFile: session.sessionFile });
   await newSession({
     name: session.tmuxSession,
@@ -235,6 +250,34 @@ async function savedSessionFile(source: ManagedSession): Promise<string> {
 
 function findSession(registry: Parameters<typeof resolveSession>[0], id: string | undefined) {
   return resolveSession(registry, id) as ReturnType<typeof resolveSession> & { sessionFile?: string; status: string; updatedAt: number };
+}
+
+function sameWorkspaceIdentity(a: ManagedSession, b: ManagedSession): boolean {
+  return a.tmuxSession === b.tmuxSession
+    && a.cwd === b.cwd
+    && equalStrings(a.additionalCwds, b.additionalCwds)
+    && a.worktreeOwnedByHub === b.worktreeOwnedByHub
+    && a.worktreePath === b.worktreePath
+    && a.worktreeRepoRoot === b.worktreeRepoRoot
+    && a.worktreeBranch === b.worktreeBranch
+    && a.worktreeBaseBranch === b.worktreeBaseBranch
+    && equalWorktrees(a.worktrees, b.worktrees);
+}
+
+function equalStrings(a: string[] | undefined, b: string[] | undefined): boolean {
+  return (a?.length ?? 0) === (b?.length ?? 0) && (a ?? []).every((value, index) => value === b?.[index]);
+}
+
+function equalWorktrees(a: ManagedWorktree[] | undefined, b: ManagedWorktree[] | undefined): boolean {
+  return (a?.length ?? 0) === (b?.length ?? 0) && (a ?? []).every((worktree, index) => {
+    const other = b?.[index];
+    return other !== undefined
+      && worktree.path === other.path
+      && worktree.repoRoot === other.repoRoot
+      && worktree.branch === other.branch
+      && worktree.baseBranch === other.baseBranch
+      && worktree.role === other.role;
+  });
 }
 
 function errorMessage(error: unknown): string {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionsController } from "../src/app/controller.js";
 import { heartbeatPath, multiRepoWorkspacePath, sessionMetadataPath } from "../src/core/paths.js";
+import { updateRegistry } from "../src/core/registry.js";
 import { HEARTBEAT_STALE_MS } from "../src/core/status.js";
 import type { ManagedSession } from "../src/core/types.js";
 import type { TmuxPresence } from "../src/core/tmux.js";
@@ -129,14 +130,16 @@ test("filter matches additional repo basenames", () => {
 
 test("moveSessionToGroup appends only when changing groups", async () => {
   await withTempSessionsDir(async () => {
-    const controller = new SessionsController({
-      version: 1,
+    const registry = {
+      version: 1 as const,
       sessions: [
         session("idle", { id: "a", title: "a", group: "default", order: 0 }),
         session("idle", { id: "b", title: "b", group: "default", order: 1 }),
         session("idle", { id: "work", title: "work", group: "work", order: 0 }),
       ],
-    });
+    };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry);
 
     await controller.moveSessionToGroup("a", "default");
     assert.deepEqual(controller.snapshot().registry.sessions.find((item) => item.id === "a")?.order, 0);
@@ -148,15 +151,17 @@ test("moveSessionToGroup appends only when changing groups", async () => {
 
 test("reorderSelected swaps selected session within its group and clamps at borders", async () => {
   await withTempSessionsDir(async () => {
-    const controller = new SessionsController({
-      version: 1,
+    const registry = {
+      version: 1 as const,
       sessions: [
         session("idle", { id: "a", title: "a", order: 0 }),
         session("idle", { id: "b", title: "b", order: 1 }),
         session("idle", { id: "c", title: "c", order: 2 }),
         session("idle", { id: "work", title: "work", group: "work", order: 0 }),
       ],
-    });
+    };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry);
 
     controller.move(1);
     assert.equal(controller.snapshot().selectedId, "b");
@@ -177,14 +182,16 @@ test("reorderSelected swaps selected session within its group and clamps at bord
 
 test("reorderSelected stays within the selected priority and activity tie", async () => {
   await withTempSessionsDir(async () => {
-    const controller = new SessionsController({
-      version: 1,
+    const registry = {
+      version: 1 as const,
       sessions: [
         session("error", { id: "error", title: "error", order: 0 }),
         session("idle", { id: "idle-a", title: "idle-a", order: 1, lastActivityAt: 200 }),
         session("waiting", { id: "idle-b", title: "idle-b", order: 2, lastActivityAt: 100 }),
       ],
-    });
+    };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry);
 
     controller.move(1);
     assert.equal(controller.snapshot().selectedId, "idle-a");
@@ -250,7 +257,7 @@ test("refresh prunes subagent rows whose tmux sessions are gone", async () => {
         session("waiting", { id: "child", title: "child", kind: "subagent" as const, parentId: "parent", agentName: "scout" }),
       ],
     };
-    await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    await updateRegistry(() => registry);
     const controller = new SessionsController(registry);
 
     await controller.refresh(10);
@@ -262,7 +269,7 @@ test("refresh prunes subagent rows whose tmux sessions are gone", async () => {
 test("refresh reads optional session metadata without changing liveness", async () => {
   await withTempSessionsDir(async () => {
     const registry = { version: 1 as const, sessions: [session("running", { id: "api", title: "Hub title" })] };
-    await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    await updateRegistry(() => registry);
     await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "session-metadata"), { recursive: true });
     await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "session-metadata", "api.json"), `${JSON.stringify({
       source: "any-extension",
@@ -304,7 +311,7 @@ test("refresh projects active workflow mode only from a fresh heartbeat with con
     };
     const activeMode = { id: "focus", short: "FOC", label: "Focus", detail: "turn 4" };
     const registry = { version: 1 as const, sessions: [session("running", { id: "api" })] };
-    await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    await updateRegistry(() => registry);
     await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
     let presence: TmuxPresence = "present";
     const controller = new SessionsController(registry, async () => "", async () => presence);
@@ -353,13 +360,15 @@ test("refresh projects active workflow mode only from a fresh heartbeat with con
 
 test("moving parent bucket moves child rows too", async () => {
   await withTempSessionsDir(async () => {
-    const controller = new SessionsController({
-      version: 1,
+    const registry = {
+      version: 1 as const,
       sessions: [
         session("idle", { id: "parent", title: "parent", order: 0 }),
         session("running", { id: "child", title: "child", kind: "subagent", parentId: "parent", agentName: "scout" }),
       ],
-    });
+    };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry);
 
     await controller.moveSessionToBucket("parent", "archived", 100);
 
@@ -377,14 +386,16 @@ test("moving parent bucket moves child rows too", async () => {
 
 test("archiving selected row keeps selection in non-archived rows above its old position", async () => {
   await withTempSessionsDir(async () => {
-    const controller = new SessionsController({
-      version: 1,
+    const registry = {
+      version: 1 as const,
       sessions: [
         session("idle", { id: "a", title: "a", order: 0 }),
         session("idle", { id: "b", title: "b", order: 1 }),
         session("idle", { id: "c", title: "c", order: 2 }),
       ],
-    });
+    };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry);
     controller.move(1);
 
     await controller.moveSessionToBucket("b", "archived", 100);
@@ -403,7 +414,7 @@ test("archive pruning removes expired archived rows only when tmux is missing", 
         session("idle", { id: "archived", title: "archived", bucket: "archived", bucketChangedAt: 1, workspaceCwd: multiRepoWorkspacePath("archived") }),
       ],
     };
-    await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    await updateRegistry(() => registry);
     await mkdir(multiRepoWorkspacePath("archived"), { recursive: true });
     await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
     await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "session-metadata"), { recursive: true });
@@ -437,7 +448,7 @@ test("refresh reuses the main presence snapshot for expired archive pruning", as
         session("idle", { id: "child-missing", title: "missing child", kind: "subagent", parentId: "archived-missing", bucket: "archived", bucketChangedAt: 1 }),
       ],
     };
-    await writeFile(join(process.env.PI_AGENT_HUB_DIR!, "registry.json"), `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+    await updateRegistry(() => registry);
     let calls = 0;
     const controller = new SessionsController(registry, async () => "", async (tmuxSession) => {
       calls += 1;
@@ -453,13 +464,15 @@ test("refresh reuses the main presence snapshot for expired archive pruning", as
 
 test("moving parent group moves direct child rows too", async () => {
   await withTempSessionsDir(async () => {
-    const controller = new SessionsController({
-      version: 1,
+    const registry = {
+      version: 1 as const,
       sessions: [
         session("idle", { id: "parent", title: "parent", group: "default", order: 0 }),
         session("running", { id: "child", title: "child", group: "default", kind: "subagent", parentId: "parent", agentName: "scout" }),
       ],
-    });
+    };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry);
 
     await controller.moveSessionToGroup("parent", "work");
 
@@ -491,12 +504,217 @@ test("syncPiName renames a session from latest Pi session_info", async () => {
   await withTempSessionsDir(async () => {
     const file = join(process.env.PI_AGENT_HUB_DIR!, "session.jsonl");
     await writeFile(file, `${JSON.stringify({ type: "session_info", name: " Old " })}\n${JSON.stringify({ type: "session_info", name: "Pi Name" })}\n`, "utf8");
-    const controller = new SessionsController({ version: 1, sessions: [session("idle", { id: "api", title: "hub", sessionFile: file })] });
+    const registry = { version: 1 as const, sessions: [session("idle", { id: "api", title: "hub", sessionFile: file })] };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry);
+    await updateRegistry((latest) => ({
+      ...latest,
+      sessions: latest.sessions.map((item) => ({ ...item, status: "running" as const, group: "latest" })),
+    }));
 
     const result = await controller.syncPiName("api");
 
     assert.deepEqual(result, { status: "synced", name: "Pi Name" });
     assert.equal(controller.snapshot().registry.sessions[0]?.title, "Pi Name");
+    assert.equal(controller.snapshot().registry.sessions[0]?.status, "running");
+    assert.equal(controller.snapshot().registry.sessions[0]?.group, "latest");
+  });
+});
+
+test("dashboard mutations preserve concurrent registry changes", async () => {
+  await withTempSessionsDir(async () => {
+    const original = session("idle", { id: "api", title: "api", group: "default" });
+    await updateRegistry(() => ({ version: 1, sessions: [original] }));
+    const controller = new SessionsController({ version: 1, sessions: [original] });
+    const external = session("running", { id: "external", title: "external" });
+    await updateRegistry((latest) => ({
+      ...latest,
+      sessions: [...latest.sessions.map((item) => item.id === "api" ? { ...item, status: "running" as const } : item), external],
+    }));
+
+    await controller.renameSession("api", "renamed", 50);
+
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => item.id), ["api", "external"]);
+    assert.equal(controller.snapshot().registry.sessions[0]?.title, "renamed");
+    assert.equal(controller.snapshot().registry.sessions[0]?.status, "running");
+  });
+});
+
+test("acknowledge reorder and group rename transform the latest registry", async () => {
+  await withTempSessionsDir(async () => {
+    const a = session("waiting", { id: "a", title: "a", group: "default", order: 0 });
+    const b = session("idle", { id: "b", title: "b", group: "default", order: 1 });
+    await updateRegistry(() => ({ version: 1, sessions: [a, b] }));
+    const controller = new SessionsController({ version: 1, sessions: [a, b] });
+    const late = session("idle", { id: "late", title: "late", group: "default", order: 2 });
+    await updateRegistry((latest) => ({
+      ...latest,
+      sessions: [...latest.sessions.map((item) => item.id === "a" ? { ...item, title: "latest a" } : item), late],
+    }));
+
+    await controller.acknowledgeSession("a", 50);
+    await controller.reorderSelected(1);
+    await controller.renameGroup("default", "work");
+
+    const latest = controller.snapshot().registry.sessions;
+    assert.equal(latest.find((item) => item.id === "a")?.title, "latest a");
+    assert.equal(latest.find((item) => item.id === "a")?.status, "idle");
+    assert.equal(latest.find((item) => item.id === "a")?.order, 1);
+    assert.equal(latest.find((item) => item.id === "b")?.order, 0);
+    assert.deepEqual(latest.map((item) => item.group), ["work", "work", "work"]);
+  });
+});
+
+test("group and bucket mutations derive ordering and cascades from latest rows", async () => {
+  await withTempSessionsDir(async () => {
+    const parent = session("idle", { id: "parent", title: "parent", group: "default", order: 0 });
+    await updateRegistry(() => ({ version: 1, sessions: [parent] }));
+    const controller = new SessionsController({ version: 1, sessions: [parent] });
+    const existing = session("idle", { id: "existing", title: "existing", group: "work", order: 5 });
+    const child = session("running", { id: "child", title: "child", kind: "subagent", parentId: "parent", group: "default" });
+    await updateRegistry((latest) => ({ ...latest, sessions: [...latest.sessions, existing, child] }));
+
+    await controller.moveSessionToGroup("parent", "work", 50);
+    await controller.moveSessionToBucket("parent", "backlog", 60);
+
+    const latest = controller.snapshot().registry.sessions;
+    assert.equal(latest.find((item) => item.id === "parent")?.order, 6);
+    assert.equal(latest.find((item) => item.id === "parent")?.bucket, "backlog");
+    assert.equal(latest.find((item) => item.id === "child")?.group, "work");
+    assert.equal(latest.find((item) => item.id === "child")?.bucket, "backlog");
+    assert.equal(latest.find((item) => item.id === "existing")?.group, "work");
+
+    const grandchild = session("running", { id: "grandchild", title: "grandchild", kind: "subagent", parentId: "child", bucket: "backlog" });
+    await updateRegistry((current) => ({ ...current, sessions: [...current.sessions, grandchild] }));
+    await controller.restoreSessionBucket("parent", 70);
+    assert.deepEqual(controller.snapshot().registry.sessions.filter((item) => ["parent", "child", "grandchild"].includes(item.id)).map((item) => item.bucket), [undefined, undefined, undefined]);
+  });
+});
+
+test("dashboard mutations do not resurrect a concurrently deleted target", async () => {
+  await withTempSessionsDir(async () => {
+    const original = session("idle", { id: "api", title: "api" });
+    const survivor = session("idle", { id: "survivor", title: "survivor" });
+    await updateRegistry(() => ({ version: 1, sessions: [original, survivor] }));
+    const controller = new SessionsController({ version: 1, sessions: [original, survivor] });
+    await updateRegistry((latest) => ({ ...latest, sessions: latest.sessions.filter((item) => item.id !== "api") }));
+
+    await controller.renameSession("api", "renamed", 50);
+
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => item.id), ["survivor"]);
+    assert.equal(controller.snapshot().selectedId, "survivor");
+  });
+});
+
+test("concurrent deletion repairs selection within the active filter", async () => {
+  await withTempSessionsDir(async () => {
+    const selected = session("idle", { id: "selected", title: "match one" });
+    const hidden = session("idle", { id: "hidden", title: "hidden" });
+    const survivor = session("idle", { id: "survivor", title: "match two" });
+    const registry = { version: 1 as const, sessions: [selected, hidden, survivor] };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry, async () => "selected preview");
+    controller.setFilter("match");
+    await controller.refreshPreview();
+    assert.equal(controller.snapshot().preview, "selected preview");
+    await updateRegistry((latest) => ({ ...latest, sessions: latest.sessions.filter((item) => item.id !== "selected") }));
+
+    await controller.renameSession("selected", "renamed", 50);
+
+    assert.equal(controller.snapshot().selectedId, "survivor");
+    assert.equal(controller.snapshot().preview, "");
+  });
+});
+
+test("refresh merges observations into latest rows and leaves new rows untouched", async () => {
+  await withTempSessionsDir(async () => {
+    const original = session("idle", { id: "api", title: "api", group: "default" });
+    await updateRegistry(() => ({ version: 1, sessions: [original] }));
+    const external = session("stopped", { id: "external", title: "external" });
+    let changed = false;
+    const controller = new SessionsController({ version: 1, sessions: [original] }, async () => "", async () => {
+      if (!changed) {
+        changed = true;
+        await updateRegistry((latest) => ({
+          ...latest,
+          sessions: [...latest.sessions.map((item) => item.id === "api" ? { ...item, title: "latest", group: "work", acknowledgedAt: 99 } : item), external],
+        }));
+      }
+      return "present";
+    });
+
+    await controller.refresh(100);
+
+    const [api, added] = controller.snapshot().registry.sessions;
+    assert.equal(api?.title, "latest");
+    assert.equal(api?.group, "work");
+    assert.equal(api?.status, "idle");
+    assert.deepEqual(added, external);
+  });
+});
+
+test("refresh pruning uses latest bucket and cascade state", async () => {
+  await withTempSessionsDir(async () => {
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    const archived = session("idle", { id: "archived", title: "archived", bucket: "archived", bucketChangedAt: 1 });
+    await updateRegistry(() => ({ version: 1, sessions: [archived] }));
+    const lateChild = session("running", { id: "late-child", title: "late-child", kind: "subagent", parentId: "archived", bucket: "archived", bucketChangedAt: 1 });
+    let changed = false;
+    const controller = new SessionsController({ version: 1, sessions: [archived] }, async () => "", async () => {
+      if (!changed) {
+        changed = true;
+        await updateRegistry((latest) => ({
+          ...latest,
+          sessions: [...latest.sessions.map((item) => item.id === "archived" ? { ...item, bucket: undefined, bucketChangedAt: undefined } : item), lateChild],
+        }));
+      }
+      return "missing";
+    });
+
+    await controller.refresh(1 + sevenDays);
+
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => item.id), ["archived", "late-child"]);
+    assert.equal(controller.snapshot().registry.sessions[0]?.bucket, undefined);
+  });
+});
+
+test("refresh ignores observations when the tmux target changed", async () => {
+  await withTempSessionsDir(async () => {
+    const original = session("waiting", { id: "child", kind: "subagent", parentId: "parent", tmuxSession: "old-target" });
+    await updateRegistry(() => ({ version: 1, sessions: [original] }));
+    const controller = new SessionsController({ version: 1, sessions: [original] }, async () => "", async () => {
+      await updateRegistry((latest) => ({
+        ...latest,
+        sessions: latest.sessions.map((item) => item.id === "child" ? { ...item, tmuxSession: "new-target", status: "running" as const } : item),
+      }));
+      return "missing";
+    });
+
+    await controller.refresh(100);
+
+    assert.equal(controller.snapshot().registry.sessions[0]?.tmuxSession, "new-target");
+    assert.equal(controller.snapshot().registry.sessions[0]?.status, "running");
+  });
+});
+
+test("refresh does not attach captured metadata to a changed tmux target", async () => {
+  await withTempSessionsDir(async () => {
+    const original = session("idle", { id: "api", tmuxSession: "old-target" });
+    await updateRegistry(() => ({ version: 1, sessions: [original] }));
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "session-metadata"), { recursive: true });
+    await writeFile(sessionMetadataPath("api"), `${JSON.stringify({ source: "test", status: "captured" })}\n`, "utf8");
+    const controller = new SessionsController({ version: 1, sessions: [original] }, async () => "", async () => {
+      await updateRegistry((latest) => ({
+        ...latest,
+        sessions: latest.sessions.map((item) => ({ ...item, tmuxSession: "new-target" })),
+      }));
+      return "present";
+    });
+
+    await controller.refresh(100);
+
+    assert.equal(controller.snapshot().sessions[0]?.tmuxSession, "new-target");
+    assert.equal(controller.snapshot().sessions[0]?.sessionMetadata, undefined);
   });
 });
 

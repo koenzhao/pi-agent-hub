@@ -6,11 +6,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deleteManagedSession, deleteManagedSubagentSessions } from "../src/app/delete-session.js";
-import { createSessionRecord, loadRegistry, saveRegistry } from "../src/core/registry.js";
+import { deleteManagedSession, deleteManagedSubagentSessions, removeSessions } from "../src/app/delete-session.js";
+import { createSessionRecord, loadRegistry, updateRegistry } from "../src/core/registry.js";
 import { heartbeatPath, multiRepoWorkspacePath, registryPath, sessionMetadataPath } from "../src/core/paths.js";
 
 const execFileAsync = promisify(execFile);
+
+function seedRegistry(registry: import("../src/core/types.js").SessionsRegistry, path: string): Promise<import("../src/core/types.js").SessionsRegistry> {
+  return updateRegistry(() => registry, path);
+}
 
 async function tempEnv() {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-delete-"));
@@ -20,10 +24,29 @@ async function tempEnv() {
   };
 }
 
+test("removeSessions removes only prepared ids from the latest registry", async () => {
+  const env = await tempEnv();
+  const path = registryPath(env);
+  const parent = createSessionRecord({ cwd: "/tmp/parent", title: "parent", now: 1 });
+  const unrelated = createSessionRecord({ cwd: "/tmp/unrelated", title: "unrelated", now: 1 });
+  await seedRegistry({ version: 1, sessions: [parent, unrelated] }, path);
+  const lateChild = { ...createSessionRecord({ cwd: "/tmp/child", title: "child", now: 2 }), kind: "subagent" as const, parentId: parent.id };
+  await updateRegistry((latest) => ({
+    ...latest,
+    sessions: [...latest.sessions.map((item) => item.id === unrelated.id ? { ...item, group: "latest" } : item), lateChild],
+  }), path);
+
+  await removeSessions([parent], path, env);
+
+  const remaining = await loadRegistry(path);
+  assert.deepEqual(remaining.sessions.map((item) => item.id), [unrelated.id, lateChild.id]);
+  assert.equal(remaining.sessions[0]?.group, "latest");
+});
+
 test("deleteManagedSession accepts id prefix and removes full-id heartbeat and metadata", async () => {
   const env = await tempEnv();
   const session = createSessionRecord({ cwd: "/tmp/api", title: "api", now: 1 });
-  await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
   await mkdir(join(env.PI_AGENT_HUB_DIR, "heartbeats"), { recursive: true });
   await mkdir(join(env.PI_AGENT_HUB_DIR, "session-metadata"), { recursive: true });
   await writeFile(heartbeatPath(session.id, env), JSON.stringify({ ok: true }), "utf8");
@@ -48,7 +71,7 @@ test("deleteManagedSession cascades mirrored subagent rows", async () => {
     parentId: parent.id,
     agentName: "smoke",
   };
-  await saveRegistry({ version: 1, sessions: [parent, child] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [parent, child] }, registryPath(env));
   await mkdir(join(env.PI_AGENT_HUB_DIR, "heartbeats"), { recursive: true });
   await writeFile(heartbeatPath(parent.id, env), JSON.stringify({ ok: true }), "utf8");
   await writeFile(heartbeatPath(child.id, env), JSON.stringify({ ok: true }), "utf8");
@@ -71,7 +94,7 @@ test("deleteManagedSubagentSessions removes child rows without deleting parent",
     parentId: parent.id,
     agentName: "smoke",
   };
-  await saveRegistry({ version: 1, sessions: [parent, child] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [parent, child] }, registryPath(env));
   await mkdir(join(env.PI_AGENT_HUB_DIR, "heartbeats"), { recursive: true });
   await writeFile(heartbeatPath(parent.id, env), JSON.stringify({ ok: true }), "utf8");
   await writeFile(heartbeatPath(child.id, env), JSON.stringify({ ok: true }), "utf8");
@@ -95,7 +118,7 @@ test("deleteManagedSession keeps hub-owned worktree directories", async () => {
     worktreeBaseBranch: "main",
     worktreeOwnedByHub: true,
   };
-  await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
   await mkdir(worktreePath, { recursive: true });
 
   await deleteManagedSession(session.id, { env });
@@ -114,7 +137,7 @@ test("deleteManagedSession removes owned multi-repo workspace", async () => {
     additionalCwds: ["/tmp/web"],
     workspaceCwd,
   };
-  await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
   await mkdir(workspaceCwd, { recursive: true });
 
   await deleteManagedSession(session.id, { env });
@@ -126,7 +149,7 @@ test("deleteManagedSession removes owned multi-repo workspace", async () => {
 test("pi-agent-hub delete removes registry row and heartbeat file", async () => {
   const env = await tempEnv();
   const session = createSessionRecord({ cwd: "/tmp/api", title: "api", now: 1 });
-  await saveRegistry({ version: 1, sessions: [session] }, registryPath(env));
+  await seedRegistry({ version: 1, sessions: [session] }, registryPath(env));
   await mkdir(join(env.PI_AGENT_HUB_DIR, "heartbeats"), { recursive: true });
   await writeFile(heartbeatPath(session.id, env), JSON.stringify({ ok: true }), "utf8");
 

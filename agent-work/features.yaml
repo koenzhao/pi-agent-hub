@@ -642,3 +642,15 @@
   id: architecture-002
   plan_file: agent-work/history/20260801_architecture-002_side_pane_lifecycle.md
   completed_at: '2026-08-01'
+- epic: architecture
+  status: done
+  description: Make registry writes own freshness through one locked read-modify-write
+    interface without changing registry format or lifecycle ordering.
+  priority: 2
+  depends_on:
+  - architecture-002
+  created_at: '2026-08-01'
+  discovered_from: 'architecture review 2026-07-26: make registry writes own freshness'
+  id: architecture-003
+  plan_file: agent-work/history/20260801_architecture-003_registry_freshness.md
+  completed_at: '2026-08-01'
