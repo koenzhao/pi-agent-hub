@@ -664,12 +664,3 @@
   created_at: '2026-08-01'
   plan_file: agent-work/history/20260801_worktree-setup-002_worktree_agent_guidance.md
   completed_at: '2026-08-01'
-- epic: worktree-setup
-  description: Make Hub-owned worktree creation the default in the new-session window
-    while preserving the per-session opt-out.
-  priority: 2
-  depends_on:
-  - worktree-setup-002
-  id: worktree-setup-003
-  status: pending
-  created_at: '2026-08-01'
