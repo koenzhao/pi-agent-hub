@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { access, rm } from "node:fs/promises";
-import { SESSION_ID_ENV, STATE_ENV } from "../core/names.js";
+import { SESSION_ID_ENV, STATE_ENV, SUBAGENT_PROMPT_APPEND_ENV, WORKTREE_GUIDANCE_ENV } from "../core/names.js";
 import { resolve } from "node:path";
 import { effectiveSessionPrelude } from "../core/config.js";
 import { buildPiArgs } from "../core/pi-process.js";
@@ -8,6 +8,7 @@ import { extensionPath } from "../core/extension-path.js";
 import { effectiveSessionCwd, ensureMultiRepoWorkspace, removeMultiRepoWorkspace } from "../core/multi-repo.js";
 import { heartbeatPath, sessionsStateDir } from "../core/paths.js";
 import { createOwnedWorktrees, isWorktreeSession, removeOwnedWorktrees } from "../core/worktree.js";
+import { renderWorktreeGuidance } from "../core/worktree-context.js";
 import { recordRepoUsage } from "../core/repo-history.js";
 import { createSessionRecord, loadRegistry, updateRegistry, upsertSession } from "../core/registry.js";
 import { randomSessionTitle } from "../core/session-title.js";
@@ -113,11 +114,19 @@ export async function startManagedSession(
   });
   session = findSession(committed, session.id);
   const piArgs = buildPiArgs({ extensionPath: extensionPath(), sessionFile: session.sessionFile });
+  const worktreeGuidance = renderWorktreeGuidance(session);
   await newSession({
     name: session.tmuxSession,
     cwd: effectiveSessionCwd(session),
     command: managedPiCommand({ piArgs, prelude: await effectiveSessionPrelude() }),
-    env: { [SESSION_ID_ENV]: session.id, [STATE_ENV]: sessionsStateDir() },
+    env: {
+      [SESSION_ID_ENV]: session.id,
+      [STATE_ENV]: sessionsStateDir(),
+      ...(worktreeGuidance ? {
+        [WORKTREE_GUIDANCE_ENV]: worktreeGuidance,
+        [SUBAGENT_PROMPT_APPEND_ENV]: worktreeGuidance,
+      } : {}),
+    },
   });
   await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await loadManagedSessionTheme(session) });
 }

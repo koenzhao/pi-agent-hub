@@ -5,6 +5,7 @@ import { SessionsController } from "../src/app/controller.js";
 import { SessionsView } from "../src/tui/sessions-view.js";
 import { darkTheme, stripAnsi } from "../src/tui/theme.js";
 import type { ManagedSession } from "../src/core/types.js";
+import type { SessionsViewState } from "../src/tui/dialog.js";
 
 function session(id: string, title: string): ManagedSession {
   return {
@@ -99,7 +100,7 @@ test("help overlay opens and closes", () => {
   assert.match(help, /F then 1-4 or Alt\+1-4 focus panel/);
   assert.match(help, /o reset to one panel/);
   assert.match(help, /mouse click select · double-click open\/switch/);
-  assert.match(help, /v toggle compact\/card rows/);
+  assert.match(help, /v cycle row density/);
   assert.match(help, /t theme settings/);
   assert.match(help, /Active and Backlog keep project\/group headers/);
   assert.match(help, /Archived shows 5 parent cascades/);
@@ -447,6 +448,22 @@ test("reorder is disabled in stage grouping", () => {
 
   assert.deepEqual(deltas, []);
   assert.match(view.render(120).join("\n"), /switch to project grouping to reorder/);
+});
+
+test("v toggles and persists compact and junction density modes", () => {
+  const saved: SessionsViewState[] = [];
+  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
+  const view = new SessionsView(controller, () => {}, {
+    saveViewState: (state) => { saved.push(state); },
+  });
+
+  view.handleInput("v");
+  view.handleInput("v");
+
+  assert.deepEqual(saved, [
+    { grouping: "project", density: "all-cards" },
+    { grouping: "project", density: "compact" },
+  ]);
 });
 
 test("v inside filter mode edits the filter instead of toggling views", () => {

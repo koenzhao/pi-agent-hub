@@ -48,7 +48,7 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `p` | Send a one-line message to the selected live session without opening it |
 | `?` | Show help and status legend |
 | `i` | Toggle compact/full selected-session info |
-| `v` | Toggle compact rows ↔ selected workflow cards |
+| `v` | Toggle compact rows ↔ all-session junction cards |
 | `S` | Toggle project grouping ↔ workflow-stage lanes |
 | `q` | Quit the dashboard |
 | `r` | Open restart choices (`r` selected, `n` new conversation, `a` all active sessions) |
@@ -65,7 +65,7 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `s` / `m` | Pick project skills or MCP servers; `←→` switches Enabled/Available |
 | Click / double-click | Select a session / open, switch, or restart it |
 
-The dashboard has independent grouping and density controls: `S` switches project groups and workflow-stage lanes, while `v` switches compact rows and selected workflow cards. In stage grouping, every Active session remains visible: compatible workflow sessions stay in producer-defined lanes and all others appear in `OTHER ACTIVE`, nested under their existing project/group labels. Top-level parent rows show `⚙︎N` when descendant subagents are starting or running. Stage-group children start collapsed: `▸`/`▾` shows disclosure state, `Space` toggles the selected tree, and filters temporarily reveal matching child context. Producer-confirmed attention remains independent of workflow and runtime state: `✓` marks a ready handoff, `?` a question, and `!` a blocker on waiting/idle rows. Selected cards use the authored `plan.feature` title when available, show a ticket row and workflow markers (`✓` done, `◉` active, `·` pending), and render phase-separated task progress when `plan.phases` is available; the right pane keeps full available plan context.
+The dashboard has independent grouping and density controls. `S` switches project groups and workflow-stage lanes. `v` toggles compact rows and junction-rail cards for all Active main sessions. Junction cards keep the stored Hub title and adapt to available metadata: ticket id, a non-duplicate `plan.feature` description, then workflow/plan progress plus semantic status. For the clearest hierarchy, use a 1–3-word Hub session title and a 5–7-word authored ticket title for `plan.feature`. Existing Hub groups own the rails in both grouping modes. Backlog, Archived, and subagents remain compact. In stage grouping, every Active session remains visible: compatible workflow sessions stay in producer-defined lanes and all others appear in `OTHER ACTIVE`, nested under their existing project/group labels. Top-level parent rows show `⚙︎N` when descendant subagents are starting or running. Stage-group children start collapsed: `▸`/`▾` shows disclosure state, `Space` toggles the selected tree, and filters temporarily reveal matching child context. Producer-confirmed attention remains independent of workflow and runtime state: `✓` marks a ready handoff, `?` a question, and `!` a blocker on waiting/idle rows. The right pane keeps full available plan context.
 
 ## Install
 

@@ -40,7 +40,7 @@ export interface RenderSession {
   boardDescendantCount?: number;
   boardExpanded?: boolean;
   runningSubagentCount?: number;
-  selectedPlan?: RenderPlanSummary;
+  plan?: RenderPlanSummary;
   workflow?: WorkflowRuntimeSnapshot;
   worktreePath?: string;
   worktreeBranch?: string;
@@ -125,7 +125,7 @@ export interface RenderModel {
   preview: string;
   detailsExpanded: boolean;
   grouping: "project" | "stage";
-  density: "compact" | "cards";
+  density: "compact" | "all-cards";
   panelStrip?: PanelStripItem[];
   sidePaneFocusedSlot?: number;
 }
@@ -142,7 +142,7 @@ export interface BuildRenderModelInput {
   detailsExpanded?: boolean;
   selectedSkillCount?: number;
   grouping?: "project" | "stage";
-  density?: "compact" | "cards";
+  density?: "compact" | "all-cards";
   now?: number;
   sidePaneSessionIds?: ReadonlyMap<string, number>;
   sidePaneFocusedSlot?: number;
@@ -179,8 +179,8 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
     ? ([1, 2, 3, 4] as const).map((slot) => ({ slot, ...(occupiedSlots.has(slot) ? { title: occupiedSlots.get(slot) } : {}) }))
     : undefined;
   const boardExpanded = (id: string) => input.filter !== undefined || input.expandedBoardParentIds?.has(id) === true;
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
-  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density === "cards", subagentStats.get(session.id), boardExpanded(session.id)));
+  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), boardExpanded(session.id)));
+  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), boardExpanded(session.id)));
   const groups = groupsForSessions(mapped);
   const sections = board
     ? lanesForBoard(mapped, boardProjection)
@@ -223,7 +223,7 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
       ? "1-4 Set · x# Close · F# Focus · ? Help"
       : input.width < 120
         ? "Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · / Filter · i Info · ? Help"
-        : `Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  v Cards · S Lanes · ? Help`,
+        : `Enter Open · 1-4 Panels · x# Close · F#/Alt+# Focus · o Reset · n New · / Filter  │  p Send · i Info · r Restart · R Rename · ${deleteFooter}${worktreeFooter}${lifecycleFooter}  │  v Density · S Lanes · ? Help`,
     filter: input.filter,
     preview: input.preview ?? "",
     detailsExpanded: input.detailsExpanded ?? false,
@@ -472,7 +472,7 @@ function descendantSubagentStats(
   return stats;
 }
 
-function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], tree: SessionTreeIndex<RuntimeSession>, skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined, board: boolean, projectPlan: boolean, subagentStats: DescendantSubagentStats | undefined, boardExpanded: boolean): RenderSession {
+function toRenderSession(session: RuntimeSession, selected: boolean, sessions: RuntimeSession[], tree: SessionTreeIndex<RuntimeSession>, skillCount: number | undefined, now: number | undefined, sidePaneSlot: number | undefined, board: boolean, density: RenderModel["density"], subagentStats: DescendantSubagentStats | undefined, boardExpanded: boolean): RenderSession {
   const displayStatus = displayStatusFor(session.status);
   const worktree = primaryWorktree(session);
   const worktrees = sessionWorktrees(session);
@@ -513,10 +513,12 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
       boardExpanded,
       ...(subagentStats.running ? { runningSubagentCount: subagentStats.running } : {}),
     } : {}),
-    ...(projectPlan && (session.status === "waiting" || session.status === "idle") && session.sessionMetadata?.attention
+    ...(board && (session.status === "waiting" || session.status === "idle") && session.sessionMetadata?.attention
       ? { attention: session.sessionMetadata.attention }
       : {}),
-    ...(selected && projectPlan ? { selectedPlan: selectedPlanSummary(session.sessionMetadata) } : {}),
+    ...(density === "all-cards" && lifecycle.section === "active" && session.kind !== "subagent"
+      ? { plan: planSummary(session.sessionMetadata) }
+      : {}),
     workflow: session.workflow,
     worktreePath: worktree?.path ?? session.worktreePath,
     worktreeBranch: worktree?.branch ?? session.worktreeBranch,
@@ -547,7 +549,7 @@ function metadataUpdatedAge(metadata: SessionMetadata | undefined, now: number |
   return ageLabel(Math.max(0, now - metadata.updatedAt));
 }
 
-function selectedPlanSummary(metadata: SessionMetadata | undefined): RenderPlanSummary | undefined {
+function planSummary(metadata: SessionMetadata | undefined): RenderPlanSummary | undefined {
   if (!metadata) return undefined;
   const nextStep = metadata.plan?.nextStep ?? metadata.nextStep;
   const summary: RenderPlanSummary = {

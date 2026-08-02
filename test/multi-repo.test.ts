@@ -149,6 +149,8 @@ test("ensureMultiRepoWorkspace links worktree sessions to source repo .pi", asyn
   await mkdir(api, { recursive: true });
   await mkdir(web, { recursive: true });
   await mkdir(apiRoot, { recursive: true });
+  await writeFile(join(api, "AGENTS.md"), "API worktree instructions\n", "utf8");
+  await writeFile(join(web, "AGENTS.md"), "WEB worktree instructions\n", "utf8");
   const original = session(root, {
     cwd: api,
     additionalCwds: [web],
@@ -163,6 +165,14 @@ test("ensureMultiRepoWorkspace links worktree sessions to source repo .pi", asyn
 
   assert.equal(resolve(await readlink(join(ensured.workspaceCwd!, ".pi"))), join(apiRoot, ".pi"));
   await assert.rejects(lstat(join(api, ".pi")), /ENOENT/);
+  const context = await readFile(join(ensured.workspaceCwd!, "AGENTS.md"), "utf8");
+  assert.match(context, /Hub-owned Git worktree/);
+  assert.match(context, new RegExp(`Primary worktree: ${escapeRegExp(api)}`));
+  assert.match(context, new RegExp(`Original repository: ${escapeRegExp(apiRoot)}`));
+  assert.match(context, new RegExp(`Additional worktree: ${escapeRegExp(web)}`));
+  assert.match(context, new RegExp(`Original repository: ${escapeRegExp(join(root, "source", "web"))}`));
+  assert.match(context, /API worktree instructions/);
+  assert.match(context, /WEB worktree instructions/);
 });
 
 test("ensureMultiRepoWorkspace dedupes canonical paths and degrades duplicate-only extras to single repo", async () => {

@@ -1,7 +1,8 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { KIND_ENV, PARENT_ID_ENV, SESSION_ID_ENV, STATE_ENV } from "../core/names.js";
+import { KIND_ENV, PARENT_ID_ENV, SESSION_ID_ENV, STATE_ENV, WORKTREE_GUIDANCE_ENV } from "../core/names.js";
+import { WORKTREE_GUIDANCE_MAX_LENGTH } from "../core/worktree-context.js";
 import { sessionsStateDir } from "../core/paths.js";
 import { loadThemeCommand } from "../core/theme-command.js";
 import { colorFromAnsi } from "../core/theme-color.js";
@@ -107,6 +108,13 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
       workflow: workflowSnapshot(ctx),
     } satisfies Heartbeat, null, 2)}\n`, "utf8");
   }
+
+  pi.on("before_agent_start", async (event) => {
+    if (process.env.PI_TMUX_SUBAGENTS_JOB_ID) return;
+    const guidance = process.env[WORKTREE_GUIDANCE_ENV]?.trim();
+    if (!guidance || guidance.length > WORKTREE_GUIDANCE_MAX_LENGTH) return;
+    return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     await applyThemeAndHeartbeat("waiting", ctx as PiContext);

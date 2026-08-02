@@ -654,3 +654,46 @@
   id: architecture-003
   plan_file: agent-work/history/20260801_architecture-003_registry_freshness.md
   completed_at: '2026-08-01'
+- epic: worktree-setup
+  title: Tell managed agents when they run in Hub-owned worktrees and expose original
+    repository paths for local environment setup.
+  priority: 2
+  depends_on: []
+  id: worktree-setup-002
+  status: done
+  created_at: '2026-08-01'
+  plan_file: agent-work/history/20260801_worktree-setup-002_worktree_agent_guidance.md
+  completed_at: '2026-08-01'
+- epic: worktree-setup
+  description: Make Hub-owned worktree creation the default in the new-session window
+    while preserving the per-session opt-out.
+  priority: 2
+  depends_on:
+  - worktree-setup-002
+  id: worktree-setup-003
+  status: pending
+  created_at: '2026-08-01'
+- epic: dashboard-scanability
+  title: Junction rail session cards
+  description: User can scan all Active session cards by existing Hub group without
+    losing project or session boundaries.
+  priority: 1
+  depends_on: []
+  id: dashboard-scanability-007
+  status: done
+  created_at: '2026-08-01'
+  plan_file: agent-work/history/20260802_dashboard-scanability-007_junction_cards.md
+  completed_at: '2026-08-02'
+- epic: worktree-setup
+  status: pending
+  title: Isolate Git hooks during worktree tests
+  description: Developers can push from linked worktrees without hook-inherited Git
+    environment variables redirecting fixture Git commands into the real repository.
+  steps: []
+  priority: 1
+  depends_on: []
+  discovered_from: dashboard-scanability-007
+  plan_file: null
+  references: []
+  created_at: '2026-08-02'
+  id: worktree-setup-004

@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import piAgentHubExtension from "../src/extension/index.js";
-import { SESSION_ID_ENV, STATE_ENV } from "../src/core/names.js";
+import { SESSION_ID_ENV, STATE_ENV, WORKTREE_GUIDANCE_ENV } from "../src/core/names.js";
+import { WORKTREE_GUIDANCE_MAX_LENGTH } from "../src/core/worktree-context.js";
 import { heartbeatPath } from "../src/core/paths.js";
 import { publishThemeCommand } from "../src/core/theme-command.js";
 import type { Heartbeat } from "../src/core/types.js";
@@ -25,27 +26,57 @@ test("piAgentHubExtension registers handlers once per active process", async () 
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
 
-  assert.deepEqual(events, ["session_start", "agent_start", "agent_end", "session_shutdown"]);
+  assert.deepEqual(events, ["before_agent_start", "session_start", "agent_start", "agent_end", "session_shutdown"]);
 
   await handlers.get("session_shutdown")?.({}, { cwd: "/repo" });
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
 
   assert.deepEqual(events, [
-    "session_start", "agent_start", "agent_end", "session_shutdown",
-    "session_start", "agent_start", "agent_end", "session_shutdown",
+    "before_agent_start", "session_start", "agent_start", "agent_end", "session_shutdown",
+    "before_agent_start", "session_start", "agent_start", "agent_end", "session_shutdown",
   ]);
   delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
 });
 
-test("piAgentHubExtension leaves tmux subagent heartbeats to child bootstrap", async () => {
+test("piAgentHubExtension appends bounded worktree guidance before parent agent turns", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const previous = process.env[WORKTREE_GUIDANCE_ENV];
+  const handlers = new Map<string, (event: { systemPrompt?: string }, ctx: unknown) => unknown>();
+  const pi = {
+    on(name: string, handler: (event: { systemPrompt?: string }, ctx: unknown) => unknown) { handlers.set(name, handler); },
+    registerTool() {},
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    process.env[WORKTREE_GUIDANCE_ENV] = "## worktree context\nUse /hub/worktree, not /repo/source.";
+    assert.deepEqual(await handlers.get("before_agent_start")?.({ systemPrompt: "base prompt" }, {}), {
+      systemPrompt: "base prompt\n\n## worktree context\nUse /hub/worktree, not /repo/source.",
+    });
+
+    process.env[WORKTREE_GUIDANCE_ENV] = "   ";
+    assert.equal(await handlers.get("before_agent_start")?.({ systemPrompt: "base prompt" }, {}), undefined);
+    process.env[WORKTREE_GUIDANCE_ENV] = "x".repeat(WORKTREE_GUIDANCE_MAX_LENGTH + 1);
+    assert.equal(await handlers.get("before_agent_start")?.({ systemPrompt: "base prompt" }, {}), undefined);
+  } finally {
+    await handlers.get("session_shutdown")?.({}, { cwd: "/repo", hasUI: false });
+    if (previous === undefined) delete process.env[WORKTREE_GUIDANCE_ENV];
+    else process.env[WORKTREE_GUIDANCE_ENV] = previous;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+});
+
+test("piAgentHubExtension leaves tmux subagent prompt and heartbeat ownership to child bootstrap", async () => {
   delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-"));
   const previousSessionId = process.env[SESSION_ID_ENV];
   const previousStateDir = process.env[STATE_ENV];
   const previousSubagentJobId = process.env.PI_TMUX_SUBAGENTS_JOB_ID;
+  const previousWorktreeGuidance = process.env[WORKTREE_GUIDANCE_ENV];
   process.env[SESSION_ID_ENV] = "subagent-1";
   process.env[STATE_ENV] = root;
   process.env.PI_TMUX_SUBAGENTS_JOB_ID = "subagent-1";
+  process.env[WORKTREE_GUIDANCE_ENV] = "worktree guidance already present in the child prompt";
   const file = heartbeatPath("subagent-1", { PI_AGENT_HUB_DIR: root });
   const childHeartbeat = `${JSON.stringify({ owner: "child-bootstrap" })}\n`;
   await mkdir(dirname(file), { recursive: true });
@@ -61,6 +92,7 @@ test("piAgentHubExtension leaves tmux subagent heartbeats to child bootstrap", a
 
   try {
     piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    assert.equal(await handlers.get("before_agent_start")?.({ systemPrompt: "child prompt" }, {}), undefined);
     await handlers.get("session_start")?.({}, {
       cwd: root,
       hasUI: true,
@@ -79,6 +111,8 @@ test("piAgentHubExtension leaves tmux subagent heartbeats to child bootstrap", a
     else process.env[STATE_ENV] = previousStateDir;
     if (previousSubagentJobId === undefined) delete process.env.PI_TMUX_SUBAGENTS_JOB_ID;
     else process.env.PI_TMUX_SUBAGENTS_JOB_ID = previousSubagentJobId;
+    if (previousWorktreeGuidance === undefined) delete process.env[WORKTREE_GUIDANCE_ENV];
+    else process.env[WORKTREE_GUIDANCE_ENV] = previousWorktreeGuidance;
     delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
   }
 });
