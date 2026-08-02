@@ -28,7 +28,7 @@ export class SessionsView implements Component {
   private flash: { text: string; expiresAt: number } | undefined;
   private detailsExpanded = false;
   private grouping: "project" | "stage";
-  private density: "compact" | "cards";
+  private density: "compact" | "all-cards";
   private pendingRestart: { sessionId: string } | undefined;
   private pendingFocusSlot = false;
   private pendingCloseSlot = false;
@@ -735,7 +735,7 @@ export class SessionsView implements Component {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
-    this.density = this.density === "compact" ? "cards" : "compact";
+    this.density = this.density === "compact" ? "all-cards" : "compact";
     this.actions.saveViewState?.({ grouping: this.grouping, density: this.density });
   }
 
@@ -967,7 +967,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  1-4 assign (stay here)    x then 1-4 close panel",
     "  F then 1-4 or Alt+1-4 focus panel     o reset to one panel",
     "  q quit                     Esc cancel/clear",
-    "  K/J reorder in group      v toggle compact/card rows",
+    "  K/J reorder in group      v cycle row density",
     "  S toggle project/stage grouping",
     "  mouse click select · double-click open/switch · wheel move",
     "",
