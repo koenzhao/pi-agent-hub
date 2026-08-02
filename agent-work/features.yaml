@@ -684,3 +684,16 @@
   created_at: '2026-08-01'
   plan_file: agent-work/history/20260802_dashboard-scanability-007_junction_cards.md
   completed_at: '2026-08-02'
+- epic: worktree-setup
+  status: pending
+  title: Isolate Git hooks during worktree tests
+  description: Developers can push from linked worktrees without hook-inherited Git
+    environment variables redirecting fixture Git commands into the real repository.
+  steps: []
+  priority: 1
+  depends_on: []
+  discovered_from: dashboard-scanability-007
+  plan_file: null
+  references: []
+  created_at: '2026-08-02'
+  id: worktree-setup-004
