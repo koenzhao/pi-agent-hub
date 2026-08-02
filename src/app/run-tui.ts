@@ -192,7 +192,7 @@ export async function runTui(): Promise<void> {
   const saved = savedViewState && typeof savedViewState === "object" ? savedViewState as Partial<SessionsViewState> : {};
   const initialViewState: SessionsViewState = {
     grouping: saved.grouping === "stage" ? "stage" : "project",
-    density: saved.density === "cards" ? "cards" : "compact",
+    density: saved.density === "all-cards" ? "all-cards" : "compact",
   };
   const skillCountCache = new Map<string, number>();
   const skillCountLoads = new Set<string>();

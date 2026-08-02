@@ -36,7 +36,7 @@ export function renderSessions(model: RenderModel, theme?: SessionsTheme): Sessi
   }
 
   const split = model.showPreview
-    ? model.density === "cards"
+    ? model.density === "all-cards"
       ? Math.max(40, Math.min(60, Math.floor(bodyWidth * 0.38)))
       : Math.max(26, Math.min(40, Math.floor(bodyWidth * 0.38)))
     : bodyWidth;
@@ -191,6 +191,8 @@ interface SessionListContent {
   selectedIndex: number;
   selectedEndIndex: number;
   continuationPriorities: Map<number, number>;
+  contextIndexes: Map<number, number[]>;
+  fillAroundSelected?: boolean;
 }
 
 function renderSessionList(model: RenderModel, width: number, styles: LayoutStyles): SessionListContent {
@@ -198,53 +200,84 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
   const lines: string[] = [];
   const targets: (SessionListTarget | undefined)[] = [];
   const continuationPriorities = new Map<number, number>();
+  const contextIndexes = new Map<number, number[]>();
   let selectedIndex = -1;
   let selectedEndIndex = -1;
   const pushLine = (line: string, target?: SessionListTarget) => {
     lines.push(line);
     targets.push(target);
   };
-  const pushRow = (session: RenderSession) => {
-    if (model.density === "cards" && session.selected) {
-      const innerWidth = Math.max(0, width - 2);
-      selectedIndex = lines.length;
-      const header = renderSelectedCardHeader(session, innerWidth, styles, model.grouping === "stage", model.sidePaneFocusedSlot);
-      pushLine(header, { kind: "session", id: session.id });
-      for (const continuation of selectedCardLines(session, innerWidth, styles)) {
-        pushLine(`${styles.accent("│")}${pad(continuation.line, innerWidth)}${styles.accent("│")}`);
-        continuationPriorities.set(lines.length - 1, continuation.priority);
+  const pushRow = (session: RenderSession, junction?: { last: boolean; rich: boolean }, context: number[] = []) => {
+    if (model.density === "all-cards" && junction) {
+      if (session.selected) selectedIndex = lines.length;
+      const branch = junction.last ? (session.selected ? "┗" : "└") : session.selected ? "┣" : "├";
+      const branchText = session.selected ? styles.accent(branch) : styles.border(branch);
+      const attention = board && session.attention ? `${attentionGlyph(session.attention.kind, styles)} ` : "";
+      const titlePrefix = `${branchText} ${attention}`;
+      const title = renderSessionRow(session, Math.max(0, width - displayWidth(titlePrefix)), styles, {
+        board,
+        focusedSlot: model.sidePaneFocusedSlot,
+        selectionMarker: false,
+        titleSource: "stored",
+        prefixMode: "none",
+      });
+      pushLine(`${titlePrefix}${title}`, { kind: "session", id: session.id });
+      contextIndexes.set(lines.length - 1, context);
+      if (junction.rich) {
+        const continuationBranch = junction.last ? " " : session.selected ? "┃" : "│";
+        const continuationPrefix = `${session.selected ? styles.accent(continuationBranch) : styles.border(continuationBranch)} `;
+        for (const continuation of allCardLines(session, Math.max(0, width - 2), styles)) {
+          pushLine(`${continuationPrefix}${continuation.line}`);
+          continuationPriorities.set(lines.length - 1, continuation.priority);
+        }
       }
-      pushLine(styles.accent(`└${"─".repeat(innerWidth)}┘`));
-      continuationPriorities.set(lines.length - 1, 3);
-      selectedEndIndex = lines.length - 1;
+      if (session.selected) selectedEndIndex = lines.length - 1;
       return;
     }
     if (session.selected) selectedIndex = lines.length;
-    pushLine(renderSessionRow(session, width, styles, board, model.sidePaneFocusedSlot), { kind: "session", id: session.id });
+    pushLine(renderSessionRow(session, width, styles, { board, focusedSlot: model.sidePaneFocusedSlot }), { kind: "session", id: session.id });
+    if (model.density === "all-cards") contextIndexes.set(lines.length - 1, context);
     if (session.selected) selectedEndIndex = lines.length - 1;
   };
   if (!model.showSections) {
-    for (const group of model.groups) {
+    for (const [groupIndex, group] of model.groups.entries()) {
+      if (model.density === "all-cards" && groupIndex) pushLine("");
+      const groupHeadingIndex = lines.length;
       pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
-      for (const session of group.sessions) pushRow(session);
+      for (const [index, session] of group.sessions.entries()) {
+        pushRow(session, model.density === "all-cards" ? { last: index === group.sessions.length - 1, rich: session.kind !== "subagent" } : undefined, [groupHeadingIndex]);
+      }
     }
-    return { lines, targets, selectedIndex, selectedEndIndex, continuationPriorities };
+    return { lines, targets, selectedIndex, selectedEndIndex, continuationPriorities, contextIndexes, fillAroundSelected: model.density === "all-cards" };
   }
   let firstSection = true;
   for (const section of model.sections) {
     if (!firstSection) pushLine("");
     const mutedStatuses = section.key !== "active";
     const headingRight = board ? styles.dim(`·${section.sessionsTotal}`) : formatStatusCounts(section.statusCounts, styles, mutedStatuses);
+    const sectionHeadingIndex = lines.length;
     pushLine(sectionHeader(section.title, headingRight, width, styles));
     firstSection = false;
-    for (const group of section.groups) {
+    for (const [groupIndex, group] of section.groups.entries()) {
+      if (model.density === "all-cards" && groupIndex) pushLine("");
+      let groupHeadingIndex: number | undefined;
       if (board) {
         const parentCount = group.sessions.filter((session) => session.kind !== "subagent").length;
-        pushLine(twoColumn(styles.muted(group.name), styles.dim(`·${parentCount}`), width));
+        const groupName = model.density === "all-cards" ? styles.accent(group.name) : styles.muted(group.name);
+        groupHeadingIndex = lines.length;
+        pushLine(twoColumn(groupName, styles.dim(`·${parentCount}`), width));
       } else if (group.name) {
+        groupHeadingIndex = lines.length;
         pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles, mutedStatuses), width));
       }
-      for (const session of group.sessions) pushRow(session);
+      const context = [sectionHeadingIndex, ...(groupHeadingIndex === undefined ? [] : [groupHeadingIndex])];
+      const junction = model.density === "all-cards" && section.key !== "archived";
+      for (const [index, session] of group.sessions.entries()) {
+        pushRow(session, junction ? {
+          last: index === group.sessions.length - 1,
+          rich: (board || section.key === "active") && session.kind !== "subagent",
+        } : undefined, context);
+      }
     }
     if (section.archiveDisclosure) {
       if (section.archiveDisclosure.selected) {
@@ -254,13 +287,14 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
       const label = section.archiveDisclosure.expanded ? "⌃ show fewer" : `… ${section.archiveDisclosure.hiddenParents} older archived`;
       const prefix = section.archiveDisclosure.selected ? `${styles.accent("▌")} ` : "  ";
       pushLine(`${prefix}${styles.dim(truncate(label, Math.max(0, width - 2)))}`, { kind: "archive-disclosure" });
+      if (model.density === "all-cards") contextIndexes.set(lines.length - 1, [sectionHeadingIndex]);
     }
   }
   if (board) {
     pushLine("");
     pushLine(boardHiddenSummary(model, width, styles));
   }
-  return { lines, targets, selectedIndex, selectedEndIndex, continuationPriorities };
+  return { lines, targets, selectedIndex, selectedEndIndex, continuationPriorities, contextIndexes, fillAroundSelected: model.density === "all-cards" };
 }
 
 function boardHiddenSummary(model: RenderModel, width: number, styles: LayoutStyles): string {
@@ -280,7 +314,7 @@ interface ListWindow {
 }
 
 function windowList(list: SessionListContent, capacity: number, scrollTop: number, styles: LayoutStyles): ListWindow {
-  if (list.selectedEndIndex > list.selectedIndex) return windowSelectedCard(list, capacity, styles);
+  if (list.fillAroundSelected) return windowFilledSelectedSpan(list, capacity, scrollTop, styles);
   if (capacity <= 0 || list.lines.length <= capacity) return { ...list, top: 0 };
   const total = list.lines.length;
   const selectedIndex = Math.max(0, list.selectedIndex);
@@ -332,6 +366,125 @@ function windowList(list: SessionListContent, capacity: number, scrollTop: numbe
     selectedIndex: selectedIndex - top + 1,
     selectedEndIndex: selectedIndex - top + 1,
     top,
+  };
+}
+
+function windowFilledSelectedSpan(list: SessionListContent, capacity: number, scrollTop: number, styles: LayoutStyles): ListWindow {
+  const safeCapacity = Math.max(1, capacity);
+  if (list.lines.length <= safeCapacity) return { ...list, top: 0 };
+  const selectedLength = list.selectedEndIndex - list.selectedIndex + 1;
+  if (selectedLength >= safeCapacity) return windowSelectedCard(list, safeCapacity, styles);
+
+  const beforeIndexes = list.targets.flatMap((target, index) => target?.kind === "session" && index < list.selectedIndex ? [index] : []);
+  const afterIndexes = list.targets.flatMap((target, index) => target?.kind === "session" && index > list.selectedEndIndex ? [index] : []);
+  const titleLimit = Math.max(0, safeCapacity - selectedLength);
+  let best: { before: number; after: number; distance: number; contexts: Set<number> } | undefined;
+  const beforeContexts = new Set(list.contextIndexes.get(list.selectedIndex) ?? []);
+  for (let before = 0; before <= Math.min(beforeIndexes.length, titleLimit); before += 1) {
+    if (before) {
+      const titleIndex = beforeIndexes[beforeIndexes.length - before]!;
+      for (const contextIndex of list.contextIndexes.get(titleIndex) ?? []) beforeContexts.add(contextIndex);
+    }
+    const contexts = new Set(beforeContexts);
+    for (let after = 0; after <= Math.min(afterIndexes.length, titleLimit - before); after += 1) {
+      if (after) {
+        const titleIndex = afterIndexes[after - 1]!;
+        for (const contextIndex of list.contextIndexes.get(titleIndex) ?? []) contexts.add(contextIndex);
+      }
+      if (selectedLength + before + after + contexts.size > safeCapacity) continue;
+      const firstIndex = before ? beforeIndexes[beforeIndexes.length - before]! : list.selectedIndex;
+      const distance = Math.abs(firstIndex - scrollTop);
+      const shown = before + after;
+      const bestShown = (best?.before ?? 0) + (best?.after ?? 0);
+      const balance = Math.abs(before - after);
+      const bestBalance = best ? Math.abs(best.before - best.after) : Number.POSITIVE_INFINITY;
+      if (!best || shown > bestShown || (shown === bestShown && balance < bestBalance) || (shown === bestShown && balance === bestBalance && distance < best.distance)) {
+        best = { before, after, distance, contexts: new Set(contexts) };
+      }
+    }
+  }
+  if (!best) {
+    const availableContext = Math.max(0, safeCapacity - selectedLength);
+    const selectedContext = (list.contextIndexes.get(list.selectedIndex) ?? []).slice(-availableContext);
+    const selectedIndex = selectedContext.length;
+    return {
+      lines: [...selectedContext.map((index) => list.lines[index] ?? ""), ...list.lines.slice(list.selectedIndex, list.selectedEndIndex + 1)],
+      targets: [...selectedContext.map(() => undefined), ...list.targets.slice(list.selectedIndex, list.selectedEndIndex + 1)],
+      selectedIndex,
+      selectedEndIndex: selectedIndex + selectedLength - 1,
+      top: selectedContext[0] ?? list.selectedIndex,
+    };
+  }
+
+  const shownBefore = beforeIndexes.slice(beforeIndexes.length - best.before);
+  const shownAfter = afterIndexes.slice(0, best.after);
+  const hiddenBefore = beforeIndexes.length - shownBefore.length;
+  const hiddenAfter = afterIndexes.length - shownAfter.length;
+  const coreRows = selectedLength + shownBefore.length + shownAfter.length + best.contexts.size;
+  let remaining = safeCapacity - coreRows;
+  let beforeIndicator = false;
+  let afterIndicator = false;
+  if (remaining > 0 && hiddenBefore && hiddenAfter) {
+    if (remaining > 1) {
+      beforeIndicator = true;
+      afterIndicator = true;
+      remaining -= 2;
+    } else if (hiddenBefore >= hiddenAfter) {
+      beforeIndicator = true;
+      remaining -= 1;
+    } else {
+      afterIndicator = true;
+      remaining -= 1;
+    }
+  } else if (remaining > 0 && hiddenBefore) {
+    beforeIndicator = true;
+    remaining -= 1;
+  } else if (remaining > 0 && hiddenAfter) {
+    afterIndicator = true;
+    remaining -= 1;
+  }
+
+  const continuationCandidates = [...shownBefore, ...shownAfter].flatMap((ownerIndex) => {
+    const distance = ownerIndex < list.selectedIndex ? list.selectedIndex - ownerIndex : ownerIndex - list.selectedEndIndex;
+    const candidates: { index: number; distance: number; priority: number }[] = [];
+    for (let index = ownerIndex + 1; list.continuationPriorities.has(index); index += 1) {
+      candidates.push({ index, distance, priority: list.continuationPriorities.get(index) ?? 99 });
+    }
+    return candidates;
+  }).sort((a, b) => a.distance - b.distance || a.priority - b.priority || a.index - b.index);
+  const keptContinuations = new Set(continuationCandidates.slice(0, remaining).map((candidate) => candidate.index));
+  const emittedContexts = new Set<number>();
+  const rowsForTitle = (titleIndex: number, includeSelectedSpan = false) => {
+    const rows = (list.contextIndexes.get(titleIndex) ?? []).filter((index) => !emittedContexts.has(index));
+    for (const index of rows) emittedContexts.add(index);
+    if (includeSelectedSpan) return [...rows, ...Array.from({ length: selectedLength }, (_, offset) => list.selectedIndex + offset)];
+    rows.push(titleIndex);
+    for (let index = titleIndex + 1; list.continuationPriorities.has(index); index += 1) {
+      if (keptContinuations.has(index)) rows.push(index);
+    }
+    return rows;
+  };
+  const beforeRows = shownBefore.flatMap((index) => rowsForTitle(index));
+  const selectedRows = rowsForTitle(list.selectedIndex, true);
+  const afterRows = shownAfter.flatMap((index) => rowsForTitle(index));
+  const sourceRows = [...beforeRows, ...selectedRows, ...afterRows];
+  const lines = [
+    ...(beforeIndicator ? [styles.dim(`↑ ${hiddenBefore} more`)] : []),
+    ...sourceRows.map((index) => list.lines[index] ?? ""),
+    ...(afterIndicator ? [styles.dim(`↓ ${hiddenAfter} more`)] : []),
+  ];
+  const targets = [
+    ...(beforeIndicator ? [undefined] : []),
+    ...sourceRows.map((index) => list.targets[index]),
+    ...(afterIndicator ? [undefined] : []),
+  ];
+  const selectedIndex = (beforeIndicator ? 1 : 0) + beforeRows.length + selectedRows.length - selectedLength;
+  return {
+    lines,
+    targets,
+    selectedIndex,
+    selectedEndIndex: selectedIndex + selectedLength - 1,
+    top: sourceRows[0] ?? list.selectedIndex,
   };
 }
 
@@ -405,7 +558,7 @@ function workflowVisualLine(session: RenderSession, width: number, styles: Layou
     return truncate(styles.success(`${CARD.shipped} ${workflow.ticketId ?? "workflow"} shipped`), width);
   }
   const dots = workflow.steps.map((step, index) => styles[index < workflow.activeIndex ? "success" : index === workflow.activeIndex ? (step.id === "review" ? "warning" : "accent") : "dim"](index < workflow.activeIndex ? CARD.stepDone : index === workflow.activeIndex ? CARD.stepActive : CARD.stepPending)).join("");
-  const plan = session.selectedPlan;
+  const plan = session.plan;
   const phases = plan?.phases;
   const executeIndex = workflow.steps.findIndex((step) => step.id === "execute");
   const isExecute = active.id === "execute";
@@ -427,10 +580,7 @@ function workflowVisualLine(session: RenderSession, width: number, styles: Layou
       if (plan.phase) zone += styles.dim(` p${plan.phase.index}/${plan.phase.count}`);
     }
   }
-  const fallbackText = session.sessionMetadata?.status
-    ?? (session.attention && session.selectedPlan?.nextSource === "metadata" ? "" : session.sessionMetadata?.nextStep)
-    ?? "";
-  if (!zone) return truncate(`${dots}  ${styles.dim(fallbackText)}`, width);
+  if (!zone) return truncate(dots, width);
 
   const flatZone = phases?.length
     ? phases.flatMap((phase) => Array.from({ length: phase.total }, (_, index) => {
@@ -449,10 +599,8 @@ function workflowVisualLine(session: RenderSession, width: number, styles: Layou
     if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
     return done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
   }).join("");
-  const status = isReview && fallbackText ? styles.dim(`  ${fallbackText}`) : "";
   const base = `${dots}  `;
   const candidates = [
-    `${base}${zone}${status}`,
     `${base}${zone}`,
     `${base}${flatZone}`,
     total ? `${base}${ratioZone} ${completed}/${total}` : "",
@@ -460,32 +608,43 @@ function workflowVisualLine(session: RenderSession, width: number, styles: Layou
   return truncate(candidates.find((candidate) => candidate && displayWidth(candidate) <= width) ?? dots, width);
 }
 
-function selectedCardLines(session: RenderSession, width: number, styles: LayoutStyles): { line: string; priority: number }[] {
+function allCardLines(session: RenderSession, width: number, styles: LayoutStyles): { line: string; priority: number }[] {
   const indent = "  ";
+  const contentWidth = Math.max(0, width - indent.length);
   const lines: { line: string; priority: number }[] = [];
-  const plan = session.selectedPlan;
-  const workflowVisual = workflowVisualLine(session, width - indent.length, styles);
-  if (session.workflow?.ticketId) lines.push({ line: truncate(`${indent}ticket: ${session.workflow.ticketId}`, width), priority: 1 });
-  if (workflowVisual) lines.push({ line: truncate(`${indent}${workflowVisual}`, width), priority: 1 });
-  if (session.attention) {
-    const marker = attentionGlyph(session.attention.kind, styles);
-    lines.push({ line: truncate(`${indent}${marker} ${session.attention.text}`, width), priority: 0 });
+  if (session.workflow?.ticketId) {
+    lines.push({ line: `${indent}${styles.dim(truncate(`ticket: ${session.workflow.ticketId}`, contentWidth))}`, priority: 2 });
   }
-  if (!plan) return lines;
-  const inExecute = session.workflow?.steps[session.workflow.activeIndex]?.id === "execute";
-  const progress = workflowVisual ? "" : planProgressText(plan, inExecute, styles);
-  if (progress) lines.push({ line: truncate(`${indent}${progress}`, width), priority: 1 });
-  const visualConsumesNext = Boolean(workflowVisual && plan.nextStep && normalizedText(stripAnsi(workflowVisual)).includes(normalizedText(plan.nextStep)));
-  const showNext = plan.nextStep
-    && !visualConsumesNext
-    && !(session.attention && plan.nextSource === "metadata")
-    && normalizedText(plan.nextStep) !== normalizedText(plan.feature)
-    && normalizedText(plan.nextStep) !== normalizedText(session.attention?.text);
-  if (showNext) lines.push({ line: truncate(` ${styles.accent("→")} ${plan.nextStep}`, width), priority: 2 });
+  const feature = session.plan?.feature;
+  if (feature && normalizedText(feature) !== normalizedText(session.title)) {
+    lines.push({ line: `${indent}${styles.dim(truncate(feature, contentWidth))}`, priority: 1 });
+  }
+  const recap = allCardRecapLine(session, contentWidth, styles);
+  if (recap) lines.push({ line: `${indent}${recap}`, priority: 0 });
   return lines;
 }
 
-function planProgressText(plan: NonNullable<RenderSession["selectedPlan"]>, inExecute: boolean, styles: LayoutStyles): string {
+function allCardRecapLine(session: RenderSession, width: number, styles: LayoutStyles): string | undefined {
+  const inExecute = session.workflow?.steps[session.workflow.activeIndex]?.id === "execute";
+  const progress = session.workflow
+    ? workflowVisualLine(session, width, styles)
+    : session.plan ? planProgressText(session.plan, inExecute, styles) : "";
+  const status = session.sessionMetadata?.status;
+  if (!status) return progress || undefined;
+  if (!progress) return styles.dim(truncate(status, width));
+  if (normalizedText(stripAnsi(progress)).includes(normalizedText(status))) return progress;
+
+  const statusWidth = Math.min(displayWidth(status), Math.max(12, Math.floor(width * 0.55)));
+  const statusText = styles.dim(truncate(status, statusWidth));
+  const progressWidth = width - displayWidth(statusText) - 2;
+  if (progressWidth < 5) return progress;
+  const compactProgress = session.workflow
+    ? workflowVisualLine(session, progressWidth, styles)
+    : truncate(progress, progressWidth);
+  return compactProgress ? `${compactProgress}  ${statusText}` : styles.dim(truncate(status, width));
+}
+
+function planProgressText(plan: NonNullable<RenderSession["plan"]>, inExecute: boolean, styles: LayoutStyles): string {
   const phaseTasks = plan.phase ? plan.phases?.[plan.phase.index - 1] : undefined;
   const phase = plan.phase ? `${inExecute ? "Phase" : "plan"} ${plan.phase.index}/${plan.phase.count}${phaseTasks ? ` · ${phaseTasks.completed}/${phaseTasks.total}` : ""}` : undefined;
   const tasks = plan.tasks ? `${plan.tasks.completed}/${plan.tasks.total} tasks${plan.phases ? " (plan)" : ""}` : undefined;
@@ -623,7 +782,7 @@ function expandedDetails(session: RenderSession, width: number, styles: LayoutSt
 }
 
 function workBlock(session: RenderSession, width: number, styles: LayoutStyles): string[] {
-  const plan = session.selectedPlan;
+  const plan = session.plan;
   if (!plan && !session.attention) return [];
   const fields: [string, string, string?][] = [];
   if (plan?.feature) fields.push(["feature", plan.feature]);
@@ -655,14 +814,14 @@ function metadataBlock(session: RenderSession, width: number, expanded: boolean,
   const metadata = session.sessionMetadata;
   if (!metadata) return [];
   const attentionText = session.attention?.text;
-  const showGoal = metadata.goal && normalizedText(metadata.goal) !== normalizedText(session.selectedPlan?.feature);
+  const showGoal = metadata.goal && normalizedText(metadata.goal) !== normalizedText(session.plan?.feature);
   const showStatus = metadata.status && normalizedText(metadata.status) !== normalizedText(attentionText);
-  const selectedNext = session.selectedPlan?.nextStep;
-  const selectedNextRenderedInCard = session.selectedPlan?.nextSource === "metadata"
+  const selectedNext = session.plan?.nextStep;
+  const selectedNextRenderedInCard = session.plan?.nextSource === "metadata"
     && !session.attention
-    && normalizedText(selectedNext) !== normalizedText(session.selectedPlan.feature);
+    && normalizedText(selectedNext) !== normalizedText(session.plan.feature);
   const showNext = metadata.nextStep
-    && !(session.selectedPlan?.nextSource === "plan" && normalizedText(metadata.nextStep) === normalizedText(selectedNext))
+    && !(session.plan?.nextSource === "plan" && normalizedText(metadata.nextStep) === normalizedText(selectedNext))
     && !(selectedNextRenderedInCard && normalizedText(metadata.nextStep) === normalizedText(selectedNext))
     && normalizedText(metadata.nextStep) !== normalizedText(attentionText);
   const showStage = expanded && metadata.stage && !session.attention;
@@ -762,25 +921,25 @@ function attentionGlyph(kind: NonNullable<RenderSession["attention"]>["kind"], s
   return styles.error("!");
 }
 
-function renderSelectedCardHeader(session: RenderSession, width: number, styles: LayoutStyles, board: boolean, focusedSlot?: number): string {
-  const right = rowRightAdornment(session, styles, board, width);
-  const rightWidth = displayWidth(right);
-  const leftWidth = Math.max(0, width - (right ? rightWidth + 3 : 2));
-  const left = renderSessionRow(session, leftWidth, styles, board, focusedSlot, false, false);
-  const fillWidth = Math.max(0, width - 1 - displayWidth(left) - (right ? rightWidth + 2 : 1));
-  const rightPart = `${right ? `${styles.accent("─")}${right}` : ""}${styles.accent("─")}`;
-  return `${styles.accent("┌─")}${left}${styles.accent("─".repeat(fillWidth))}${rightPart}${styles.accent("┐")}`;
+interface SessionRowOptions {
+  board?: boolean;
+  focusedSlot?: number;
+  selectionMarker?: boolean;
+  titleSource?: "context" | "stored";
+  prefixMode?: "default" | "none";
 }
 
-function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, board = false, focusedSlot?: number, selectionMarker = true, includeRightAdornment = true): string {
+function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, options: SessionRowOptions = {}): string {
+  const board = options.board ?? false;
+  const selectionMarker = options.selectionMarker ?? true;
   const attention = board && selectionMarker && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
   const prefix = session.selected && selectionMarker ? styles.accent("▌") : attention || (session.status === "stopped" ? styles.dim("·") : " ");
   const symbol = session.section === "active"
     ? styles.status(session.displayStatus, session.symbol)
     : styles.muted(session.symbol);
-  const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : board ? (session.boardTitle ?? session.title) : session.title;
+  const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : options.titleSource === "stored" ? session.title : board ? (session.boardTitle ?? session.title) : session.title;
   const styleTitle = (value: string) => session.status === "stopped" ? styles.dim(value) : value;
-  const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, focusedSlot, styles);
+  const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, options.focusedSlot, styles);
   const repoBadge = !board && session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
   const worktreeBadge = !board && session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
   const disclosureBadge = board && session.kind !== "subagent" && session.boardDescendantCount
@@ -790,9 +949,10 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
     ? ` ${styles.success(`⚙︎${session.runningSubagentCount}`)}`
     : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
-  const leftPrefix = `${board && !selectionMarker && prefix === " " ? prefix : `${prefix} `}${indent}${symbol} ${sidePaneMarker}`;
+  const rowPrefix = options.prefixMode === "none" ? "" : board && !selectionMarker && prefix === " " ? prefix : `${prefix} `;
+  const leftPrefix = `${rowPrefix}${indent}${symbol} ${sidePaneMarker}`;
   const leftSuffix = `${disclosureBadge}${runningBadge}${repoBadge}${worktreeBadge}`;
-  const right = includeRightAdornment ? rowRightAdornment(session, styles, board, width) : "";
+  const right = rowRightAdornment(session, styles, board, width);
   const rightSpace = right ? displayWidth(right) + 1 : 0;
   const titleWidth = Math.max(0, width - displayWidth(leftPrefix) - displayWidth(leftSuffix) - rightSpace);
   const text = `${leftPrefix}${styleTitle(truncate(titleText, titleWidth))}${leftSuffix}`;

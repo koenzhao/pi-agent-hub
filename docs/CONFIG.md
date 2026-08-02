@@ -49,7 +49,7 @@ Hub treats this file as extension-owned transient state: it displays known field
     "feature": "Rich workflow board",
     "phase": { "title": "Render responsive cards", "index": 3, "count": 4 },
     "tasks": { "completed": 2, "total": 5 },
-    "nextStep": "Add selected-card height tests"
+    "nextStep": "Add junction-card height tests"
   }
 }
 ```
@@ -59,8 +59,8 @@ Display rules:
 - At least one semantic field (`goal`, `status`, `nextStep`, `stage`, `attention`) or one valid nested `plan` field must be present.
 - If `confidence` is present and below `0.5`, Hub hides model-derived semantic fields; valid deterministic `plan` data remains visible. Attention additionally requires an explicit confidence of at least `0.5`.
 - Attention accepts only `ready` with stage `complete`, `question` with stage `waiting`, or `blocked` with stage `blocked`, each with nonblank bounded text. It never changes runtime status, workflow position, ordering, lifecycle bucket, or registry state.
-- In board mode, waiting/idle unselected rows reuse their prefix cell for `✓` ready, `?` question, or `!` blocked in both workflow lanes and `OTHER ACTIVE`. The selected accent-bordered card shows the reason before compact exact progress. Running/error/stopped rows keep operational presentation, and subagent attention stays on its own row.
-- `plan.feature` is the producer-authored compact board title. Plan fields are independently optional. Invalid phase/task pairs are omitted without discarding valid sibling fields; strings are trimmed and bounded. The card shows at most one width-truncated action, while the details `work` block retains the complete published deterministic value. Duplicate attention/goal/status/next rows are suppressed across details blocks.
+- In stage grouping, waiting/idle compact rows reuse their prefix cell for `✓` ready, `?` question, or `!` blocked in both workflow lanes and `OTHER ACTIVE`; junction rows place the same glyph beside their branch. Selected junction cards use a heavy branch plus full-span background. Running/error/stopped rows keep operational presentation, subagent attention stays on its own row, and the complete attention reason remains in details.
+- `plan.feature` is the producer-authored one-line junction description beneath the stored Hub title and is omitted when both values match. Plan fields are independently optional. Invalid phase/task pairs are omitted without discarding valid sibling fields; strings are trimmed and bounded. Junction cards combine available plan/workflow progress with semantic status in one recap line, while the details `work` block retains complete published deterministic values. Duplicate attention/goal/status/next rows are suppressed across details blocks.
 - `source` and `updatedAt` remain provenance/freshness for all projections.
 
 ### Workflow heartbeat bridge

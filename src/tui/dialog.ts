@@ -28,7 +28,7 @@ export type FocusSidePaneResult = { kind: "focused" } | { kind: "unavailable" };
 
 export interface SessionsViewState {
   grouping: "project" | "stage";
-  density: "compact" | "cards";
+  density: "compact" | "all-cards";
 }
 
 export interface SessionsViewActions {
