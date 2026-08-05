@@ -2,6 +2,7 @@ export interface DashboardShortcut {
   key: string;
   label?: string;
   send: string;
+  /** Accepted as legacy config input and ignored. */
   syncPiNameAfterMs?: number;
 }
 

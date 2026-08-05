@@ -166,10 +166,10 @@ test("dashboard shortcut config allows non-reserved printable variants", async (
   const env = { PI_AGENT_HUB_DIR: root };
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "O", send: "/session-summary name" }, { key: "!", send: "/shifted" }] },
+    dashboard: { shortcuts: [{ key: "O", send: "/session-name refresh" }, { key: "!", send: "/shifted" }] },
   }), "utf8");
 
-  assert.deepEqual(await effectiveDashboardShortcuts(env), [{ key: "O", send: "/session-summary name" }, { key: "!", send: "/shifted" }]);
+  assert.deepEqual(await effectiveDashboardShortcuts(env), [{ key: "O", send: "/session-name refresh" }, { key: "!", send: "/shifted" }]);
 });
 
 test("dashboard shortcut config rejects conflicts and invalid send values", async () => {
@@ -177,61 +177,61 @@ test("dashboard shortcut config rejects conflicts and invalid send values", asyn
   const env = { PI_AGENT_HUB_DIR: root };
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "N", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "N", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "A", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "A", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "C-q", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "C-q", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "M-q", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "M-q", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "C-m", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "C-m", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "v", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "v", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "F", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "F", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "1", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "1", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "M-1", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "M-1", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "o", send: "/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "o", send: "/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /conflicts with a built-in dashboard shortcut/);
 
@@ -243,7 +243,7 @@ test("dashboard shortcut config rejects conflicts and invalid send values", asyn
 
   await writeFile(configPath(env), JSON.stringify({
     version: 1,
-    dashboard: { shortcuts: [{ key: "C-n", send: "\n/session-summary name" }] },
+    dashboard: { shortcuts: [{ key: "C-n", send: "\n/session-name refresh" }] },
   }), "utf8");
   await assert.rejects(() => effectiveDashboardShortcuts(env), /must be one line/);
 });

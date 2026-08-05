@@ -9,7 +9,6 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 - Registry: `registry.json`
 - Heartbeats: `heartbeats/<session-id>.json`
 - Latest one-time managed-session theme request: `theme-command.json`
-- Optional session metadata: `session-metadata/<session-id>.json`
 - Multi-repo workspaces: `workspaces/<session-id>`
 - Hub-owned Git worktrees: `worktrees/<repo-name>/<session-id-prefix>-<branch-slug>`
 - Recent repo history: `repo-history.json`
@@ -22,46 +21,13 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 - MCP pool socket: `<global-state>/pool/pool.sock`
 - Temporary tmux return binding state: `return-key/active.json` and `return-key/previous.tmux`
 
-### Session metadata
+### Generic session context
 
-Extensions can publish dashboard-only semantic metadata, an optional explicit attention reason, and an optional deterministic plan summary for a managed session by writing:
+A Pi extension can append a latest-snapshot custom entry with `customType: "pi-agent-hub-context"`. Version 1 accepts a bounded ticket id, optional subtitle and description, and optional explicit `ready`, `question`, or `blocked` attention. Unknown fields are ignored. Hub copies the latest valid snapshot into its heartbeat. It does not read producer files or persist context in `registry.json`.
 
-```text
-<global-state>/session-metadata/<session-id>.json
-```
+Pi's native session name is the canonical title and is sent separately as `heartbeat.piSessionName`. Hub uses the primary repo basename as a provisional label, then caches each nonblank heartbeat name. `R` sends exact `/name <text>` to a live Pi session. `N` remains manual recovery from persisted Pi `session_info`.
 
-Hub treats this file as extension-owned transient state: it displays known fields for the selected session, removes the file on session delete, and never uses it for liveness, status counts, ordering, or Hub title changes. It never copies the file into `registry.json`.
-
-```json
-{
-  "source": "my-extension",
-  "goal": "Improve Hub metadata rendering",
-  "status": "Generic metadata is visible in the dashboard",
-  "nextStep": "Approve rollout order",
-  "stage": "waiting",
-  "confidence": 0.86,
-  "attention": {
-    "kind": "question",
-    "text": "Choose the rollout order"
-  },
-  "updatedAt": 1765060000000,
-  "plan": {
-    "feature": "Rich workflow board",
-    "phase": { "title": "Render responsive cards", "index": 3, "count": 4 },
-    "tasks": { "completed": 2, "total": 5 },
-    "nextStep": "Add junction-card height tests"
-  }
-}
-```
-
-Display rules:
-
-- At least one semantic field (`goal`, `status`, `nextStep`, `stage`, `attention`) or one valid nested `plan` field must be present.
-- If `confidence` is present and below `0.5`, Hub hides model-derived semantic fields; valid deterministic `plan` data remains visible. Attention additionally requires an explicit confidence of at least `0.5`.
-- Attention accepts only `ready` with stage `complete`, `question` with stage `waiting`, or `blocked` with stage `blocked`, each with nonblank bounded text. It never changes runtime status, workflow position, ordering, lifecycle bucket, or registry state.
-- In stage grouping, waiting/idle compact rows reuse their prefix cell for `✓` ready, `?` question, or `!` blocked in both workflow lanes and `OTHER ACTIVE`; junction rows place the same glyph beside their branch. Selected junction cards use a heavy branch plus full-span background. Running/error/stopped rows keep operational presentation, subagent attention stays on its own row, and the complete attention reason remains in details.
-- `plan.feature` is the producer-authored one-line junction description beneath the stored Hub title and is omitted when both values match. Plan fields are independently optional. Invalid phase/task pairs are omitted without discarding valid sibling fields; strings are trimmed and bounded. Junction cards combine available plan/workflow progress with semantic status in one recap line, while the details `work` block retains complete published deterministic values. Duplicate attention/goal/status/next rows are suppressed across details blocks.
-- `source` and `updatedAt` remain provenance/freshness for all projections.
+If generic context and workflow runtime contain different ticket ids, Hub keeps the workflow ticket id and suppresses context subtitle/description. Attention stays independent and appears only on waiting/idle rows.
 
 ### Workflow heartbeat bridge
 
@@ -81,6 +47,16 @@ Hub's extension can also surface workflow-stage state from the optional `workflo
       "label": "Focus",
       "detail": "turn 4"
     },
+    "activity": {
+      "id": "implementation-review",
+      "label": "Reviewing implementation",
+      "pass": 2
+    },
+    "plan": {
+      "phase": { "title": "Bridge context", "index": 2, "count": 4 },
+      "tasks": { "completed": 8, "total": 11 },
+      "nextStep": "Validate the dashboard"
+    },
     "steps": [
       { "id": "plan-md", "short": "PL", "label": "Plan" },
       { "id": "execute", "short": "EX", "label": "Execute" },
@@ -94,9 +70,11 @@ Hub's extension can also surface workflow-stage state from the optional `workflo
 
 The producer owns step order, ids, short codes, and optional labels. `activeStep`, finite `updatedAt`, and a nonempty `steps` array are required; each step needs a unique nonblank `id` and nonblank `short`, while `label` and `ticketId` are optional. `updatedAt` is the producer's state-change timestamp, so it can advance during one workflow step—for example, when a focus turn completes—independently of heartbeat cadence. Missing or malformed base workflow metadata silently removes the rail and canonical lane placement without affecting process state; an Active session still appears in `OTHER ACTIVE`. The board requires a `workflow-runtime` version from `rules` that publishes `steps` and `updatedAt` for producer-lane placement. Older payloads have no rail and stay in `OTHER ACTIVE`. No fallback step list is mirrored in Hub.
 
+`activity` and `plan` are independent optional producer projections. A valid activity (`id`, `label`, optional positive `pass`) takes precedence on the card recap. Without activity, Hub shows bounded deterministic phase/task progress and `nextStep`; it does not inspect step ids to choose either path. Task counts are nonnegative integers up to 10,000. A plan can publish at most 100 phase counts, and their aggregate total must also stay at or below 10,000; Hub omits an invalid phase projection while retaining other valid plan fields. Malformed optional projections are omitted without hiding a valid base rail.
+
 `activeMode` is an optional producer-owned display modifier. It requires nonblank `id` and `short`; `label` and `detail` are optional. Hub validates it independently, so malformed mode metadata is omitted without discarding a valid base workflow. Hub does not interpret Rules' private focus execution state. The mode is runtime-only: the controller exposes it only from a fresh, non-shutdown heartbeat with confirmed tmux presence and never writes it to `registry.json`. Stale, missing, shutdown, or stopped sessions retain the base workflow snapshot but lose the transient mode decoration.
 
-The snapshot drives the per-session rail and canonical lanes in the read-only `v` board. Modes change the active step's display only; pipeline identity and lane placement continue to use the ordered base step ids. When visible Active parents report different ordered-id pipelines, Hub deterministically selects the most prevalent pipeline, treats label/short-only versions as compatible, and uses the newest compatible vocabulary. Incompatible and workflowless Active parent trees render once in synthetic `OTHER ACTIVE`; Backlog/Archived remain footer-only. Because heartbeats fire on agent start/end and every 15 seconds, a producer state change can lag in the dashboard by up to ~15 seconds.
+The snapshot drives the per-session rail and canonical lanes in the read-only `v` board. Modes change the active step's display only; pipeline identity and lane placement continue to use the ordered base step ids. When visible Active parents report different ordered-id pipelines, Hub deterministically selects the most prevalent pipeline, treats label/short-only versions as compatible, and uses the newest compatible vocabulary. Incompatible and workflowless Active parent trees render once in synthetic `OTHER ACTIVE`; Backlog/Archived remain footer-only. Heartbeats fire on agent start/end, after all `agent_end` handlers settle, and every 15 seconds. Final context is immediate; other producer changes still have the periodic fallback.
 
 ## Global config
 
@@ -123,9 +101,8 @@ Optional global config lives at `config.json` under the global state directory:
     "shortcuts": [
       {
         "key": "C-n",
-        "label": "summarize name",
-        "send": "/session-summary name",
-        "syncPiNameAfterMs": 1500
+        "label": "refresh name",
+        "send": "/session-name refresh"
       }
     ]
   }
@@ -153,9 +130,8 @@ pi-hub config unset worktree-default
     "shortcuts": [
       {
         "key": "C-n",
-        "label": "summarize name",
-        "send": "/session-summary name",
-        "syncPiNameAfterMs": 1500
+        "label": "refresh name",
+        "send": "/session-name refresh"
       }
     ]
   }
@@ -164,7 +140,7 @@ pi-hub config unset worktree-default
 
 Supported key spelling includes plain single characters, `C-x`/`ctrl+x`, and `M-x`/`alt+x`. Built-in dashboard keys and tmux return/focus keys are reserved, including theme settings `t`, the panel-close prefix `x`, sidebar return `M-q`, and `M-1` through `M-4`; shifted digit characters such as `!` are available for custom shortcuts. `send` must be a single nonblank line; this is not a shell-command or macro facility.
 
-`syncPiNameAfterMs` is a pi-agent-hub-specific post-action for `/session-summary name` workflows: after sending the shortcut, Hub waits that many milliseconds and then syncs the selected dashboard title from Pi's latest `session_info.name`, equivalent to pressing `N` later. `/session-summary name` is not built into Hub; it is provided by the optional [`pi-session-summary`](https://github.com/masta-g3/pi-session-summary) Pi extension.
+Legacy `syncPiNameAfterMs` values remain readable but schedule no delayed copy. Native Pi name changes trigger an immediate heartbeat. `/session-name refresh` is producer-provided and can be configured as an ordinary one-line text send.
 
 ## New-session worktree default
 

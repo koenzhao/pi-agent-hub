@@ -34,7 +34,6 @@ export async function updateRegistry(
 
 export interface NewSessionInput {
   cwd: string;
-  title?: string;
   group?: string;
   additionalCwds?: string[];
   now?: number;
@@ -44,7 +43,7 @@ export function createSessionRecord(input: NewSessionInput): ManagedSession {
   const now = input.now ?? Date.now();
   const cwd = resolve(input.cwd);
   const id = randomUUID();
-  const title = input.title?.trim() || basename(cwd) || "pi-session";
+  const title = provisionalSessionTitle(cwd);
   const additionalCwds = normalizeAdditionalCwds(cwd, input.additionalCwds);
   return {
     id,
@@ -57,6 +56,10 @@ export function createSessionRecord(input: NewSessionInput): ManagedSession {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export function provisionalSessionTitle(cwd: string): string {
+  return basename(resolve(cwd)) || "pi-session";
 }
 
 export function normalizeGroup(group: string | undefined): string {

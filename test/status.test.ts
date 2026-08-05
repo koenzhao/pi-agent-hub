@@ -96,7 +96,7 @@ test("apply computed status keeps fresh active theme and drops stale theme", () 
 });
 
 test("apply computed status retains base workflow without transient active mode", () => {
-  const workflow = { steps: [{ id: "plan-md", short: "PL", label: "Plan" }, { id: "execute", short: "EX", label: "Execute" }], activeIndex: 1, ticketId: "auth-001", updatedAt: now };
+  const workflow = { steps: [{ id: "plan-md", short: "PL", label: "Plan" }, { id: "execute", short: "EX", label: "Execute" }], activeIndex: 1, currentStepComplete: true, ticketId: "auth-001", updatedAt: now };
   const runtimeWorkflow = {
     ...workflow,
     activeMode: { id: "focus", short: "FOC", label: "Focus", detail: "turn 4" },
@@ -115,6 +115,22 @@ test("apply computed status retains base workflow without transient active mode"
 
   const missing = applyComputedStatus(session({ workflow }), { status: "waiting", note: "missing heartbeat" }, now);
   assert.deepEqual(missing.workflow, workflow);
+});
+
+test("apply computed status retains producer activity and plan while dropping transient mode", () => {
+  const managed = session({ status: "waiting" });
+  const runtime = {
+    steps: [{ id: "build", short: "BLD" }], activeIndex: 0, updatedAt: 10,
+    activeMode: { id: "focus", short: "FOC" },
+    activity: { id: "review", label: "Reviewing implementation", pass: 2 },
+    plan: { tasks: { completed: 2, total: 3 } },
+  };
+  const updated = applyComputedStatus(managed, { status: "waiting" }, now, heartbeat({ workflow: runtime }));
+  assert.deepEqual(updated.workflow, {
+    steps: [{ id: "build", short: "BLD" }], activeIndex: 0, updatedAt: 10,
+    activity: { id: "review", label: "Reviewing implementation", pass: 2 },
+    plan: { tasks: { completed: 2, total: 3 } },
+  });
 });
 
 test("mark acknowledged turns waiting into idle", () => {

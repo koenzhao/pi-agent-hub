@@ -25,16 +25,24 @@ export interface WorkflowModeDisplay {
 export interface WorkflowSnapshot {
   steps: WorkflowStep[];
   activeIndex: number;
+  currentStepComplete?: boolean;
   ticketId?: string;
   updatedAt: number;
 }
 
+export interface WorkflowActivityDisplay {
+  id: string;
+  label: string;
+  pass?: number;
+}
+
 export interface WorkflowRuntimeSnapshot extends WorkflowSnapshot {
   activeMode?: WorkflowModeDisplay;
+  activity?: WorkflowActivityDisplay;
+  plan?: SessionPlanSummary;
 }
 
 export interface SessionPlanSummary {
-  feature?: string;
   phase?: {
     title: string;
     index: number;
@@ -55,16 +63,15 @@ export interface SessionAttention {
   text: string;
 }
 
-export interface SessionMetadata {
-  source?: string;
-  goal?: string;
-  status?: string;
-  nextStep?: string;
-  stage?: string;
-  confidence?: number;
+export interface PiAgentHubContextV1 {
+  version: 1;
+  updatedAt: number;
+  ticket?: {
+    id: string;
+    subtitle?: string;
+    description?: string;
+  };
   attention?: SessionAttention;
-  updatedAt?: number;
-  plan?: SessionPlanSummary;
 }
 
 export interface ManagedWorktree {
@@ -112,7 +119,7 @@ export interface ManagedSession {
 }
 
 export interface RuntimeSession extends ManagedSession {
-  sessionMetadata?: SessionMetadata;
+  context?: PiAgentHubContextV1;
   workflow?: WorkflowRuntimeSnapshot;
 }
 
@@ -136,6 +143,8 @@ export interface Heartbeat {
   taskPreview?: string;
   resultPath?: string;
   activeTheme?: ActiveThemeSnapshot;
+  piSessionName?: string;
+  context?: PiAgentHubContextV1;
   workflow?: WorkflowRuntimeSnapshot;
 }
 

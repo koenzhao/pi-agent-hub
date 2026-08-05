@@ -26,14 +26,14 @@ test("piAgentHubExtension registers handlers once per active process", async () 
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
 
-  assert.deepEqual(events, ["before_agent_start", "session_start", "agent_start", "agent_end", "session_shutdown"]);
+  assert.deepEqual(events, ["before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_shutdown"]);
 
   await handlers.get("session_shutdown")?.({}, { cwd: "/repo" });
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
 
   assert.deepEqual(events, [
-    "before_agent_start", "session_start", "agent_start", "agent_end", "session_shutdown",
-    "before_agent_start", "session_start", "agent_start", "agent_end", "session_shutdown",
+    "before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_shutdown",
+    "before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_shutdown",
   ]);
   delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
 });
@@ -470,6 +470,30 @@ test("piAgentHubExtension bridges the producer-owned workflow definition into he
   });
 });
 
+test("piAgentHubExtension transports optional current-position completion without interpreting the producer", async () => {
+  for (const [currentStepComplete, expected] of [[undefined, undefined], [false, false], [true, true], ["true", undefined], [1, undefined]] as const) {
+    const heartbeat = await heartbeatWithSessionManager({
+      getBranch: () => [{ ...WORKFLOW_ENTRY, data: { ...WORKFLOW_ENTRY.data, currentStepComplete } }],
+    });
+    assert.equal(heartbeat.workflow?.currentStepComplete, expected);
+    assert.equal(heartbeat.workflow?.steps[heartbeat.workflow.activeIndex]?.id, "execute");
+  }
+});
+
+test("piAgentHubExtension bridges native name, generic context, activity, and plan", async () => {
+  const heartbeat = await heartbeatWithSessionManager({
+    getBranch: () => [
+      { type: "custom", customType: "pi-agent-hub-context", data: { version: 1, updatedAt: 4, ticket: { id: "metadata-redesign-001", subtitle: "Simplify session context", description: "Use one generic contract." }, attention: { kind: "ready", text: "Review the result" } } },
+      { ...WORKFLOW_ENTRY, data: { ...WORKFLOW_ENTRY.data, activity: { id: "critic", label: "Reviewing implementation", pass: 2 }, plan: { phase: { title: "Hub bridge", index: 2, count: 4 }, tasks: { completed: 8, total: 11 }, phases: [{ completed: 3, total: 3 }, { completed: 5, total: 8 }], nextStep: "Wire settled heartbeat" } } },
+    ],
+  });
+  assert.equal(heartbeat.piSessionName, "Canonical Name");
+  assert.deepEqual(heartbeat.context?.ticket, { id: "metadata-redesign-001", subtitle: "Simplify session context", description: "Use one generic contract." });
+  assert.deepEqual(heartbeat.workflow?.activity, { id: "critic", label: "Reviewing implementation", pass: 2 });
+  assert.deepEqual(heartbeat.workflow?.plan?.tasks, { completed: 8, total: 11 });
+  assert.equal(heartbeat.workflow?.plan?.nextStep, "Wire settled heartbeat");
+});
+
 test("piAgentHubExtension bridges optional producer mode display into heartbeat", async () => {
   const heartbeat = await heartbeatWithSessionManager({
     getBranch: () => [{
@@ -509,6 +533,45 @@ test("piAgentHubExtension drops malformed optional mode without dropping workflo
   }
 });
 
+test("piAgentHubExtension omits malformed optional activity and plan for alternate producer steps", async () => {
+  const base = {
+    activeStep: "ship",
+    ticketId: "alternate-001",
+    updatedAt: 1_784_772_000_000,
+    steps: [{ id: "discover", short: "DS", label: "Discover" }, { id: "ship", short: "SH", label: "Ship" }],
+  };
+  const invalidActivities = [
+    {}, { id: "", label: "Working" }, { id: "work", label: "" },
+    { id: "work", label: "Working", pass: 0 }, { id: "work", label: "Working", pass: 1.5 },
+  ];
+  for (const activity of invalidActivities) {
+    const heartbeat = await heartbeatWithSessionManager({ getBranch: () => [{ type: "custom", customType: "workflow-runtime", data: { ...base, activity } }] });
+    assert.equal(heartbeat.workflow?.steps[heartbeat.workflow.activeIndex]?.id, "ship");
+    assert.equal(heartbeat.workflow?.activity, undefined);
+  }
+
+  const invalidPlans = [
+    {},
+    { tasks: { completed: 4, total: 3 } },
+    { phase: { title: "", index: 1, count: 2 } },
+    { phases: [{ completed: -1, total: 2 }] },
+    { phases: [{ completed: 3_000, total: 6_000 }, { completed: 2_000, total: 5_000 }] },
+    { nextStep: "x".repeat(241) },
+  ];
+  for (const plan of invalidPlans) {
+    const heartbeat = await heartbeatWithSessionManager({ getBranch: () => [{ type: "custom", customType: "workflow-runtime", data: { ...base, plan } }] });
+    assert.equal(heartbeat.workflow?.steps[heartbeat.workflow.activeIndex]?.id, "ship");
+    assert.equal(heartbeat.workflow?.plan, undefined);
+  }
+
+  const partial = await heartbeatWithSessionManager({ getBranch: () => [{
+    type: "custom", customType: "workflow-runtime",
+    data: { ...base, activity: { id: "", label: "bad" }, plan: { phase: { title: "bad", index: 3, count: 2 }, tasks: { completed: 2, total: 5 }, nextStep: "Publish result" } },
+  }] });
+  assert.deepEqual(partial.workflow?.plan, { tasks: { completed: 2, total: 5 }, nextStep: "Publish result" });
+  assert.equal(partial.workflow?.activity, undefined);
+});
+
 test("piAgentHubExtension keeps producer workflow time stable across heartbeat cadence", async () => {
   const first = await heartbeatWithSessionManager({ getBranch: () => [WORKFLOW_ENTRY] });
   await new Promise((resolve) => setTimeout(resolve, 2));
@@ -541,12 +604,42 @@ test("piAgentHubExtension rejects invalid producer workflow definitions", async 
   assert.equal(cleared.workflow, undefined);
 });
 
+test("piAgentHubExtension agent_settled projects context appended after agent_end", async () => {
+  const branch: unknown[] = [];
+  const heartbeat = await heartbeatWithSessionManager({ getBranch: () => branch }, async (handlers, ctx) => {
+    await handlers.get("agent_end")?.({}, ctx);
+    branch.push({ type: "custom", customType: "pi-agent-hub-context", data: {
+      version: 1, updatedAt: 9, attention: { kind: "question", text: "Choose the release target" },
+    } });
+    await handlers.get("agent_settled")?.({}, ctx);
+  });
+  assert.equal(heartbeat.state, "waiting");
+  assert.deepEqual(heartbeat.context?.attention, { kind: "question", text: "Choose the release target" });
+});
+
+test("piAgentHubExtension follows agent_settled for detached context publication", async () => {
+  const branch: unknown[] = [];
+  const heartbeat = await heartbeatWithSessionManager({ getBranch: () => branch }, async (handlers, ctx) => {
+    await handlers.get("agent_settled")?.({}, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    branch.push({ type: "custom", customType: "pi-agent-hub-context", data: {
+      version: 1, updatedAt: 10, attention: { kind: "ready", text: "Review the completed change" },
+    } });
+    await new Promise((resolve) => setTimeout(resolve, 850));
+  });
+  assert.equal(heartbeat.state, "waiting");
+  assert.deepEqual(heartbeat.context?.attention, { kind: "ready", text: "Review the completed change" });
+});
+
 test("piAgentHubExtension omits workflow when getBranch is unavailable or throws", async () => {
   assert.equal((await heartbeatWithSessionManager({})).workflow, undefined);
   assert.equal((await heartbeatWithSessionManager({ getBranch: () => { throw new Error("boom"); } })).workflow, undefined);
 });
 
-async function heartbeatWithSessionManager(sessionManager: Record<string, unknown>): Promise<Heartbeat> {
+async function heartbeatWithSessionManager(
+  sessionManager: Record<string, unknown>,
+  afterStart?: (handlers: Map<string, (event: unknown, ctx: unknown) => Promise<void>>, ctx: Record<string, unknown>) => Promise<void>,
+): Promise<Heartbeat> {
   delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-"));
   const previousSessionId = process.env[SESSION_ID_ENV];
@@ -559,11 +652,15 @@ async function heartbeatWithSessionManager(sessionManager: Record<string, unknow
       handlers.set(name, handler);
     },
     registerTool() {},
+    getSessionName() { return "Canonical Name"; },
   };
 
   try {
     piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
-    await handlers.get("session_start")?.({}, { cwd: root, hasUI: false, sessionManager });
+    const ctx = { cwd: root, hasUI: false, sessionManager };
+    await handlers.get("session_start")?.({}, ctx);
+    if (afterStart) await afterStart(handlers, ctx);
+    else await handlers.get("session_info_changed")?.({}, ctx);
     return JSON.parse(await readFile(heartbeatPath("session-wf", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
   } finally {
     await handlers.get("session_shutdown")?.({}, { cwd: root, sessionManager });

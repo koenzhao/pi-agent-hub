@@ -5,7 +5,7 @@ import { createSessionTreeIndex, orderedSessionRows } from "../core/session-tree
 import type { ManagedSession } from "../core/types.js";
 import { matchesDashboardShortcut } from "./dashboard-shortcuts.js";
 import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
-import { boardLaneRows, buildRenderModel } from "./render-model.js";
+import { boardLaneRows, buildRenderModel, visibleTreeRows } from "./render-model.js";
 import { renderSessions, type SessionListTarget } from "./layout.js";
 import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
@@ -40,6 +40,7 @@ export class SessionsView implements Component {
   private listWidth = 0;
   private listScrollTop = 0;
   private expandedBoardParentIds = new Set<string>();
+  private expandedProjectParentIds = new Set<string>();
   private themeLoadRequest = 0;
 
   constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {
@@ -168,8 +169,25 @@ export class SessionsView implements Component {
       this.openSelectedSidePane(panelSlot);
       return;
     }
+    const filterActive = Boolean(this.controller.snapshot().filter?.trim());
+    if (!filterActive && matchesKey(data, Key.shift("right"))) {
+      this.setAllSubagents(true);
+      return;
+    }
+    if (!filterActive && matchesKey(data, Key.shift("left"))) {
+      this.setAllSubagents(false);
+      return;
+    }
+    if (!filterActive && matchesKey(data, Key.right)) {
+      this.setSelectedSubagents(true);
+      return;
+    }
+    if (!filterActive && matchesKey(data, Key.left)) {
+      this.setSelectedSubagents(false);
+      return;
+    }
     if (this.grouping === "stage" && data === " ") {
-      if (!this.controller.snapshot().filter?.trim()) this.toggleBoardSubagents();
+      if (!filterActive) this.toggleBoardSubagents();
       return;
     }
     if (this.runConfiguredShortcut(data)) return;
@@ -263,6 +281,7 @@ export class SessionsView implements Component {
       archiveDisclosureSelected: this.archiveDisclosureSelected,
       hidePreview: Boolean(sidePaneSessionIds?.size),
       expandedBoardParentIds: this.expandedBoardParentIds,
+      expandedProjectParentIds: this.expandedProjectParentIds,
     }), this.theme);
     this.rowTargets = layout.rowTargets;
     this.listWidth = layout.listWidth;
@@ -520,7 +539,7 @@ export class SessionsView implements Component {
       this.archiveDisclosureSelected = false;
       if (target.id !== previousId) this.actions.selectionChanged?.();
     }
-    const targetKey = target.kind === "session" ? `session:${target.id}` : target.kind;
+    const targetKey = target.kind === "archive-disclosure" ? target.kind : `session:${target.id}`;
     const now = this.actions.now?.() ?? Date.now();
     const elapsed = this.lastMouseClick ? now - this.lastMouseClick.at : undefined;
     const doubleClick = this.lastMouseClick?.target === targetKey && elapsed !== undefined && elapsed >= 0 && elapsed <= DOUBLE_CLICK_MS;
@@ -666,9 +685,11 @@ export class SessionsView implements Component {
   private visibleListTargets(): SessionListTarget[] {
     if (this.grouping === "stage") return this.boardRows().map((row) => ({ kind: "session", id: row.id }));
     const snapshot = this.controller.snapshot();
-    const allRows = orderedSessionRows(snapshot.sessions, snapshot.filter);
-    const archive = archiveSectionRows(allRows, { expanded: this.archiveExpanded, filterActive: snapshot.filter !== undefined });
-    const targets: SessionListTarget[] = archive.rows.map((row) => ({ kind: "session", id: row.id }));
+    const filterActive = Boolean(snapshot.filter?.trim());
+    const allRows = orderedSessionRows(snapshot.sessions, filterActive ? snapshot.filter : undefined);
+    const archive = archiveSectionRows(allRows, { expanded: this.archiveExpanded, filterActive });
+    const visibleRows = visibleTreeRows(archive.rows, allRows, this.expandedProjectParentIds, filterActive);
+    const targets: SessionListTarget[] = visibleRows.map((row) => ({ kind: "session", id: row.id }));
     if (archive.showDisclosure) targets.push({ kind: "archive-disclosure" });
     return targets;
   }
@@ -685,7 +706,7 @@ export class SessionsView implements Component {
     }
     const selectedId = this.controller.snapshot().selectedId;
     if (targets.some((target) => target.kind === "session" && target.id === selectedId)) return;
-    const boardParentId = this.grouping === "stage" ? this.topLevelBoardParentId(selectedId) : undefined;
+    const boardParentId = this.topLevelBoardParentId(selectedId);
     if (boardParentId && targets.some((target) => target.kind === "session" && target.id === boardParentId)) {
       if (this.controller.selectSession(boardParentId) && boardParentId !== selectedId) this.actions.selectionChanged?.();
       return;
@@ -701,12 +722,13 @@ export class SessionsView implements Component {
 
   private boardRows() {
     const snapshot = this.controller.snapshot();
-    const rows = orderedSessionRows(snapshot.sessions, snapshot.filter);
+    const filterActive = Boolean(snapshot.filter?.trim());
+    const rows = orderedSessionRows(snapshot.sessions, filterActive ? snapshot.filter : undefined);
     const tree = createSessionTreeIndex(rows);
     const active = rows.filter((session) => effectiveSessionLifecycle(session, rows, tree).section === "active");
     return boardLaneRows(active, rows, {
       expandedParentIds: this.expandedBoardParentIds,
-      revealAll: snapshot.filter !== undefined,
+      revealAll: filterActive,
     }).flatMap((lane) => lane.rows);
   }
 
@@ -717,18 +739,51 @@ export class SessionsView implements Component {
     return session ? tree.trace(session).owner?.id : undefined;
   }
 
-  private toggleBoardSubagents() {
+  private subagentParentIds(): Set<string> {
     const snapshot = this.controller.snapshot();
-    const selectedId = snapshot.selectedId;
+    const rows = orderedSessionRows(snapshot.sessions);
+    const tree = createSessionTreeIndex(rows);
+    const scopedRows = this.grouping === "stage"
+      ? rows.filter((session) => effectiveSessionLifecycle(session, rows, tree).section === "active")
+      : rows;
+    const scopedIds = new Set(scopedRows.map((session) => session.id));
+    const parentIds = new Set<string>();
+    for (const session of scopedRows) {
+      if (session.kind !== "subagent") continue;
+      const owner = tree.trace(session).owner;
+      if (owner && owner.kind !== "subagent" && scopedIds.has(owner.id)) parentIds.add(owner.id);
+    }
+    return parentIds;
+  }
+
+  private setSelectedSubagents(expanded: boolean) {
+    const selectedId = this.controller.snapshot().selectedId;
     const parentId = this.topLevelBoardParentId(selectedId);
-    if (!parentId || !snapshot.sessions.some((session) => session.kind === "subagent" && session.parentId === parentId)) return;
-    if (this.expandedBoardParentIds.has(parentId)) {
-      this.expandedBoardParentIds.delete(parentId);
-      if (selectedId !== parentId && this.controller.selectSession(parentId)) this.actions.selectionChanged?.();
-    } else {
-      this.expandedBoardParentIds.add(parentId);
+    if (!parentId || !this.subagentParentIds().has(parentId)) return;
+    const expandedIds = this.grouping === "stage" ? this.expandedBoardParentIds : this.expandedProjectParentIds;
+    if (expanded) expandedIds.add(parentId);
+    else expandedIds.delete(parentId);
+    if (!expanded && selectedId !== parentId && this.controller.selectSession(parentId)) this.actions.selectionChanged?.();
+    this.listScrollTop = 0;
+  }
+
+  private setAllSubagents(expanded: boolean) {
+    const expandedIds = this.grouping === "stage" ? this.expandedBoardParentIds : this.expandedProjectParentIds;
+    if (expanded) {
+      for (const parentId of this.subagentParentIds()) expandedIds.add(parentId);
+    } else expandedIds.clear();
+    if (!expanded) {
+      const selectedId = this.controller.snapshot().selectedId;
+      const parentId = this.topLevelBoardParentId(selectedId);
+      if (parentId && selectedId !== parentId && this.controller.selectSession(parentId)) this.actions.selectionChanged?.();
     }
     this.listScrollTop = 0;
+  }
+
+  private toggleBoardSubagents() {
+    const parentId = this.topLevelBoardParentId(this.controller.snapshot().selectedId);
+    if (!parentId || !this.subagentParentIds().has(parentId)) return;
+    this.setSelectedSubagents(!this.expandedBoardParentIds.has(parentId));
   }
 
   private toggleDensity() {
@@ -969,6 +1024,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  q quit                     Esc cancel/clear",
     "  K/J reorder in group      v cycle row density",
     "  S toggle project/stage grouping",
+    "  subagent trees: ←/→ collapse/expand selected · Shift+←/→ all",
     "  mouse click select · double-click open/switch · wheel move",
     "",
     heading("Sessions"),
@@ -994,7 +1050,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  Archived shows 5 parent cascades; Enter/double-click reveals older rows",
     "  Archived cascades auto-remove after 7d once every tmux session is gone",
     "  Board view lanes canonical workflow sessions by producer step, then OTHER ACTIVE;",
-    "  subagents start collapsed: Space toggles a tree; filters reveal matching children",
+    "  subagent trees start collapsed; Space toggles one board tree; filters reveal matches",
     "  every lane nests project/group labels; Backlog/Archived stay summarized",
     "",
     heading("Status legend"),

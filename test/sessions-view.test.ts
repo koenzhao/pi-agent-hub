@@ -105,7 +105,8 @@ test("help overlay opens and closes", () => {
   assert.match(help, /Active and Backlog keep project\/group headers/);
   assert.match(help, /Archived shows 5 parent cascades/);
   assert.match(help, /Board view lanes canonical workflow sessions by producer step, then OTHER ACTIVE/);
-  assert.match(help, /subagents start collapsed: Space toggles a tree/);
+  assert.match(help, /subagent trees: ←\/→ collapse\/expand selected · Shift\+←\/→ all/);
+  assert.match(help, /subagent trees start collapsed; Space toggles one board tree/);
   view.handleInput("\u001b");
   assert.doesNotMatch(view.render(80).join("\n"), /pi agent hub help/);
 });
@@ -383,6 +384,80 @@ test("Space expands and collapses the selected board parent tree", () => {
   view.handleInput(" ");
   assert.equal(controller.snapshot().selectedId, "parent");
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
+});
+
+test("left and right arrows expand and collapse the selected project tree", () => {
+  const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
+  const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
+  const controller = new SessionsController({ version: 1, sessions: [parent, child] });
+  const view = new SessionsView(controller, () => {});
+
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
+  view.handleInput("\u001b[C");
+  assert.match(stripAnsi(view.render(120).join("\n")), /api[\s\S]*worker/);
+
+  view.handleInput("j");
+  assert.equal(controller.snapshot().selectedId, "child");
+  view.handleInput("\u001b[D");
+  assert.equal(controller.snapshot().selectedId, "parent");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
+});
+
+test("left and right arrows collapse and expand the selected board tree", () => {
+  const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
+  const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
+  const controller = new SessionsController({ version: 1, sessions: [parent, child] });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("S");
+  view.handleInput("\u001b[C");
+  assert.match(stripAnsi(view.render(120).join("\n")), /api ▾[\s\S]*worker/);
+
+  view.handleInput("j");
+  assert.equal(controller.snapshot().selectedId, "child");
+  view.handleInput("\u001b[D");
+  assert.equal(controller.snapshot().selectedId, "parent");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
+});
+
+test("shift arrows expand and collapse all project trees", () => {
+  const sessions = [
+    session("a", "api"),
+    { ...session("a-child", "api"), kind: "subagent" as const, parentId: "a", agentName: "api-worker" },
+    session("b", "docs"),
+    { ...session("b-child", "docs"), kind: "subagent" as const, parentId: "b", agentName: "docs-worker" },
+  ];
+  const view = new SessionsView(new SessionsController({ version: 1, sessions }), () => {});
+
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /api-worker|docs-worker/);
+  view.handleInput("\u001b[1;2C");
+  assert.match(stripAnsi(view.render(120).join("\n")), /api-worker/);
+  assert.match(stripAnsi(view.render(120).join("\n")), /docs-worker/);
+
+  view.handleInput("\u001b[1;2D");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /api-worker|docs-worker/);
+});
+
+test("shift arrows expand and collapse all board trees", () => {
+  const sessions = [
+    { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
+    { ...session("a-child", "api"), kind: "subagent" as const, parentId: "a", agentName: "api-worker" },
+    { ...session("b", "docs"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
+    { ...session("b-child", "docs"), kind: "subagent" as const, parentId: "b", agentName: "docs-worker" },
+  ];
+  const controller = new SessionsController({ version: 1, sessions });
+  const view = new SessionsView(controller, () => {});
+
+  view.handleInput("S");
+  view.handleInput("\u001b[1;2C");
+  assert.match(stripAnsi(view.render(120).join("\n")), /api-worker/);
+  assert.match(stripAnsi(view.render(120).join("\n")), /docs-worker/);
+
+  controller.selectSession("b-child");
+  view.render(120);
+  view.handleInput("\u001b[1;2D");
+  assert.equal(controller.snapshot().selectedId, "b");
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /api-worker|docs-worker/);
 });
 
 test("Space remains configurable outside board mode but is reserved for board disclosure", () => {
@@ -818,6 +893,34 @@ test("single mouse click selects without opening", () => {
 
   assert.equal(controller.snapshot().selectedId, "docs");
   assert.deepEqual(switched, []);
+});
+
+test("card continuation rows select and double-click open their session", () => {
+  const switched: string[] = [];
+  let now = 100;
+  const rich = (id: string, title: string) => ({
+    ...session(id, title),
+    workflow: { ...VIEW_WORKFLOW, activeIndex: 1, ticketId: `${id}-001`, activity: { id: "working", label: "Working" } },
+    context: { version: 1 as const, updatedAt: 1, ticket: { id: `${id}-001`, subtitle: `${title} subtitle` } },
+  });
+  const controller = new SessionsController({ version: 1, sessions: [rich("api", "api"), rich("docs", "docs")] });
+  const view = new SessionsView(controller, () => {}, {
+    now: () => now,
+    attachOutsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
+    switchInsideTmux: (tmuxSession) => { switched.push(tmuxSession); },
+  });
+  view.handleInput("v");
+  const rendered = view.render(100);
+  const continuationIndex = rendered.findIndex((line) => stripAnsi(line).includes("#docs-001"));
+  assert.notEqual(continuationIndex, -1);
+
+  view.handleInput(mousePressAtLine(continuationIndex));
+  assert.equal(controller.snapshot().selectedId, "docs");
+  assert.deepEqual(switched, []);
+
+  now = 300;
+  view.handleInput(mousePressAtLine(continuationIndex));
+  assert.deepEqual(switched, ["pi-agent-hub-docs"]);
 });
 
 test("keyboard and mouse selection changes request an immediate preview", () => {
@@ -1428,45 +1531,9 @@ test("enter on stopped session without restart action explains the recovery key"
   assert.match(view.render(100).join("\n"), /session stopped; press r twice to restart/);
 });
 
-test("new form submits with basename group and random title on enter", () => {
-  let created: { cwd: string; group: string; title: string } | undefined;
-  const view = new SessionsView(new SessionsController(), () => {}, {
-    createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "black-aleph" }),
-  });
-  view.handleInput("n");
-  const rendered = view.render(120).join("\n");
-  assert.match(rendered, /New session/);
-  assert.match(rendered, /repos/);
-  assert.match(rendered, /★ primary/);
-  assert.doesNotMatch(rendered, /repo 2/);
-  assert.doesNotMatch(rendered, /repo 3/);
-  assert.match(rendered, /worktree\s+\[ \] off/);
-  assert.match(rendered, /group/);
-  assert.match(rendered, /title/);
-  assert.match(rendered, /black-aleph/);
-  view.handleInput("\r");
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "black-aleph" });
-});
-
-test("new form tab cycles focus and edits title", () => {
-  let created: { cwd: string; group: string; title: string } | undefined;
-  const view = new SessionsView(new SessionsController(), () => {}, {
-    createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
-  });
-  view.handleInput("n");
-  view.handleInput("\t");
-  view.handleInput("\t");
-  view.handleInput("\t");
-  for (const char of "-prod") view.handleInput(char);
-  view.handleInput("\r");
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api-prod" });
-});
-
 test("new form worktree row toggles with space", () => {
   const view = new SessionsView(new SessionsController(), () => {}, {
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   view.handleInput("\t");
@@ -1479,11 +1546,11 @@ test("new form worktree row toggles with space", () => {
   assert.match(view.render(120).join("\n"), /space toggle/);
 });
 
-test("new form worktree toggle uses branch as session title", () => {
-  let created: { cwd: string; group: string; title: string; worktree?: { branch: string } } | undefined;
+test("new form worktree toggle submits a branch without a title input", () => {
+  let created: { cwd: string; group: string; worktree?: { branch: string } } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   view.handleInput("\u0014");
@@ -1495,44 +1562,63 @@ test("new form worktree toggle uses branch as session title", () => {
   for (const char of "feature/api") view.handleInput(char);
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "feature/api", worktree: { branch: "feature/api" } });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", worktree: { branch: "feature/api" } });
 });
 
-test("new form worktree toggle can turn off without crashing", () => {
-  let created: { cwd: string; group: string; title: string; worktree?: { branch: string } } | undefined;
+test("new form worktree toggle can turn off without title state", () => {
+  let created: { cwd: string; group: string; worktree?: { branch: string } } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   view.handleInput("\u0014");
   view.handleInput("\u0014");
   const rendered = view.render(120).join("\n");
   assert.match(rendered, /worktree\s+\[ \] off/);
-  assert.match(rendered, /title/);
+  assert.doesNotMatch(rendered, /\n│▎?\s+title\s/);
   view.handleInput("\r");
-
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api" });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api" });
 });
 
-test("new form worktree mode defaults branch from generated title", () => {
-  let created: { cwd: string; group: string; title: string; worktree?: { branch: string } } | undefined;
+test("new form printable a and x edit the focused field instead of activating shortcuts", () => {
+  let created: { cwd: string; group: string } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api-work" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
-  view.handleInput("\u0014");
+  view.handleInput("\t");
+  view.handleInput("\t");
+  view.handleInput("x");
+  view.handleInput("a");
   view.handleInput("\r");
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "apixa" });
+});
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api-work", worktree: { branch: "api-work" } });
+test("new form preserves a user-edited group across primary cwd changes", () => {
+  let created: { cwd: string; group: string } | undefined;
+  const view = new SessionsView(new SessionsController(), () => {}, {
+    createSession: (input) => { created = input; },
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"] }),
+  });
+  view.handleInput("n");
+  view.handleInput("\t");
+  view.handleInput("\t");
+  for (let i = 0; i < "api".length; i += 1) view.handleInput("\u007f");
+  for (const char of "backend") view.handleInput(char);
+  view.handleInput("\u001b[Z");
+  view.handleInput("\u001b[Z");
+  view.handleInput("\u000e");
+  view.handleInput("\r");
+  assert.deepEqual(created, { cwd: "/tmp/web", group: "backend" });
 });
 
 test("new form worktree mode supports additional repos", () => {
   let created: unknown;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   view.handleInput("\u001ba");
@@ -1542,14 +1628,14 @@ test("new form worktree mode supports additional repos", () => {
   for (const char of "feature/api") view.handleInput(char);
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "feature/api", additionalCwds: ["/tmp/web"], worktree: { branch: "feature/api" } });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", additionalCwds: ["/tmp/web"], worktree: { branch: "feature/api" } });
 });
 
 test("new form add repo shortcut submits one additional cwd", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
+  let created: { cwd: string; group: string; additionalCwds?: string[] } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   view.handleInput("\u001ba");
@@ -1557,14 +1643,14 @@ test("new form add repo shortcut submits one additional cwd", () => {
   for (const char of "/tmp/web") view.handleInput(char);
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api", additionalCwds: ["/tmp/web"] });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", additionalCwds: ["/tmp/web"] });
 });
 
 test("new form add repo shortcut supports more than two additional cwds", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
+  let created: { cwd: string; group: string; additionalCwds?: string[] } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   for (const repo of ["/tmp/web", "/tmp/shared", "/tmp/docs"]) {
@@ -1573,14 +1659,14 @@ test("new form add repo shortcut supports more than two additional cwds", () => 
   }
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api", additionalCwds: ["/tmp/web", "/tmp/shared", "/tmp/docs"] });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", additionalCwds: ["/tmp/web", "/tmp/shared", "/tmp/docs"] });
 });
 
 test("new form remove shortcut removes focused extra repo and omits blank rows", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
+  let created: { cwd: string; group: string; additionalCwds?: string[] } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   view.handleInput("\u001ba");
@@ -1589,24 +1675,24 @@ test("new form remove shortcut removes focused extra repo and omits blank rows",
   view.handleInput("\u001bx");
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api", additionalCwds: ["/tmp/web"] });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", additionalCwds: ["/tmp/web"] });
 });
 
 test("new form remove shortcut is a no-op on primary repo", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
+  let created: { cwd: string; group: string; additionalCwds?: string[] } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   view.handleInput("\u001bx");
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api" });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api" });
 });
 
 test("new form can default to selected session cwd, group, and all additional repos", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
+  let created: { cwd: string; group: string; additionalCwds?: string[] } | undefined;
   const controller = new SessionsController({
     version: 1,
     sessions: [{ ...session("api", "api"), cwd: "/repo/api", group: "backend", additionalCwds: ["/repo/web", "/repo/shared", "/repo/docs"] }],
@@ -1620,7 +1706,6 @@ test("new form can default to selected session cwd, group, and all additional re
         group: selected?.group,
         knownCwds: ["/dashboard", "/repo/api", "/repo/web", "/repo/shared", "/repo/docs"],
         additionalCwds: selected?.additionalCwds,
-        titleGenerator: () => "api",
       };
     },
   });
@@ -1632,12 +1717,12 @@ test("new form can default to selected session cwd, group, and all additional re
   assert.match(rendered, /\/repo\/docs/);
   assert.match(rendered, /backend/);
   view.handleInput("\r");
-  assert.deepEqual(created, { cwd: "/repo/api", group: "backend", title: "api", additionalCwds: ["/repo/web", "/repo/shared", "/repo/docs"] });
+  assert.deepEqual(created, { cwd: "/repo/api", group: "backend", additionalCwds: ["/repo/web", "/repo/shared", "/repo/docs"] });
 });
 
 test("new form per-field validation focuses first invalid field on enter", () => {
   const view = new SessionsView(new SessionsController(), () => {}, {
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api" }),
   });
   view.handleInput("n");
   for (let i = 0; i < "/tmp/api".length; i += 1) view.handleInput("\u007f");
@@ -1650,10 +1735,10 @@ test("new form per-field validation focuses first invalid field on enter", () =>
 });
 
 test("new form ctrl-n cycles primary cwd suggestions and updates group only", () => {
-  let created: { cwd: string; group: string; title: string } | undefined;
+  let created: { cwd: string; group: string } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/web", "/tmp/api"], titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/web", "/tmp/api"] }),
   });
   view.handleInput("n");
   view.handleInput("\u000e");
@@ -1661,14 +1746,14 @@ test("new form ctrl-n cycles primary cwd suggestions and updates group only", ()
   assert.match(rendered, /\/tmp\/web/);
   assert.match(rendered, /web/);
   view.handleInput("\r");
-  assert.deepEqual(created, { cwd: "/tmp/web", group: "web", title: "api" });
+  assert.deepEqual(created, { cwd: "/tmp/web", group: "web" });
 });
 
 test("new form ctrl-n cycles cwd suggestions on extra repo fields", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
+  let created: { cwd: string; group: string; additionalCwds?: string[] } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"] }),
   });
   view.handleInput("n");
   view.handleInput("\u001ba");
@@ -1676,14 +1761,14 @@ test("new form ctrl-n cycles cwd suggestions on extra repo fields", () => {
   view.handleInput("\u000e");
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api", additionalCwds: ["/tmp/web"] });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", additionalCwds: ["/tmp/web"] });
 });
 
 test("new form repo picker selects primary cwd and updates group", () => {
-  let created: { cwd: string; group: string; title: string } | undefined;
+  let created: { cwd: string; group: string } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web-client"], titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web-client"] }),
   });
   view.handleInput("n");
   view.handleInput("\u000f");
@@ -1694,14 +1779,14 @@ test("new form repo picker selects primary cwd and updates group", () => {
   assert.match(view.render(120).join("\n"), /web-client/);
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/web-client", group: "web-client", title: "api" });
+  assert.deepEqual(created, { cwd: "/tmp/web-client", group: "web-client" });
 });
 
 test("new form repo picker selects extra repo without changing group", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
+  let created: { cwd: string; group: string; additionalCwds?: string[] } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"] }),
   });
   view.handleInput("n");
   view.handleInput("\u001ba");
@@ -1710,14 +1795,14 @@ test("new form repo picker selects extra repo without changing group", () => {
   view.handleInput("\r");
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api", additionalCwds: ["/tmp/web"] });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", additionalCwds: ["/tmp/web"] });
 });
 
 test("new form repo picker escape preserves form state", () => {
-  let created: { cwd: string; group: string; title: string } | undefined;
+  let created: { cwd: string; group: string } | undefined;
   const view = new SessionsView(new SessionsController(), () => {}, {
     createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"] }),
   });
   view.handleInput("n");
   view.handleInput("\u000f");
@@ -1726,12 +1811,12 @@ test("new form repo picker escape preserves form state", () => {
   assert.match(view.render(120).join("\n"), /New session/);
   view.handleInput("\r");
 
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "api" });
+  assert.deepEqual(created, { cwd: "/tmp/api", group: "api" });
 });
 
 test("new form repo picker enter with no match stays open", () => {
   const view = new SessionsView(new SessionsController(), () => {}, {
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"] }),
   });
   view.handleInput("n");
   view.handleInput("\u000f");
@@ -1745,7 +1830,7 @@ test("new form repo picker enter with no match stays open", () => {
 
 test("new form ctrl-o outside repo fields is a no-op", () => {
   const view = new SessionsView(new SessionsController(), () => {}, {
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
+    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"] }),
   });
   view.handleInput("n");
   view.handleInput("\t");
@@ -1753,59 +1838,6 @@ test("new form ctrl-o outside repo fields is a no-op", () => {
 
   assert.match(view.render(120).join("\n"), /New session/);
   assert.doesNotMatch(view.render(120).join("\n"), /Recent repos/);
-});
-
-test("new form printable a and x edit text instead of adding or removing repos", () => {
-  let created: { cwd: string; group: string; title: string; additionalCwds?: string[] } | undefined;
-  const view = new SessionsView(new SessionsController(), () => {}, {
-    createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", titleGenerator: () => "api" }),
-  });
-  view.handleInput("n");
-  view.handleInput("\t");
-  view.handleInput("\t");
-  view.handleInput("\t");
-  view.handleInput("x");
-  view.handleInput("a");
-  view.handleInput("\r");
-
-  assert.deepEqual(created, { cwd: "/tmp/api", group: "api", title: "apixa" });
-});
-
-test("new form preserves user-edited title across cwd changes", () => {
-  let created: { cwd: string; group: string; title: string } | undefined;
-  const view = new SessionsView(new SessionsController(), () => {}, {
-    createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
-  });
-  view.handleInput("n");
-  view.handleInput("\t");
-  view.handleInput("\t");
-  view.handleInput("\t");
-  for (let i = 0; i < "api".length; i += 1) view.handleInput("\u007f");
-  for (const char of "manual") view.handleInput(char);
-  view.handleInput("\t");
-  view.handleInput("\u000e");
-  view.handleInput("\r");
-  assert.deepEqual(created, { cwd: "/tmp/web", group: "web", title: "manual" });
-});
-
-test("new form preserves user-edited group across cwd changes", () => {
-  let created: { cwd: string; group: string; title: string } | undefined;
-  const view = new SessionsView(new SessionsController(), () => {}, {
-    createSession: (input) => { created = input; },
-    newFormContext: () => ({ cwd: "/tmp/api", knownCwds: ["/tmp/api", "/tmp/web"], titleGenerator: () => "api" }),
-  });
-  view.handleInput("n");
-  view.handleInput("\t");
-  view.handleInput("\t");
-  for (let i = 0; i < "api".length; i += 1) view.handleInput("\u007f");
-  for (const char of "backend") view.handleInput(char);
-  view.handleInput("\t");
-  view.handleInput("\t");
-  view.handleInput("\u000e");
-  view.handleInput("\r");
-  assert.deepEqual(created, { cwd: "/tmp/web", group: "backend", title: "api" });
 });
 
 test("selected session surfaces cached skill count", () => {
@@ -2174,6 +2206,17 @@ test("R opens rename form for selected session title", () => {
   assert.doesNotMatch(view.render(100).join("\n"), /Rename session/);
 });
 
+test("R requires stopped and error sessions to restart before rename", () => {
+  for (const status of ["stopped", "error"] as const) {
+    const controller = new SessionsController({ version: 1, sessions: [{ ...session("api", "api"), status }] });
+    const view = new SessionsView(controller, () => {});
+    view.handleInput("R");
+    const rendered = stripAnsi(view.render(100).join("\n"));
+    assert.match(rendered, /restart the Pi session before renaming/);
+    assert.doesNotMatch(rendered, /Rename session/);
+  }
+});
+
 test("narrow rename form keeps a long title and cursor visible", () => {
   const title = "Market Snapshot Workflow Review and Export";
   const controller = new SessionsController({ version: 1, sessions: [session("market", title)] });
@@ -2229,18 +2272,18 @@ test("rename form validates blank title", () => {
   assert.match(view.render(100).join("\n"), /title is required/);
 });
 
-test("custom Ctrl+N dashboard shortcut sends session-summary name to selected live session", async () => {
+test("custom Ctrl+N dashboard shortcut sends session-name refresh to selected live session", async () => {
   const runs: Array<{ sessionId: string; send: string }> = [];
   const view = new SessionsView(new SessionsController({ version: 1, sessions: [session("api", "api")] }), () => {}, {
-    dashboardShortcuts: [{ key: "C-n", label: "summarize name", send: "/session-summary name", syncPiNameAfterMs: 8000 }],
+    dashboardShortcuts: [{ key: "C-n", label: "refresh name", send: "/session-name refresh" }],
     runDashboardShortcut: async (sessionId, shortcut) => { runs.push({ sessionId, send: shortcut.send }); },
   });
 
   view.handleInput("\x0e");
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(runs, [{ sessionId: "api", send: "/session-summary name" }]);
-  assert.match(stripAnsi(view.render(100).join("\n")), /summarize name → api/);
+  assert.deepEqual(runs, [{ sessionId: "api", send: "/session-name refresh" }]);
+  assert.match(stripAnsi(view.render(100).join("\n")), /refresh name → api/);
 });
 
 test("custom dashboard shortcut blocks subagent stopped and error rows", () => {
@@ -2254,7 +2297,7 @@ test("custom dashboard shortcut blocks subagent stopped and error rows", () => {
   for (let i = 0; i < blockedSessions.length; i += 1) {
     let called = false;
     const view = new SessionsView(new SessionsController({ version: 1, sessions: [blockedSessions[i]!] }), () => {}, {
-      dashboardShortcuts: [{ key: "C-n", send: "/session-summary name" }],
+      dashboardShortcuts: [{ key: "C-n", send: "/session-name refresh" }],
       runDashboardShortcut: () => { called = true; },
     });
     view.handleInput("\x0e");
@@ -2266,7 +2309,7 @@ test("custom dashboard shortcut blocks subagent stopped and error rows", () => {
 test("custom dashboard shortcuts only run in normal mode", () => {
   let called = false;
   const view = new SessionsView(new SessionsController({ version: 1, sessions: [session("api", "api")] }), () => {}, {
-    dashboardShortcuts: [{ key: "C-n", send: "/session-summary name" }],
+    dashboardShortcuts: [{ key: "C-n", send: "/session-name refresh" }],
     runDashboardShortcut: () => { called = true; },
   });
 
@@ -2278,7 +2321,7 @@ test("custom dashboard shortcuts only run in normal mode", () => {
 
 test("custom dashboard shortcut reports unavailable without a transport action", () => {
   const view = new SessionsView(new SessionsController({ version: 1, sessions: [session("api", "api")] }), () => {}, {
-    dashboardShortcuts: [{ key: "C-n", send: "/session-summary name" }],
+    dashboardShortcuts: [{ key: "C-n", send: "/session-name refresh" }],
   });
 
   view.handleInput("\x0e");
@@ -2438,31 +2481,6 @@ test("group rename dialog validates blank group", () => {
 
   assert.equal(renamed, undefined);
   assert.match(view.render(100).join("\n"), /group is required/);
-});
-
-test("fork dialog submits selected session defaults", () => {
-  let forked: { source: string; group: string; title: string } | undefined;
-  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
-  const view = new SessionsView(controller, () => {}, { forkSession: (source, input) => { forked = { source, ...input }; } });
-  view.handleInput("f");
-  const rendered = view.render(120).join("\n");
-  assert.match(rendered, /Fork session/);
-  assert.match(rendered, /▎ group\s+default█/);
-  assert.match(rendered, /title\s+api fork/);
-  view.handleInput("\r");
-  assert.deepEqual(forked, { source: "api", group: "default", title: "api fork" });
-});
-
-test("fork dialog tab cycles and edits title field", () => {
-  let forked: { source: string; group: string; title: string } | undefined;
-  const controller = new SessionsController({ version: 1, sessions: [session("api", "api")] });
-  const view = new SessionsView(controller, () => {}, { forkSession: (source, input) => { forked = { source, ...input }; } });
-  view.handleInput("f");
-  view.handleInput("\t");
-  for (let i = 0; i < "api fork".length; i += 1) view.handleInput("\u007f");
-  for (const char of "api-copy") view.handleInput(char);
-  view.handleInput("\r");
-  assert.deepEqual(forked, { source: "api", group: "default", title: "api-copy" });
 });
 
 test("fork dialog reports async action errors", async () => {

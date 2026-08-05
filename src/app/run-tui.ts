@@ -22,8 +22,9 @@ import { createSidePaneLifecycle, type SidePaneLifecycle } from "./side-pane-lif
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
-import { addManagedSession, forkManagedSession, restartManagedSession, restartManagedSessionFresh, syncManagedSessionStatusBars } from "./session-commands.js";
+import { addManagedSession, forkManagedSession, renameManagedSession, restartManagedSession, restartManagedSessionFresh, syncManagedSessionStatusBars } from "./session-commands.js";
 import { discardWorktreeSession, finishWorktreeSession } from "./worktree-session.js";
+import { cleanupRetiredSessionMetadata } from "./state-migration.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { ManagedSession } from "../core/types.js";
 import type { SessionsViewState } from "../tui/dialog.js";
@@ -150,6 +151,7 @@ export function createRegistryMutator(deps: RegistryMutatorDeps): (action: () =>
 
 export async function runTui(): Promise<void> {
   const cwd = process.cwd();
+  await cleanupRetiredSessionMetadata();
   const controller = new SessionsController();
   await controller.refresh();
   const terminalAppearance = detectTerminalAppearance();
@@ -213,14 +215,11 @@ export async function runTui(): Promise<void> {
   let stopThemeLoop: (() => void) | undefined;
   let stopActionLoop: (() => void) | undefined;
   let stopped = false;
-  const shortcutTimers = new Set<NodeJS.Timeout>();
   const stop = () => {
     if (stopped) return;
     stopped = true;
     stopThemeLoop?.();
     stopActionLoop?.();
-    for (const timer of shortcutTimers) clearTimeout(timer);
-    shortcutTimers.clear();
     void stopLoop?.stop();
     const finish = () => {
       terminal.write(MOUSE_DISABLE);
@@ -257,20 +256,6 @@ export async function runTui(): Promise<void> {
     render: () => tui.requestRender(),
     exec: realTmuxExec,
   });
-  const scheduleShortcutNameSync = (sessionId: string, delayMs: number) => {
-    const timer = setTimeout(() => {
-      shortcutTimers.delete(timer);
-      void mutateRegistry(async () => {
-        await controller.syncPiName(sessionId);
-      }).catch((error: unknown) => {
-        if (!stopped) {
-          view.setMessage(errorMessage(error));
-          tui.requestRender();
-        }
-      });
-    }, delayMs);
-    shortcutTimers.add(timer);
-  };
   const skillPickerItems = async (projectCwd: string) => {
     const state = await loadProjectSkillsState(projectCwd);
     const enabledSkillNames = new Set(state.attached.map((skill) => skill.name));
@@ -375,7 +360,7 @@ export async function runTui(): Promise<void> {
       return mutateRegistry(() => controller.restoreSessionBucket(sessionId));
     },
     renameSession(sessionId, title) {
-      return mutateRegistry(() => controller.renameSession(sessionId, title));
+      return renameManagedSession(sessionId, title);
     },
     syncPiName(sessionId) {
       let result: Awaited<ReturnType<SessionsController["syncPiName"]>> | undefined;
@@ -395,7 +380,6 @@ export async function runTui(): Promise<void> {
       const session = controller.snapshot().registry.sessions.find((item) => item.id === sessionId);
       if (!session) throw new Error("session not found");
       await sendTextToSession(session.tmuxSession, shortcut.send);
-      if (shortcut.syncPiNameAfterMs) scheduleShortcutNameSync(session.id, shortcut.syncPiNameAfterMs);
     },
     acknowledge() {
       return mutateRegistry(() => controller.acknowledgeSelected());

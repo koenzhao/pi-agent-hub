@@ -8,7 +8,8 @@ import { loadThemeCommand } from "../core/theme-command.js";
 import { colorFromAnsi } from "../core/theme-color.js";
 import { HEARTBEAT_INTERVAL_MS } from "../core/status.js";
 import { registerMcpTools } from "../mcp/register-tools.js";
-import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, WorkflowModeDisplay, WorkflowRuntimeSnapshot, WorkflowStep } from "../core/types.js";
+import { parseSessionContext } from "../core/session-context.js";
+import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, SessionPlanSummary, WorkflowActivityDisplay, WorkflowModeDisplay, WorkflowRuntimeSnapshot, WorkflowStep } from "../core/types.js";
 
 type PiTheme = {
   name?: string;
@@ -41,8 +42,11 @@ const THEME_TOKENS: Exclude<ActiveThemeToken, "statusLineBg" | "selectedBg">[] =
 // Soft contract with rules/extensions/workflow-runtime. Invalid or absent
 // base workflow metadata hides the rail; invalid mode decoration is omitted.
 const WORKFLOW_RUNTIME_ENTRY = "workflow-runtime";
+const SESSION_CONTEXT_ENTRY = "pi-agent-hub-context";
 const STARTUP_HEARTBEAT_DELAYS_MS = [250, 1_000, 3_000];
+const SETTLED_HEARTBEAT_DELAYS_MS = [1_000, 3_000, 6_000];
 const THEME_COMMAND_INTERVAL_MS = 1_000;
+const PLAN_TASK_MAX = 10_000;
 
 export default function piAgentHubExtension(pi: ExtensionAPI) {
   const globalState = globalThis as PiAgentHubGlobal;
@@ -55,6 +59,7 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let themeCommandTimer: ReturnType<typeof setInterval> | undefined;
   let startupHeartbeatTimers: ReturnType<typeof setTimeout>[] = [];
+  let settledHeartbeatTimers: ReturnType<typeof setTimeout>[] = [];
   let lastThemeRevision: string | undefined;
   let mcpCleanup: (() => Promise<void>) | undefined;
 
@@ -105,6 +110,8 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
       taskPreview: process.env.PI_SUBAGENT_TASK_PREVIEW,
       resultPath: process.env.PI_SUBAGENT_RESULT_PATH,
       activeTheme: activeTheme(ctx),
+      piSessionName: normalizedName(pi.getSessionName?.()),
+      context: sessionContextSnapshot(ctx),
       workflow: workflowSnapshot(ctx),
     } satisfies Heartbeat, null, 2)}\n`, "utf8");
   }
@@ -124,14 +131,26 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
     mcpCleanup = await registerMcpTools(pi, (ctx as PiContext).cwd);
   });
 
-  pi.on("agent_start", async (_event, ctx) => applyThemeAndHeartbeat("running", ctx as PiContext));
+  pi.on("session_info_changed", async (_event, ctx) => applyThemeAndHeartbeat(currentState, ctx as PiContext));
+  pi.on("agent_start", async (_event, ctx) => {
+    for (const timer of settledHeartbeatTimers) clearTimeout(timer);
+    settledHeartbeatTimers = [];
+    await applyThemeAndHeartbeat("running", ctx as PiContext);
+  });
   pi.on("agent_end", async (_event, ctx) => applyThemeAndHeartbeat("waiting", ctx as PiContext));
+  pi.on("agent_settled", async (_event, ctx) => {
+    await applyThemeAndHeartbeat("waiting", ctx as PiContext);
+    for (const timer of settledHeartbeatTimers) clearTimeout(timer);
+    settledHeartbeatTimers = SETTLED_HEARTBEAT_DELAYS_MS.map((delay) => setTimeout(() => void heartbeat(currentState, ctx as PiContext), delay));
+  });
   pi.on("session_shutdown", async (_event, ctx) => {
     try {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       if (themeCommandTimer) clearInterval(themeCommandTimer);
       for (const timer of startupHeartbeatTimers) clearTimeout(timer);
       startupHeartbeatTimers = [];
+      for (const timer of settledHeartbeatTimers) clearTimeout(timer);
+      settledHeartbeatTimers = [];
       await mcpCleanup?.();
       await heartbeat("shutdown", ctx as PiContext);
     } finally {
@@ -148,6 +167,19 @@ function workflowSnapshot(ctx: PiContext): WorkflowRuntimeSnapshot | undefined {
       const entry = entries[i] as { type?: string; customType?: string; data?: unknown } | undefined;
       if (entry?.type !== "custom" || entry.customType !== WORKFLOW_RUNTIME_ENTRY) continue;
       return parseWorkflowSnapshot(entry.data);
+    }
+  } catch {}
+  return undefined;
+}
+
+function sessionContextSnapshot(ctx: PiContext) {
+  try {
+    const entries = ctx.sessionManager?.getBranch?.();
+    if (!entries) return undefined;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i] as { type?: string; customType?: string; data?: unknown } | undefined;
+      if (entry?.type !== "custom" || entry.customType !== SESSION_CONTEXT_ENTRY) continue;
+      return parseSessionContext(entry.data);
     }
   } catch {}
   return undefined;
@@ -177,11 +209,17 @@ function parseWorkflowSnapshot(value: unknown): WorkflowRuntimeSnapshot | undefi
   const activeIndex = steps.findIndex((step) => step.id === data.activeStep);
   if (activeIndex < 0) return undefined;
   const ticketId = typeof data.ticketId === "string" ? data.ticketId.trim() : "";
+  const currentStepComplete = typeof data.currentStepComplete === "boolean" ? data.currentStepComplete : undefined;
   const activeMode = parseWorkflowMode(data.activeMode);
+  const activity = parseWorkflowActivity(data.activity);
+  const plan = parseWorkflowPlan(data.plan);
   return {
     steps,
     activeIndex,
+    ...(currentStepComplete !== undefined ? { currentStepComplete } : {}),
     ...(activeMode ? { activeMode } : {}),
+    ...(activity ? { activity } : {}),
+    ...(plan ? { plan } : {}),
     ...(ticketId ? { ticketId } : {}),
     updatedAt: data.updatedAt,
   };
@@ -203,6 +241,46 @@ function parseWorkflowMode(value: unknown): WorkflowModeDisplay | undefined {
     ...(typeof mode.detail === "string" ? { detail: mode.detail.trim() } : {}),
   };
 }
+
+function parseWorkflowActivity(value: unknown): WorkflowActivityDisplay | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const activity = value as Record<string, unknown>;
+  const id = typeof activity.id === "string" ? activity.id.trim() : "";
+  const label = typeof activity.label === "string" ? activity.label.trim() : "";
+  if (!id || !label || [...id].length > 80 || [...label].length > 120) return undefined;
+  const pass = activity.pass;
+  if (pass !== undefined && (!Number.isInteger(pass) || (pass as number) < 1 || (pass as number) > 999)) return undefined;
+  return { id, label, ...(typeof pass === "number" ? { pass } : {}) };
+}
+
+function parseWorkflowPlan(value: unknown): SessionPlanSummary | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const data = value as Record<string, unknown>;
+  const tasks = parseCount(data.tasks);
+  const phase = data.phase && typeof data.phase === "object" ? data.phase as Record<string, unknown> : undefined;
+  const title = phase && typeof phase.title === "string" ? phase.title.trim() : "";
+  const index = phase?.index;
+  const count = phase?.count;
+  const parsedPhase = title && positiveInt(index) && positiveInt(count) && index <= count && [...title].length <= 160 ? { title, index, count } : undefined;
+  const phases = Array.isArray(data.phases) && data.phases.length <= 100 ? data.phases.map(parseCount) : undefined;
+  const parsedPhases = phases?.every(Boolean) ? phases as { completed: number; total: number }[] : undefined;
+  const validPhases = parsedPhases && parsedPhases.reduce((sum, item) => sum + item.total, 0) <= PLAN_TASK_MAX
+    ? parsedPhases
+    : undefined;
+  const nextStep = typeof data.nextStep === "string" && data.nextStep.trim() && [...data.nextStep.trim()].length <= 240 ? data.nextStep.trim() : undefined;
+  const plan = { ...(parsedPhase ? { phase: parsedPhase } : {}), ...(tasks ? { tasks } : {}), ...(validPhases?.length ? { phases: validPhases } : {}), ...(nextStep ? { nextStep } : {}) };
+  return Object.keys(plan).length ? plan : undefined;
+}
+
+function parseCount(value: unknown): { completed: number; total: number } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const count = value as Record<string, unknown>;
+  return nonnegativeInt(count.completed) && nonnegativeInt(count.total) && count.completed <= count.total ? { completed: count.completed, total: count.total } : undefined;
+}
+
+function positiveInt(value: unknown): value is number { return Number.isInteger(value) && (value as number) > 0 && (value as number) <= 100; }
+function nonnegativeInt(value: unknown): value is number { return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= PLAN_TASK_MAX; }
+function normalizedName(value: string | undefined): string | undefined { return value?.trim() || undefined; }
 
 function activeTheme(ctx: PiContext): ActiveThemeSnapshot | undefined {
   if (ctx.hasUI === false) return undefined;

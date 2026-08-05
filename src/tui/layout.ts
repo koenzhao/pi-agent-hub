@@ -6,6 +6,7 @@ import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken,
 
 export type SessionListTarget =
   | { kind: "session"; id: string }
+  | { kind: "session-continuation"; id: string }
   | { kind: "archive-disclosure" };
 
 export interface SessionsLayout {
@@ -212,7 +213,7 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
       if (session.selected) selectedIndex = lines.length;
       const branch = junction.last ? (session.selected ? "┗" : "└") : session.selected ? "┣" : "├";
       const branchText = session.selected ? styles.accent(branch) : styles.border(branch);
-      const attention = board && session.attention ? `${attentionGlyph(session.attention.kind, styles)} ` : "";
+      const attention = session.attention ? `${attentionGlyph(session.attention.kind, styles)} ` : "";
       const titlePrefix = `${branchText} ${attention}`;
       const title = renderSessionRow(session, Math.max(0, width - displayWidth(titlePrefix)), styles, {
         board,
@@ -227,7 +228,7 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
         const continuationBranch = junction.last ? " " : session.selected ? "┃" : "│";
         const continuationPrefix = `${session.selected ? styles.accent(continuationBranch) : styles.border(continuationBranch)} `;
         for (const continuation of allCardLines(session, Math.max(0, width - 2), styles)) {
-          pushLine(`${continuationPrefix}${continuation.line}`);
+          pushLine(`${continuationPrefix}${continuation.line}`, { kind: "session-continuation", id: session.id });
           continuationPriorities.set(lines.length - 1, continuation.priority);
         }
       }
@@ -529,8 +530,8 @@ function windowSelectedCard(list: SessionListContent, capacity: number, styles: 
   const targets = [
     ...(beforeIndicator ? [undefined] : []),
     list.targets[headerIndex],
-    ...orderedDetails.map(() => undefined),
-    undefined,
+    ...orderedDetails.map((index) => list.targets[index]),
+    list.targets[footerIndex],
     ...(afterIndicator ? [undefined] : []),
   ];
   const selectedIndex = beforeIndicator ? 1 : 0;
@@ -546,64 +547,62 @@ function windowSelectedCard(list: SessionListContent, capacity: number, styles: 
 const CARD = {
   stepDone: "✓", stepActive: "◉", stepPending: "·",
   taskDone: "▰", taskPending: "▱", phaseSep: "│",
-  shipped: "✓",
 } as const;
+
+export function workflowStepMarker(workflow: WorkflowRuntimeSnapshot, index: number): "✓" | "◉" | "·" {
+  const done = index < workflow.activeIndex
+    || (index === workflow.activeIndex && workflow.currentStepComplete === true);
+  return done ? CARD.stepDone : index === workflow.activeIndex ? CARD.stepActive : CARD.stepPending;
+}
+
+function styledWorkflowMarker(workflow: WorkflowRuntimeSnapshot, index: number, styles: LayoutStyles): string {
+  const marker = workflowStepMarker(workflow, index);
+  return styles[marker === CARD.stepDone ? "success" : marker === CARD.stepActive ? "accent" : "dim"](marker);
+}
 
 function workflowVisualLine(session: RenderSession, width: number, styles: LayoutStyles): string | undefined {
   const workflow = session.workflow;
-  if (!workflow) return undefined;
-  const active = workflow.steps[workflow.activeIndex];
-  if (!active) return undefined;
-  if (workflow.activeIndex === workflow.steps.length - 1 && session.attention?.kind === "ready") {
-    return truncate(styles.success(`${CARD.shipped} ${workflow.ticketId ?? "workflow"} shipped`), width);
+  if (!workflow?.steps[workflow.activeIndex]) return undefined;
+  const dots = workflow.steps.map((_step, index) => styledWorkflowMarker(workflow, index, styles)).join("");
+  const activity = workflow.activity;
+  if (activity) {
+    const pass = activity.pass && activity.pass > 1 ? ` (pass ${activity.pass})` : "";
+    return truncate(`${dots}  ${activity.label}${pass}`, width);
   }
-  const dots = workflow.steps.map((step, index) => styles[index < workflow.activeIndex ? "success" : index === workflow.activeIndex ? (step.id === "review" ? "warning" : "accent") : "dim"](index < workflow.activeIndex ? CARD.stepDone : index === workflow.activeIndex ? CARD.stepActive : CARD.stepPending)).join("");
   const plan = session.plan;
   const phases = plan?.phases;
-  const executeIndex = workflow.steps.findIndex((step) => step.id === "execute");
-  const isExecute = active.id === "execute";
-  const isReview = active.id === "review";
-  let zone = "";
-  if (executeIndex >= 0 && (isExecute || isReview || workflow.activeIndex < executeIndex)) {
-    if (phases?.length) {
-      zone = phases.map((phase) => `${Array.from({ length: phase.total }, (_, index) => {
-        const done = index < phase.completed;
-        if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
-        return isExecute && done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
-      }).join("")}`).join(styles.border(CARD.phaseSep));
-    } else if (plan?.tasks) {
-      zone = Array.from({ length: plan.tasks.total }, (_, index) => {
-        const done = index < plan.tasks!.completed;
-        if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
-        return isExecute && done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
-      }).join("");
-      if (plan.phase) zone += styles.dim(` p${plan.phase.index}/${plan.phase.count}`);
-    }
-  }
-  if (!zone) return truncate(dots, width);
+  const taskMarker = (done: boolean) => done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
+  const renderCells = (completed: number, total: number) => Array.from(
+    { length: total },
+    (_, index) => taskMarker(index < completed),
+  ).join("");
+  const total = phases?.length
+    ? phases.reduce((sum, phase) => sum + phase.total, 0)
+    : plan?.tasks?.total ?? 0;
+  const completed = phases?.length
+    ? phases.reduce((sum, phase) => sum + phase.completed, 0)
+    : plan?.tasks?.completed ?? 0;
+  if (!total) return truncate(dots, width);
 
-  const flatZone = phases?.length
-    ? phases.flatMap((phase) => Array.from({ length: phase.total }, (_, index) => {
-      const done = index < phase.completed;
-      if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
-      return isExecute && done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
-    })).join("")
-    : zone;
-  const total = phases?.reduce((sum, phase) => sum + phase.total, 0) ?? plan?.tasks?.total ?? 0;
-  const completed = isExecute || isReview
-    ? phases?.reduce((sum, phase) => sum + phase.completed, 0) ?? plan?.tasks?.completed ?? 0
-    : 0;
-  const ratioDone = total ? Math.round((completed / total) * 10) : 0;
-  const ratioZone = Array.from({ length: 10 }, (_, index) => {
-    const done = index < ratioDone;
-    if (isReview) return styles.warning(done ? CARD.taskDone : CARD.taskPending);
-    return done ? styles.accent(CARD.taskDone) : styles.dim(CARD.taskPending);
-  }).join("");
   const base = `${dots}  `;
+  const available = Math.max(0, width - displayWidth(base));
+  let separatedZone = "";
+  let flatZone = "";
+  if (phases?.length) {
+    if (total + phases.length - 1 <= available) {
+      separatedZone = phases.map((phase) => renderCells(phase.completed, phase.total)).join(styles.border(CARD.phaseSep));
+    }
+    if (total <= available) flatZone = renderCells(completed, total);
+  } else if (plan?.tasks) {
+    const suffix = plan.phase ? ` p${plan.phase.index}/${plan.phase.count}` : "";
+    if (total + displayWidth(suffix) <= available) separatedZone = `${renderCells(completed, total)}${styles.dim(suffix)}`;
+  }
+  const ratioDone = Math.round((completed / total) * 10);
+  const ratioZone = Array.from({ length: 10 }, (_, index) => taskMarker(index < ratioDone)).join("");
   const candidates = [
-    `${base}${zone}`,
-    `${base}${flatZone}`,
-    total ? `${base}${ratioZone} ${completed}/${total}` : "",
+    separatedZone ? `${base}${separatedZone}` : "",
+    flatZone ? `${base}${flatZone}` : "",
+    `${base}${ratioZone} ${completed}/${total}`,
   ];
   return truncate(candidates.find((candidate) => candidate && displayWidth(candidate) <= width) ?? dots, width);
 }
@@ -612,12 +611,12 @@ function allCardLines(session: RenderSession, width: number, styles: LayoutStyle
   const indent = "  ";
   const contentWidth = Math.max(0, width - indent.length);
   const lines: { line: string; priority: number }[] = [];
-  if (session.workflow?.ticketId) {
-    lines.push({ line: `${indent}${styles.dim(truncate(`ticket: ${session.workflow.ticketId}`, contentWidth))}`, priority: 2 });
-  }
-  const feature = session.plan?.feature;
-  if (feature && normalizedText(feature) !== normalizedText(session.title)) {
-    lines.push({ line: `${indent}${styles.dim(truncate(feature, contentWidth))}`, priority: 1 });
+  if (session.ticketId) {
+    const id = `#${session.ticketId}`;
+    const subtitle = session.ticketSubtitle && normalizedText(session.ticketSubtitle) !== normalizedText(session.title)
+      ? ` · ${session.ticketSubtitle}` : "";
+    const text = displayWidth(`${id}${subtitle}`) <= contentWidth || contentWidth - displayWidth(id) >= 12 ? `${id}${subtitle}` : id;
+    lines.push({ line: `${indent}${styles.dim(truncate(text, contentWidth))}`, priority: 2 });
   }
   const recap = allCardRecapLine(session, contentWidth, styles);
   if (recap) lines.push({ line: `${indent}${recap}`, priority: 0 });
@@ -625,32 +624,17 @@ function allCardLines(session: RenderSession, width: number, styles: LayoutStyle
 }
 
 function allCardRecapLine(session: RenderSession, width: number, styles: LayoutStyles): string | undefined {
-  const inExecute = session.workflow?.steps[session.workflow.activeIndex]?.id === "execute";
-  const progress = session.workflow
+  return session.workflow
     ? workflowVisualLine(session, width, styles)
-    : session.plan ? planProgressText(session.plan, inExecute, styles) : "";
-  const status = session.sessionMetadata?.status;
-  if (!status) return progress || undefined;
-  if (!progress) return styles.dim(truncate(status, width));
-  if (normalizedText(stripAnsi(progress)).includes(normalizedText(status))) return progress;
-
-  const statusWidth = Math.min(displayWidth(status), Math.max(12, Math.floor(width * 0.55)));
-  const statusText = styles.dim(truncate(status, statusWidth));
-  const progressWidth = width - displayWidth(statusText) - 2;
-  if (progressWidth < 5) return progress;
-  const compactProgress = session.workflow
-    ? workflowVisualLine(session, progressWidth, styles)
-    : truncate(progress, progressWidth);
-  return compactProgress ? `${compactProgress}  ${statusText}` : styles.dim(truncate(status, width));
+    : session.plan ? planProgressText(session.plan, styles) : undefined;
 }
 
-function planProgressText(plan: NonNullable<RenderSession["plan"]>, inExecute: boolean, styles: LayoutStyles): string {
+function planProgressText(plan: NonNullable<RenderSession["plan"]>, styles: LayoutStyles): string {
   const phaseTasks = plan.phase ? plan.phases?.[plan.phase.index - 1] : undefined;
-  const phase = plan.phase ? `${inExecute ? "Phase" : "plan"} ${plan.phase.index}/${plan.phase.count}${phaseTasks ? ` · ${phaseTasks.completed}/${phaseTasks.total}` : ""}` : undefined;
-  const tasks = plan.tasks ? `${plan.tasks.completed}/${plan.tasks.total} tasks${plan.phases ? " (plan)" : ""}` : undefined;
+  const phase = plan.phase ? `Phase ${plan.phase.index}/${plan.phase.count}${phaseTasks ? ` · ${phaseTasks.completed}/${phaseTasks.total}` : ""}` : undefined;
+  const tasks = plan.tasks ? `${plan.tasks.completed}/${plan.tasks.total}` : undefined;
   const text = [phase, tasks].filter(Boolean).join(" · ");
-  if (!text) return "";
-  return inExecute ? text : styles.dim(phase ? text : `plan ${text}`);
+  return text ? styles.dim(text) : "";
 }
 
 function renderDetails(session: RenderSession | undefined, width: number, preview: string, expanded: boolean, targetRows: number | undefined, styles: LayoutStyles): string[] {
@@ -683,7 +667,7 @@ function activeStepShort(workflow: WorkflowRuntimeSnapshot, mode?: WorkflowModeD
 
 function railCompact(workflow: WorkflowRuntimeSnapshot, mode: WorkflowModeDisplay | undefined, styles: LayoutStyles): string {
   const short = activeStepShort(workflow, mode);
-  return short ? styles.accent(short) : "";
+  return short ? `${styledWorkflowMarker(workflow, workflow.activeIndex, styles)}${styles.accent(short)}` : "";
 }
 
 function sidePaneGlyph(slot: number | undefined, focusedSlot: number | undefined, styles: LayoutStyles): string {
@@ -696,13 +680,13 @@ function rowRightAdornment(session: RenderSession, styles: LayoutStyles, board: 
   const fits = (right: string): boolean => Boolean(right) && width - displayWidth(right) - 1 >= 12;
   if (board) {
     if (session.kind === "subagent" || !session.workflow) return "";
-    const short = styles.accent(activeStepShort(session.workflow, mode));
+    const short = railCompact(session.workflow, mode, styles);
     return fits(short) ? short : "";
   }
 
-  const stage = session.workflow ? activeStepShort(session.workflow, mode) : "";
+  const stage = session.workflow ? railCompact(session.workflow, mode, styles) : "";
   const activity = session.displayStatus === "running" ? "" : session.activityAge ?? "";
-  const stageSlot = `${stage}${" ".repeat(Math.max(0, 3 - displayWidth(stage)))}`;
+  const stageSlot = `${stage}${" ".repeat(Math.max(0, 4 - displayWidth(stage)))}`;
   const activitySlot = `${" ".repeat(Math.max(0, 3 - displayWidth(activity)))}${activity}`;
   const active = `${stage ? styles.accent(stageSlot) : stageSlot} ${activity ? styles.dim(activitySlot) : activitySlot}`;
   const right = session.archivedAge ? styles.dim(session.archivedAge) : active;
@@ -711,7 +695,11 @@ function rowRightAdornment(session: RenderSession, styles: LayoutStyles, board: 
 
 function railFull(workflow: WorkflowRuntimeSnapshot, mode: WorkflowModeDisplay | undefined, styles: LayoutStyles): string {
   const rail = workflow.steps
-    .map((step, index) => index === workflow.activeIndex ? styles.accent(`▐${activeStepShort(workflow, mode)}▌`) : styles.dim(step.short))
+    .map((step, index) => {
+      const short = index === workflow.activeIndex ? activeStepShort(workflow, mode) : step.short;
+      const styledShort = index === workflow.activeIndex ? styles.accent(short) : styles.dim(short);
+      return `${styledWorkflowMarker(workflow, index, styles)} ${styledShort}`;
+    })
     .join(styles.border("─"));
   return workflow.ticketId ? `${rail} ${styles.border("·")} ${styles.muted(workflow.ticketId)}` : rail;
 }
@@ -723,6 +711,7 @@ function railLine(workflow: WorkflowRuntimeSnapshot, mode: WorkflowModeDisplay |
 
 function compactDetails(session: RenderSession, width: number, styles: LayoutStyles): string[] {
   const lines = [titleStatusRow(session, width, styles)];
+  if (session.ticketSubtitle) lines.push(styles.dim(truncate(session.ticketSubtitle, width)));
   if (session.workflow) lines.push(railLine(session.workflow, activeWorkflowMode(session), width, styles));
   if (session.kind === "subagent") {
     lines.push(truncate([`agent ${session.agentName ?? "subagent"}`, session.taskPreview ? `task ${session.taskPreview}` : ""].filter(Boolean).join(" · "), width));
@@ -734,8 +723,7 @@ function compactDetails(session: RenderSession, width: number, styles: LayoutSty
   }
   const lifecycle = lifecycleLine(session);
   if (lifecycle) lines.push(styles.dim(lifecycle));
-  lines.push(...workBlock(session, width, styles));
-  lines.push(...metadataBlock(session, width, false, styles));
+  lines.push(...workBlock(session, width, styles, false));
   const capabilities = compactCapabilities(session, width, styles);
   if (capabilities) lines.push(capabilities);
   if (session.error) lines.push(styles.error(`error     ${session.error}`));
@@ -752,6 +740,7 @@ function compactCapabilities(session: RenderSession, width: number, styles: Layo
 
 function expandedDetails(session: RenderSession, width: number, styles: LayoutStyles): string[] {
   const lines = [titleStatusRow(session, width, styles)];
+  if (session.ticketSubtitle) lines.push(styles.dim(truncate(session.ticketSubtitle, width)));
   const mode = activeWorkflowMode(session);
   if (session.workflow) lines.push(railLine(session.workflow, mode, width, styles));
   if (mode) {
@@ -773,31 +762,33 @@ function expandedDetails(session: RenderSession, width: number, styles: LayoutSt
   if (session.worktreePath) lines.push(`wt path   ${truncatePath(session.worktreePath, Math.max(0, width - 10))}`);
   if (session.workspaceCwd) lines.push(`runtime   ${truncatePath(session.workspaceCwd, Math.max(0, width - 10))}`);
   if (session.sessionFile) lines.push(`session   ${truncatePath(session.sessionFile, Math.max(0, width - 10))}`);
-  lines.push(...workBlock(session, width, styles));
-  lines.push(...metadataBlock(session, width, true, styles));
+  lines.push(...workBlock(session, width, styles, true));
   if (session.enabledMcpServers.length) lines.push(`mcp       ${session.enabledMcpServers.join(", ")}`);
   if (session.resultSummary) lines.push(`result    ${session.resultSummary}`);
   if (session.error) lines.push(styles.error(`error     ${session.error}`));
   return lines;
 }
 
-function workBlock(session: RenderSession, width: number, styles: LayoutStyles): string[] {
+function workBlock(session: RenderSession, width: number, styles: LayoutStyles, expanded: boolean): string[] {
   const plan = session.plan;
-  if (!plan && !session.attention) return [];
+  if (!plan && !session.attention && !session.ticketDescription) return [];
   const fields: [string, string, string?][] = [];
-  if (plan?.feature) fields.push(["feature", plan.feature]);
+  if (session.ticketDescription) fields.push(["context", session.ticketDescription]);
   if (plan?.phase) {
     const phaseTasks = plan.phases?.[plan.phase.index - 1];
     fields.push(["phase", `${plan.phase.index}/${plan.phase.count} · ${plan.phase.title}${phaseTasks ? ` · ${phaseTasks.completed}/${phaseTasks.total}` : ""}`]);
   }
   if (plan?.tasks) fields.push(["progress", `${plan.tasks.completed}/${plan.tasks.total} tasks${plan.phases ? " (plan)" : ""}`]);
   if (session.attention) fields.push(["attention", session.attention.text, attentionGlyph(session.attention.kind, styles)]);
-  if (plan?.nextStep && plan.nextSource === "plan") fields.push(["next", plan.nextStep, styles.accent("→")]);
+  if (plan?.nextStep) fields.push(["next", plan.nextStep, styles.accent("→")]);
   if (!fields.length) return [];
   return [
     "",
     styles.border("── work ─"),
-    ...fields.flatMap(([label, value, marker]) => workField(label, value, width, styles, marker ? `${marker} ` : "")),
+    ...fields.flatMap(([label, value, marker]) => {
+      const lines = workField(label, value, width, styles, marker ? `${marker} ` : "");
+      return label === "context" && !expanded ? lines.slice(0, 2) : lines;
+    }),
   ];
 }
 
@@ -810,43 +801,8 @@ function workField(label: string, value: string, width: number, styles: LayoutSt
   return wrapWords(value, firstWidth, nextWidth).map((line, index) => index === 0 ? `${firstPrefix}${marker}${line}` : `${nextPrefix}${line}`);
 }
 
-function metadataBlock(session: RenderSession, width: number, expanded: boolean, styles: LayoutStyles): string[] {
-  const metadata = session.sessionMetadata;
-  if (!metadata) return [];
-  const attentionText = session.attention?.text;
-  const showGoal = metadata.goal && normalizedText(metadata.goal) !== normalizedText(session.plan?.feature);
-  const showStatus = metadata.status && normalizedText(metadata.status) !== normalizedText(attentionText);
-  const selectedNext = session.plan?.nextStep;
-  const selectedNextRenderedInCard = session.plan?.nextSource === "metadata"
-    && !session.attention
-    && normalizedText(selectedNext) !== normalizedText(session.plan.feature);
-  const showNext = metadata.nextStep
-    && !(session.plan?.nextSource === "plan" && normalizedText(metadata.nextStep) === normalizedText(selectedNext))
-    && !(selectedNextRenderedInCard && normalizedText(metadata.nextStep) === normalizedText(selectedNext))
-    && normalizedText(metadata.nextStep) !== normalizedText(attentionText);
-  const showStage = expanded && metadata.stage && !session.attention;
-  if (!showGoal && !showStatus && !showNext && !showStage) return [];
-  const headerRight = [metadata.source ? `via ${metadata.source}` : undefined, session.metadataUpdatedAge].filter(Boolean).join(" · ");
-  const lines = ["", twoColumn(styles.border("── metadata ─"), styles.dim(headerRight), width)];
-  if (showGoal) lines.push(...metadataField("goal", metadata.goal!, width, styles));
-  if (showStatus) lines.push(...metadataField("prog", metadata.status!, width, styles));
-  if (showNext) lines.push(...metadataField("next", metadata.nextStep!, width, styles));
-  if (showStage) lines.push(`${styles.muted(pad("stage", 5))} ${styles.muted(truncate(`[${metadata.stage}]`, Math.max(4, width - 6)))}`);
-  return lines;
-}
-
 function normalizedText(value: string | undefined): string {
   return value?.trim().replace(/\s+/g, " ").toLowerCase() ?? "";
-}
-
-function metadataField(label: string, value: string, width: number, styles: LayoutStyles, marker = ""): string[] {
-  const labelText = styles.muted(pad(label, 5));
-  const firstPrefix = `${labelText} `;
-  const nextPrefix = `${pad("", 5)} `;
-  const firstWidth = Math.max(4, width - displayWidth(firstPrefix) - displayWidth(marker));
-  const nextWidth = Math.max(4, width - displayWidth(nextPrefix));
-  const wrapped = wrapWords(value, firstWidth, nextWidth);
-  return wrapped.map((line, index) => index === 0 ? `${firstPrefix}${marker}${line}` : `${nextPrefix}${line}`);
 }
 
 function wrapWords(value: string, firstWidth: number, nextWidth: number): string[] {
@@ -932,17 +888,17 @@ interface SessionRowOptions {
 function renderSessionRow(session: RenderSession, width: number, styles: LayoutStyles, options: SessionRowOptions = {}): string {
   const board = options.board ?? false;
   const selectionMarker = options.selectionMarker ?? true;
-  const attention = board && selectionMarker && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
+  const attention = selectionMarker && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
   const prefix = session.selected && selectionMarker ? styles.accent("▌") : attention || (session.status === "stopped" ? styles.dim("·") : " ");
   const symbol = session.section === "active"
     ? styles.status(session.displayStatus, session.symbol)
     : styles.muted(session.symbol);
-  const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : options.titleSource === "stored" ? session.title : board ? (session.boardTitle ?? session.title) : session.title;
+  const titleText = session.kind === "subagent" ? (session.agentName ?? "subagent") : session.title;
   const styleTitle = (value: string) => session.status === "stopped" ? styles.dim(value) : value;
   const sidePaneMarker = sidePaneGlyph(session.sidePaneSlot, options.focusedSlot, styles);
-  const repoBadge = !board && session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` [${session.repoCount} repos]`) : "";
-  const worktreeBadge = !board && session.worktreeBranch && session.kind !== "subagent" ? styles.dim(" ⎇") : "";
-  const disclosureBadge = board && session.kind !== "subagent" && session.boardDescendantCount
+  const repoBadge = !board && session.repoCount > 1 && session.kind !== "subagent" ? styles.dim(` ⧉ ${session.repoCount}`) : "";
+  const worktreeMarker = !board && session.worktreeBranch && session.kind !== "subagent" ? styles.accent("⎇ ") : "";
+  const disclosureBadge = session.kind !== "subagent" && session.boardDescendantCount
     ? ` ${styles.dim(session.boardExpanded ? "▾" : "▸")}`
     : "";
   const runningBadge = board && session.kind !== "subagent" && session.runningSubagentCount
@@ -950,8 +906,8 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
     : "";
   const indent = session.depth > 0 ? styles.dim(`${"  ".repeat(session.depth)}└ `) : "";
   const rowPrefix = options.prefixMode === "none" ? "" : board && !selectionMarker && prefix === " " ? prefix : `${prefix} `;
-  const leftPrefix = `${rowPrefix}${indent}${symbol} ${sidePaneMarker}`;
-  const leftSuffix = `${disclosureBadge}${runningBadge}${repoBadge}${worktreeBadge}`;
+  const leftPrefix = `${rowPrefix}${indent}${symbol} ${sidePaneMarker}${worktreeMarker}`;
+  const leftSuffix = `${disclosureBadge}${runningBadge}${repoBadge}`;
   const right = rowRightAdornment(session, styles, board, width);
   const rightSpace = right ? displayWidth(right) + 1 : 0;
   const titleWidth = Math.max(0, width - displayWidth(leftPrefix) - displayWidth(leftSuffix) - rightSpace);
