@@ -202,7 +202,7 @@ test("partial worktree recovery updates the latest surviving registry row", asyn
   const web = await createRepo(root, "partial-web");
   const created = await createOwnedWorktrees({ cwds: [api, web], sessionId: "partial", branch: "feature/partial", env });
   const session = { ...multiWorktreeSession(created), id: "partial", tmuxSession: "pi-agent-hub-partial", title: "captured" };
-  const unrelated = createSessionRecord({ cwd: "/tmp/unrelated", title: "unrelated", now: 1 });
+  const unrelated = createSessionRecord({ cwd: "/tmp/unrelated", now: 1 });
   const path = registryPath(env);
   await seedRegistry({ version: 1, sessions: [session, unrelated] }, path);
 
@@ -264,7 +264,7 @@ test("finishWorktreeSession removes parent, subagent rows, and heartbeats after 
   await git(created.worktreePath, ["commit", "-m", "app"]);
   const parent = { ...worktreeSession(created), id: "parent", tmuxSession: "pi-agent-hub-parent" };
   const child = {
-    ...createSessionRecord({ cwd: created.worktreePath, title: "smoke", now: 2 }),
+    ...createSessionRecord({ cwd: created.worktreePath, now: 2 }),
     id: "child",
     tmuxSession: "pi-agent-hub-child",
     kind: "subagent" as const,

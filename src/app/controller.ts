@@ -1,16 +1,16 @@
 import { unlink } from "node:fs/promises";
 import { isErrno } from "../core/atomic-json.js";
 import { removeMultiRepoWorkspace } from "../core/multi-repo.js";
-import { heartbeatPath, sessionMetadataPath } from "../core/paths.js";
+import { heartbeatPath } from "../core/paths.js";
 import { loadRegistry, normalizeGroup, renameGroup as renameRegistryGroup, updateRegistry } from "../core/registry.js";
 import { ARCHIVE_PRUNE_AFTER_MS, moveToBucket, restoreBucket, sessionSection } from "../core/session-bucket.js";
 import { assignGroupOrder, compareSessionPriority, nextOrderInGroup, orderedSessions } from "../core/session-order.js";
 import { orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../core/session-tree.js";
 import { readPiSessionName } from "../core/pi-session-name.js";
-import { readSessionMetadata } from "../core/session-metadata.js";
+import { parseSessionContext } from "../core/session-context.js";
 import { applyComputedStatus, computeStatus, isFreshHeartbeat, markAcknowledged, readHeartbeat } from "../core/status.js";
 import { capturePane, sessionPresence, type TmuxPresence } from "../core/tmux.js";
-import type { SessionsRegistry, ManagedSession, RuntimeSession, SessionMetadata, SessionBucket, WorkflowModeDisplay, Heartbeat } from "../core/types.js";
+import type { SessionsRegistry, ManagedSession, RuntimeSession, PiAgentHubContextV1, SessionBucket, WorkflowModeDisplay, Heartbeat } from "../core/types.js";
 
 export interface SessionsSnapshot {
   registry: SessionsRegistry;
@@ -27,14 +27,14 @@ export type SyncPiNameResult =
 
 interface RefreshObservation {
   tmuxSession: string;
+  observedUpdatedAt: number;
   presence: TmuxPresence;
   heartbeat?: Heartbeat;
-  metadata?: SessionMetadata;
 }
 
 export class SessionsController {
   private registry: SessionsRegistry;
-  private sessionMetadata = new Map<string, SessionMetadata>();
+  private sessionContexts = new Map<string, PiAgentHubContextV1>();
   private workflowModes = new Map<string, WorkflowModeDisplay>();
   private selectedId: string | undefined;
   private preview = "";
@@ -57,14 +57,14 @@ export class SessionsController {
     for (const session of this.registry.sessions) {
       const presence = await this.presence(session.tmuxSession);
       if (isSubagentSession(session) && presence === "missing") {
-        observations.set(session.id, { tmuxSession: session.tmuxSession, presence });
+        observations.set(session.id, { tmuxSession: session.tmuxSession, observedUpdatedAt: session.updatedAt, presence });
         continue;
       }
       observations.set(session.id, {
         tmuxSession: session.tmuxSession,
+        observedUpdatedAt: session.updatedAt,
         presence,
         heartbeat: await readHeartbeat(session.id),
-        metadata: await readSessionMetadata(session.id),
       });
     }
 
@@ -87,7 +87,9 @@ export class SessionsController {
           const observation = matchingObservation(session, observations);
           if (!observation) return [session];
           const computed = computeStatus({ session, tmux: { exists: observation.presence === "present" }, heartbeat: observation.heartbeat, now });
-          return [applyComputedStatus(session, computed, now, observation.heartbeat)];
+          const updated = applyComputedStatus(session, computed, now, observation.heartbeat);
+          const piName = typeof observation.heartbeat?.piSessionName === "string" ? observation.heartbeat.piSessionName.trim() : "";
+          return [{ ...updated, ...(piName && isFreshHeartbeat(observation.heartbeat, now) && session.updatedAt === observation.observedUpdatedAt ? { title: piName } : {}) }];
         }),
       };
     });
@@ -95,8 +97,9 @@ export class SessionsController {
     const latestById = new Map(this.registry.sessions.map((session) => [session.id, session]));
     for (const [id, observation] of observations) {
       const latest = latestById.get(id);
-      if (latest?.tmuxSession === observation.tmuxSession && observation.metadata) this.sessionMetadata.set(id, observation.metadata);
-      else this.sessionMetadata.delete(id);
+      const context = parseSessionContext(observation.heartbeat?.context);
+      if (latest?.tmuxSession === observation.tmuxSession && context) this.sessionContexts.set(id, context);
+      else this.sessionContexts.delete(id);
       const activeMode = latest && latest.tmuxSession === observation.tmuxSession && observation.presence === "present" && isFreshHeartbeat(observation.heartbeat, now)
         ? observation.heartbeat.workflow?.activeMode
         : undefined;
@@ -227,15 +230,6 @@ export class SessionsController {
     });
   }
 
-  async renameSession(id: string, title: string, now = Date.now()): Promise<void> {
-    const trimmed = title.trim();
-    if (!trimmed) throw new Error("title is required");
-    await this.mutateRegistry((latest) => ({
-      ...latest,
-      sessions: latest.sessions.map((session) => session.id === id ? { ...session, title: trimmed, updatedAt: now } : session),
-    }));
-  }
-
   async syncPiName(id: string, now = Date.now()): Promise<SyncPiNameResult> {
     const selected = this.registry.sessions.find((session) => session.id === id);
     if (!selected?.sessionFile) return { status: "unavailable" };
@@ -264,7 +258,7 @@ export class SessionsController {
     const wasSelected = this.selectedId === id;
     const ids = sessionCascadeIds(this.registry.sessions, id);
     for (const removedId of ids) {
-      this.sessionMetadata.delete(removedId);
+      this.sessionContexts.delete(removedId);
       this.workflowModes.delete(removedId);
     }
     this.registry = { ...this.registry, sessions: this.registry.sessions.filter((session) => !ids.has(session.id)) };
@@ -307,11 +301,11 @@ export class SessionsController {
 
   private sessionsWithMetadata(): RuntimeSession[] {
     return this.registry.sessions.map((session) => {
-      const metadata = this.sessionMetadata.get(session.id);
+      const context = this.sessionContexts.get(session.id);
       const activeMode = this.workflowModes.get(session.id);
       const workflow = activeMode && session.workflow ? { ...session.workflow, activeMode } : session.workflow;
-      return metadata || workflow !== session.workflow
-        ? { ...session, ...(metadata ? { sessionMetadata: metadata } : {}), workflow }
+      return context || workflow !== session.workflow
+        ? { ...session, ...(context ? { context } : {}), workflow }
         : session;
     });
   }
@@ -361,9 +355,6 @@ function expiredArchivedCascadeIds(
 async function removeDashboardState(session: ManagedSession): Promise<void> {
   await removeMultiRepoWorkspace(session);
   await unlink(heartbeatPath(session.id)).catch((error: unknown) => {
-    if (!isErrno(error, "ENOENT")) throw error;
-  });
-  await unlink(sessionMetadataPath(session.id)).catch((error: unknown) => {
     if (!isErrno(error, "ENOENT")) throw error;
   });
 }

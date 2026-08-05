@@ -75,12 +75,12 @@ Usage:
   ${CLI_COMMAND}              open dashboard tmux session
   ${CLI_COMMAND} tui          run TUI directly
   ${CLI_COMMAND} list
-  ${CLI_COMMAND} add <cwd> [-t title] [-g group] [--add-cwd path ...]
+  ${CLI_COMMAND} add <cwd> [-g group] [--add-cwd path ...]
   ${CLI_COMMAND} start <session-id>
   ${CLI_COMMAND} stop <session-id>
   ${CLI_COMMAND} restart <session-id>
   ${CLI_COMMAND} delete <session-id>
-  ${CLI_COMMAND} fork <session-id> [-t title] [-g group]
+  ${CLI_COMMAND} fork <session-id> [-g group]
   ${CLI_COMMAND} mcp-pool
   ${CLI_COMMAND} doctor
   ${CLI_COMMAND} config get
@@ -114,11 +114,10 @@ async function list() {
 
 async function add(argv: string[]) {
   const cwdArg = argv[0];
-  if (!cwdArg) throw new Error(`Usage: ${CLI_COMMAND} add <cwd> [-t title] [-g group] [--add-cwd path ...]`);
-  const title = flag(argv, "-t") ?? flag(argv, "--title");
+  if (!cwdArg) throw new Error(`Usage: ${CLI_COMMAND} add <cwd> [-g group] [--add-cwd path ...]`);
   const group = flag(argv, "-g") ?? flag(argv, "--group");
   const additionalCwds = flags(argv, "--add-cwd");
-  const record = await addManagedSession({ cwd: cwdArg, title, group, additionalCwds });
+  const record = await addManagedSession({ cwd: cwdArg, group, additionalCwds });
   console.log(record.id);
 }
 
@@ -145,10 +144,9 @@ async function deleteCommand(id: string | undefined) {
 
 async function fork(argv: string[]) {
   const sourceId = argv[0];
-  if (!sourceId) throw new Error(`Usage: ${CLI_COMMAND} fork <session-id> [-t title] [-g group]`);
-  const title = flag(argv, "-t") ?? flag(argv, "--title");
+  if (!sourceId) throw new Error(`Usage: ${CLI_COMMAND} fork <session-id> [-g group]`);
   const group = flag(argv, "-g") ?? flag(argv, "--group");
-  const record = await forkManagedSession(sourceId, { title, group });
+  const record = await forkManagedSession(sourceId, { group });
   console.log(record.id);
 }
 

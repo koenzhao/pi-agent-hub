@@ -31,7 +31,6 @@ export function openForkDialog(ctx: DialogContext): FormDialog | undefined {
     purpose: "fork",
     form: createForm([
       { key: "group", label: "group", value: selected.group, hint: "session group label" },
-      { key: "title", label: "title", value: `${selected.title} fork`, hint: "display title for the fork" },
     ]),
   };
 }
@@ -58,11 +57,15 @@ export function openRenameSessionForm(ctx: DialogContext, returnTmuxSession?: st
     ctx.setMessage("subagent rows cannot be renamed");
     return undefined;
   }
+  if (selected.status === "stopped" || selected.status === "error") {
+    ctx.setMessage("restart the Pi session before renaming");
+    return undefined;
+  }
   return {
     kind: "form",
     purpose: "renameSession",
     returnTmuxSession,
-    form: createForm([{ key: "title", label: "title", value: selected.title, hint: "session display title" }]),
+    form: createForm([{ key: "title", label: "title", value: selected.title, hint: "exact Pi session name" }]),
   };
 }
 
@@ -125,8 +128,7 @@ function submitForkDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | 
   const result = validateRequired(dialog.form);
   if (!result.ok) return { ...dialog, form: result.state };
   const group = result.state.fields.group.value;
-  const title = result.state.fields.title.value;
-  ctx.runAction(() => ctx.actions.forkSession?.(selected.id, { group, title }), "forking session...");
+  ctx.runAction(() => ctx.actions.forkSession?.(selected.id, { group }), "forking session...");
   return undefined;
 }
 
@@ -147,7 +149,10 @@ function submitRenameSessionDialog(dialog: FormDialog, ctx: DialogContext): Form
   if (!result.ok) return { ...dialog, form: result.state };
   const title = result.state.fields.title.value;
   ctx.runAction(
-    () => ctx.actions.renameSession ? ctx.actions.renameSession(selected.id, title) : ctx.controller.renameSession(selected.id, title),
+    () => {
+      if (!ctx.actions.renameSession) throw new Error("rename transport unavailable");
+      return ctx.actions.renameSession(selected.id, title);
+    },
     "renaming session...",
     () => { if (dialog.returnTmuxSession) ctx.attachSession(selected); },
   );

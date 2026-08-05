@@ -697,3 +697,35 @@
   references: []
   created_at: '2026-08-02'
   id: worktree-setup-004
+- id: metadata-redesign-001
+  status: done
+  title: Metadata redesign
+  subtitle: Simplify cross-package session context
+  description: User can rely on one minimal, extensible session-context contract across
+    Rules, Pi, and the Hub dashboard without duplicated title or metadata ownership.
+  priority: 1
+  created_at: '2026-08-02'
+  plan_file: agent-work/history/20260804_metadata-redesign-001_session_context_redesign.md
+  completed_at: '2026-08-04'
+- id: dashboard-scanability-008
+  status: done
+  title: Card markers
+  subtitle: Restore compact visual scan cues
+  description: User can scan worktree, repository, and plan progress markers without
+    verbose row text.
+  priority: 2
+  created_at: '2026-08-04'
+  discovered_from: metadata-redesign-001
+  completed_at: '2026-08-04'
+  plan_file: agent-work/history/20260804_metadata-redesign-001_session_context_redesign.md
+- id: dashboard-scanability-009
+  status: done
+  title: Card clicks
+  subtitle: Select sessions from full cards
+  description: User can select or open a session by clicking any visible line in its
+    card.
+  priority: 2
+  created_at: '2026-08-04'
+  discovered_from: dashboard-scanability-008
+  completed_at: '2026-08-04'
+  plan_file: agent-work/history/20260804_metadata-redesign-001_session_context_redesign.md

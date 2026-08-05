@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { access, rm } from "node:fs/promises";
-import { SESSION_ID_ENV, STATE_ENV, SUBAGENT_PROMPT_APPEND_ENV, WORKTREE_GUIDANCE_ENV } from "../core/names.js";
+import { PRIMARY_CWD_ENV, SESSION_ID_ENV, STATE_ENV, SUBAGENT_PROMPT_APPEND_ENV, WORKTREE_GUIDANCE_ENV } from "../core/names.js";
 import { resolve } from "node:path";
 import { effectiveSessionPrelude } from "../core/config.js";
 import { buildPiArgs } from "../core/pi-process.js";
@@ -10,25 +10,22 @@ import { heartbeatPath, sessionsStateDir } from "../core/paths.js";
 import { createOwnedWorktrees, isWorktreeSession, removeOwnedWorktrees } from "../core/worktree.js";
 import { renderWorktreeGuidance } from "../core/worktree-context.js";
 import { recordRepoUsage } from "../core/repo-history.js";
-import { createSessionRecord, loadRegistry, updateRegistry, upsertSession } from "../core/registry.js";
-import { randomSessionTitle } from "../core/session-title.js";
+import { createSessionRecord, loadRegistry, provisionalSessionTitle, updateRegistry, upsertSession } from "../core/registry.js";
 import { nextOrderInGroup } from "../core/session-order.js";
 import { isSubagentSession } from "../core/session-tree.js";
-import { configureManagedSessionStatusBar, killSession, newSession, sessionExists, shellQuote } from "../core/tmux.js";
+import { configureManagedSessionStatusBar, killSession, newSession, sendTextToSession, sessionExists, shellQuote } from "../core/tmux.js";
 import { loadManagedSessionTheme } from "../tui/theme.js";
 import { resolveSession } from "./delete-session.js";
 import type { ManagedSession, ManagedWorktree } from "../core/types.js";
 
 export interface SessionInput {
   cwd: string;
-  title?: string;
   group?: string;
   additionalCwds?: string[];
   worktree?: { branch: string };
 }
 
 export interface ForkInput {
-  title?: string;
   group?: string;
 }
 
@@ -49,7 +46,7 @@ export function managedPiCommand(input: { piArgs: string[]; prelude?: string; sh
 export async function addManagedSession(input: SessionInput): Promise<ManagedSession> {
   const originalCwd = resolve(input.cwd);
   const originalAdditionalCwds = input.additionalCwds ?? [];
-  let record = createSessionRecord({ cwd: originalCwd, title: input.title, group: input.group, additionalCwds: input.additionalCwds });
+  let record = createSessionRecord({ cwd: originalCwd, group: input.group, additionalCwds: input.additionalCwds });
   try {
     if (input.worktree) {
       const created = await createOwnedWorktrees({ cwds: [record.cwd, ...(record.additionalCwds ?? [])], sessionId: record.id, branch: input.worktree.branch });
@@ -122,6 +119,7 @@ export async function startManagedSession(
     env: {
       [SESSION_ID_ENV]: session.id,
       [STATE_ENV]: sessionsStateDir(),
+      [PRIMARY_CWD_ENV]: session.cwd,
       ...(worktreeGuidance ? {
         [WORKTREE_GUIDANCE_ENV]: worktreeGuidance,
         [SUBAGENT_PROMPT_APPEND_ENV]: worktreeGuidance,
@@ -129,6 +127,16 @@ export async function startManagedSession(
     },
   });
   await configureManagedSessionStatusBar({ name: session.tmuxSession, title: session.title, cwd: session.cwd, theme: await loadManagedSessionTheme(session) });
+}
+
+export async function renameManagedSession(id: string, title: string): Promise<void> {
+  const registry = await loadRegistry();
+  const session = findSession(registry, id);
+  const name = title.trim();
+  if (isSubagentSession(session)) throw new Error("subagent rows cannot be renamed");
+  if (session.status === "stopped" || session.status === "error") throw new Error("restart the Pi session before renaming");
+  if (!name || /[\r\n]/.test(name)) throw new Error("name must be one nonblank line");
+  await sendTextToSession(session.tmuxSession, `/name ${name}`);
 }
 
 export async function stopManagedSession(id: string): Promise<void> {
@@ -152,7 +160,7 @@ export async function restartManagedSession(id: string): Promise<void> {
   await startManagedSession(id);
 }
 
-export async function restartManagedSessionFresh(id: string, titleGenerator = randomSessionTitle): Promise<void> {
+export async function restartManagedSessionFresh(id: string): Promise<void> {
   await stopManagedSession(id);
   await rm(heartbeatPath(id), { force: true });
   await updateRegistry((registry) => {
@@ -161,7 +169,7 @@ export async function restartManagedSessionFresh(id: string, titleGenerator = ra
       ...registry,
       sessions: registry.sessions.map((item) => item.id === session.id ? {
         ...item,
-        title: titleGenerator(),
+        title: provisionalSessionTitle(session.worktrees?.find((worktree) => worktree.role === "primary")?.repoRoot ?? session.worktreeRepoRoot ?? session.cwd),
         status: "starting",
         sessionFile: undefined,
         piSessionId: undefined,
@@ -198,7 +206,6 @@ export async function forkManagedSession(sourceId: string, input: ForkInput = {}
   const sourceFile = await savedSessionFile(source);
   let record = createSessionRecord({
     cwd: source.cwd,
-    title: input.title ?? `${source.title} fork`,
     group: input.group ?? source.group,
     additionalCwds: source.additionalCwds,
   });
@@ -214,7 +221,7 @@ export async function forkManagedSession(sourceId: string, input: ForkInput = {}
     name: record.tmuxSession,
     cwd: effectiveSessionCwd(record),
     command: managedPiCommand({ piArgs, prelude: await effectiveSessionPrelude() }),
-    env: { [SESSION_ID_ENV]: record.id, [STATE_ENV]: sessionsStateDir() },
+    env: { [SESSION_ID_ENV]: record.id, [STATE_ENV]: sessionsStateDir(), [PRIMARY_CWD_ENV]: record.cwd },
   });
   await configureManagedSessionStatusBar({ name: record.tmuxSession, title: record.title, cwd: record.cwd, theme: await loadManagedSessionTheme(record) });
   return record;

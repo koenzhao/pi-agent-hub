@@ -57,7 +57,3 @@ Updated:
 - `docs/FEATURES.md`
 - `docs/STRUCTURE.md`
 - `pi-tmux-subagents/docs/STRUCTURE.md`
-
-## Follow-up
-
-`worktree-setup-003` tracks the user's request to make worktree creation the default in the new-session window while retaining a per-session opt-out.

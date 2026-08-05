@@ -7,11 +7,12 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { loadRegistry, updateRegistry } from "../src/core/registry.js";
 import { heartbeatPath } from "../src/core/paths.js";
-import { SUBAGENT_PROMPT_APPEND_ENV, WORKTREE_GUIDANCE_ENV } from "../src/core/names.js";
+import { PRIMARY_CWD_ENV, SUBAGENT_PROMPT_APPEND_ENV, WORKTREE_GUIDANCE_ENV } from "../src/core/names.js";
 import {
   addManagedSession,
   forkManagedSession,
   managedPiCommand,
+  renameManagedSession,
   restartManagedSessionFresh,
   startManagedSession,
   stopManagedSession,
@@ -107,6 +108,30 @@ test("managedPiCommand treats whitespace-only prelude as unset", () => {
   assert.equal(managedPiCommand({ prelude: "   ", piArgs: ["--help"] }), "pi '--help'");
 });
 
+test("renameManagedSession sends exact Pi name command and never mutates the cached title", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-rename-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  await mkdir(bin);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  process.env.PI_AGENT_HUB_DIR = join(root, "hub");
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    const managed: ManagedSession = { id: "api", title: "api", cwd: "/tmp/api", group: "default", tmuxSession: "pi-agent-hub-api", status: "waiting", createdAt: 1, updatedAt: 1 };
+    await updateRegistry(() => ({ version: 1, sessions: [managed] }));
+    await renameManagedSession("api", "Canonical Name");
+    assert.equal((await loadRegistry()).sessions[0]?.title, "api");
+    assert.match(await readFile(log, "utf8"), /set-buffer .* -- \/name Canonical Name[\s\S]*paste-buffer[\s\S]*send-keys .* Enter/);
+    await assert.rejects(renameManagedSession("api", "bad\nname"), /one nonblank line/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR; else process.env.PI_AGENT_HUB_DIR = oldDir;
+    process.env.PATH = oldPath;
+  }
+});
+
 test("addManagedSession creates multi-repo worktree sessions in a source-pi workspace", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-add-wt-"));
   const bin = join(root, "bin");
@@ -121,7 +146,7 @@ test("addManagedSession creates multi-repo worktree sessions in a source-pi work
   process.env.PI_AGENT_HUB_DIR = join(root, "hub");
   process.env.PATH = `${bin}:${oldPath ?? ""}`;
   try {
-    const created = await addManagedSession({ cwd: api, additionalCwds: [web], title: "feature", group: "test", worktree: { branch: "feature/multi" } });
+    const created = await addManagedSession({ cwd: api, additionalCwds: [web], group: "test", worktree: { branch: "feature/multi" } });
     const registry = await loadRegistry();
     const saved = registry.sessions[0]!;
 
@@ -137,6 +162,9 @@ test("addManagedSession creates multi-repo worktree sessions in a source-pi work
     assert.match(commands, new RegExp(`new-session.*-c ${saved.workspaceCwd!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.match(commands, new RegExp(`${WORKTREE_GUIDANCE_ENV}=`));
     assert.match(commands, new RegExp(`${SUBAGENT_PROMPT_APPEND_ENV}=`));
+    assert.match(commands, new RegExp(`${PRIMARY_CWD_ENV}='${saved.cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`));
+    assert.doesNotMatch(commands, new RegExp(`${PRIMARY_CWD_ENV}='${saved.workspaceCwd!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`));
+    assert.doesNotMatch(commands, new RegExp(`${PRIMARY_CWD_ENV}='${saved.additionalCwds![0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`));
     assert.match(commands, new RegExp(saved.worktrees![0]!.repoRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(commands, new RegExp(saved.worktrees![1]!.repoRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
@@ -222,7 +250,11 @@ test("startManagedSession merges prepared workspace outputs into the latest row"
     assert.equal(committed.status, "running");
     assert.equal(committed.cwd, "/tmp/canonical");
     assert.deepEqual(committed.additionalCwds, ["/tmp/canonical-extra"]);
-    assert.match(await readFile(log, "utf8"), /new-session/);
+    const commands = await readFile(log, "utf8");
+    assert.match(commands, /new-session/);
+    assert.match(commands, new RegExp(`${PRIMARY_CWD_ENV}='\/tmp\/canonical'`));
+    assert.doesNotMatch(commands, new RegExp(`${PRIMARY_CWD_ENV}='${join(root, "workspace").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`));
+    assert.doesNotMatch(commands, new RegExp(`${PRIMARY_CWD_ENV}='\/tmp\/canonical-extra'`));
   } finally {
     if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
     else process.env.PI_AGENT_HUB_DIR = oldDir;
@@ -313,12 +345,12 @@ test("restartManagedSessionFresh clears saved Pi state and starts a new tmux ses
     await mkdir(join(root, "heartbeats"));
     await writeFile(heartbeatPath("source-session"), "{}", "utf8");
 
-    await restartManagedSessionFresh("source-session", () => "black-aleph");
+    await restartManagedSessionFresh("source-session");
 
     const registry = await loadRegistry();
     const restarted = registry.sessions[0]!;
     assert.equal(restarted.status, "starting");
-    assert.equal(restarted.title, "black-aleph");
+    assert.equal(restarted.title, "project");
     assert.equal(restarted.sessionFile, undefined);
     assert.equal(restarted.piSessionId, undefined);
     assert.equal(restarted.acknowledgedAt, undefined);
@@ -331,7 +363,7 @@ test("restartManagedSessionFresh clears saved Pi state and starts a new tmux ses
     assert.doesNotMatch(commands, new RegExp(`${WORKTREE_GUIDANCE_ENV}=`));
     assert.doesNotMatch(commands, new RegExp(`${SUBAGENT_PROMPT_APPEND_ENV}=`));
     assert.match(commands, /set-option -t pi-agent-hub-source status on/);
-    assert.match(commands, /status-right .*black-aleph/);
+    assert.match(commands, /status-right .*project/);
   } finally {
     if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
     else process.env.PI_AGENT_HUB_DIR = oldDir;
@@ -356,6 +388,51 @@ test("lifecycle commands reject subagent registry rows", async () => {
   }
 });
 
+test("forkManagedSession exports the fork record primary cwd without changing conversation fork behavior", async () => {
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-fork-primary-cwd-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  const history = join(root, "saved.jsonl");
+  const primary = join(root, "primary");
+  const additional = join(root, "additional");
+  await mkdir(bin);
+  await mkdir(primary);
+  await mkdir(additional);
+  await writeFile(history, "{}\n", "utf8");
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  process.env.PI_AGENT_HUB_DIR = join(root, "hub");
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    await seedRegistry({ version: 1, sessions: [session({ cwd: primary, additionalCwds: [additional], sessionFile: history })] });
+    const fork = await forkManagedSession("source-session");
+    const commands = await readFile(log, "utf8");
+    assert.equal(fork.cwd, primary);
+    assert.match(commands, new RegExp(`${PRIMARY_CWD_ENV}='${primary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`));
+    assert.doesNotMatch(commands, new RegExp(`${PRIMARY_CWD_ENV}='${additional.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`));
+    assert.match(commands, /--fork/);
+    assert.equal(fork.worktreeOwnedByHub, undefined);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR; else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
+  }
+});
+
+test("forkManagedSession keeps worktree-session forks blocked", async () => {
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const dir = await mkdtemp(join(tmpdir(), "pi-agent-hub-fork-worktree-"));
+  process.env.PI_AGENT_HUB_DIR = dir;
+  try {
+    await seedRegistry({ version: 1, sessions: [session({ worktreeOwnedByHub: true, worktreePath: "/tmp/worktree", worktreeRepoRoot: "/tmp/source", worktreeBranch: "feature/test", worktreeBaseBranch: "main", sessionFile: join(dir, "saved.jsonl") })] });
+    await assert.rejects(() => forkManagedSession("source-session"), /Cannot fork worktree sessions in v1/);
+    assert.equal((await loadRegistry()).sessions.length, 1);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR; else process.env.PI_AGENT_HUB_DIR = oldDir;
+  }
+});
+
 test("forkManagedSession does not register a fork when source history is not saved", async () => {
   const oldDir = process.env.PI_AGENT_HUB_DIR;
   const dir = await mkdtemp(join(tmpdir(), "pi-agent-hub-fork-"));
@@ -364,7 +441,7 @@ test("forkManagedSession does not register a fork when source history is not sav
     await seedRegistry({ version: 1, sessions: [session({ sessionFile: join(dir, "missing.jsonl") })] });
 
     await assert.rejects(
-      () => forkManagedSession("source-session", { title: "source fork", group: "default" }),
+      () => forkManagedSession("source-session", { group: "default" }),
       /history is not saved yet/,
     );
 

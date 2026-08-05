@@ -60,12 +60,13 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | `w` | Finish a hub-owned worktree session |
 | `N` | Sync the selected hub title from Pi's `/name` |
 | `↑↓` / `j` / `k` | Move selection |
+| `←` / `→` | Collapse or expand the selected subagent tree; add Shift for all trees |
 | `g` / `G` | Move a session to a group (Ctrl+N/P cycles visible groups) or rename its group |
 | `K` / `J` | Move the selected Active/Backlog session up/down within its group |
 | `s` / `m` | Pick project skills or MCP servers; `←→` switches Enabled/Available |
-| Click / double-click | Select a session / open, switch, or restart it |
+| Click / double-click | Select / open, switch, or restart from any visible card line |
 
-The dashboard has independent grouping and density controls. `S` switches project groups and workflow-stage lanes. `v` toggles compact rows and junction-rail cards for all Active main sessions. Junction cards keep the stored Hub title and adapt to available metadata: ticket id, a non-duplicate `plan.feature` description, then workflow/plan progress plus semantic status. For the clearest hierarchy, use a 1–3-word Hub session title and a 5–7-word authored ticket title for `plan.feature`. Existing Hub groups own the rails in both grouping modes. Backlog, Archived, and subagents remain compact. In stage grouping, every Active session remains visible: compatible workflow sessions stay in producer-defined lanes and all others appear in `OTHER ACTIVE`, nested under their existing project/group labels. Top-level parent rows show `⚙︎N` when descendant subagents are starting or running. Stage-group children start collapsed: `▸`/`▾` shows disclosure state, `Space` toggles the selected tree, and filters temporarily reveal matching child context. Producer-confirmed attention remains independent of workflow and runtime state: `✓` marks a ready handoff, `?` a question, and `!` a blocker on waiting/idle rows. The right pane keeps full available plan context.
+The dashboard has independent grouping and density controls. `S` switches project groups and workflow-stage lanes. `v` toggles compact rows and junction-rail cards for all Active main sessions. Pi's native session name is canonical; Hub starts with the primary repo basename and caches names received by heartbeat. Junction cards can show generic producer context as `#ticket-id · subtitle`, followed by producer-owned workflow activity or deterministic plan progress. Existing Hub groups own the rails in both grouping modes. Backlog, Archived, and subagents remain compact. In stage grouping, every Active session remains visible: compatible workflow sessions stay in producer-defined lanes and all others appear in `OTHER ACTIVE`, nested under their existing project/group labels. Top-level parent rows show `⚙︎N` when descendant subagents are starting or running. Subagent trees start collapsed in both project and stage grouping: `▸`/`▾` shows disclosure state, `←`/`→` collapses or expands the selected tree, `Shift+←`/`Shift+→` applies to all trees in the current grouping, and `Space` remains a stage-group selected-tree toggle. Filters temporarily reveal matching child context. Producer-confirmed attention remains independent of workflow and runtime state: `✓` marks a ready handoff, `?` a question, and `!` a blocker on waiting/idle rows. The right pane keeps full available plan context.
 
 ## Install
 
@@ -102,8 +103,8 @@ pi-hub              # create/attach/switch to the dashboard tmux session
 pi-hub tui          # run the TUI directly in the current terminal
 pi-hub doctor
 pi-hub list
-pi-hub add . -t api -g default
-pi-hub add ./api -t fullstack --add-cwd ../web --add-cwd ../shared
+pi-hub add . -g default
+pi-hub add ./api --add-cwd ../web --add-cwd ../shared
 pi-hub delete <session-id>
 pi-hub mcp-pool     # run the pooled MCP socket daemon
 pi-hub config get
@@ -113,7 +114,7 @@ pi-hub config set worktree-default true
 pi-hub config unset worktree-default
 ```
 
-`add --add-cwd` creates a multi-repo session: `cwd` stays the primary repo, extra paths are symlinked into a per-session workspace, and Pi starts from that workspace. Worktree sessions are created from the TUI new-session form by focusing the Worktree row and pressing `Space`, or with `Ctrl+T`; the branch name is also the session title. New forms normally start with worktrees off. Set `worktree-default` to open them in worktree mode automatically; either toggle can still turn it off per session. `delete` stops the tmux session if it is still alive, removes the registry row, removes the heartbeat file, and removes any owned multi-repo workspace. Dashboard archive/backlog/restore only reorganizes rows and never stops tmux or Pi. Archived is a flat newest-first list that shows five parent cascades by default; select the older-items row and press `Enter` or double-click to expand it. Archived cascades become eligible for dashboard cleanup after seven days, but are forgotten only when every tmux session in the cascade is confirmed gone. Pi conversation/session files, source repos, and hub-owned worktree directories are kept by normal delete; use dashboard `w` to merge and remove a clean hub-owned worktree, or `d` then `Shift+D` to discard a clean worktree and branch without merging.
+`add --add-cwd` creates a multi-repo session: `cwd` stays the primary repo, extra paths are symlinked into a per-session workspace, and Pi starts from that workspace. Worktree sessions are created from the TUI new-session form by focusing the Worktree row and pressing `Space`, or with `Ctrl+T`; the branch does not control Pi's native session name. New forms start with worktrees on. Set `worktree-default false` to open them in normal-session mode instead; either toggle can still change the mode per session. `delete` stops the tmux session if it is still alive, removes the registry row, removes the heartbeat file, and removes any owned multi-repo workspace. Dashboard archive/backlog/restore only reorganizes rows and never stops tmux or Pi. Archived is a flat newest-first list that shows five parent cascades by default; select the older-items row and press `Enter` or double-click to expand it. Archived cascades become eligible for dashboard cleanup after seven days, but are forgotten only when every tmux session in the cascade is confirmed gone. Pi conversation/session files, source repos, and hub-owned worktree directories are kept by normal delete; use dashboard `w` to merge and remove a clean hub-owned worktree, or `d` then `Shift+D` to discard a clean worktree and branch without merging.
 
 ## Troubleshooting
 

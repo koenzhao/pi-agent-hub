@@ -1,7 +1,7 @@
 import { unlink } from "node:fs/promises";
 import { isErrno } from "../core/atomic-json.js";
 import { removeMultiRepoWorkspace } from "../core/multi-repo.js";
-import { heartbeatPath, registryPath, sessionMetadataPath } from "../core/paths.js";
+import { heartbeatPath, registryPath } from "../core/paths.js";
 import { loadRegistry, updateRegistry } from "../core/registry.js";
 import { sessionCascadeIds } from "../core/session-tree.js";
 import { killSession, sessionExists } from "../core/tmux.js";
@@ -57,9 +57,6 @@ export async function removeSessions(sessions: ManagedSession[], path: string, e
   await updateRegistry((latest) => ({ ...latest, sessions: latest.sessions.filter((item) => !ids.has(item.id)) }), path);
   for (const item of sessions) {
     await unlink(heartbeatPath(item.id, env)).catch((error: unknown) => {
-      if (!isErrno(error, "ENOENT")) throw error;
-    });
-    await unlink(sessionMetadataPath(item.id, env)).catch((error: unknown) => {
       if (!isErrno(error, "ENOENT")) throw error;
     });
   }

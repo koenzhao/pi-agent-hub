@@ -12,7 +12,6 @@ import type { NewSessionDialog, RepoPickerDialog } from "./new-session-dialog.js
 import type { ThemeDialog, ThemeDialogInput } from "./theme-dialog.js";
 
 export interface SessionDialogInput {
-  title: string;
   cwd?: string;
   group: string;
   additionalCwds?: string[];
