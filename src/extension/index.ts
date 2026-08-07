@@ -6,7 +6,7 @@ import { WORKTREE_GUIDANCE_MAX_LENGTH } from "../core/worktree-context.js";
 import { sessionsStateDir } from "../core/paths.js";
 import { loadThemeCommand } from "../core/theme-command.js";
 import { colorFromAnsi } from "../core/theme-color.js";
-import { HEARTBEAT_INTERVAL_MS } from "../core/status.js";
+import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_STALE_MS } from "../core/status.js";
 import { registerMcpTools } from "../mcp/register-tools.js";
 import { parseSessionContext } from "../core/session-context.js";
 import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, SessionPlanSummary, WorkflowActivityDisplay, WorkflowModeDisplay, WorkflowRuntimeSnapshot, WorkflowStep } from "../core/types.js";
@@ -60,6 +60,9 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
   let themeCommandTimer: ReturnType<typeof setInterval> | undefined;
   let startupHeartbeatTimers: ReturnType<typeof setTimeout>[] = [];
   let settledHeartbeatTimers: ReturnType<typeof setTimeout>[] = [];
+  let compactionSnapshot: { state: Heartbeat["state"]; stateSince: number } | undefined;
+  let compactionWatchdog: ReturnType<typeof setTimeout> | undefined;
+  let heartbeatWrite: Promise<void> = Promise.resolve();
   let lastThemeRevision: string | undefined;
   let mcpCleanup: (() => Promise<void>) | undefined;
 
@@ -84,36 +87,40 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
     await heartbeat(state, ctx, message);
   }
 
-  async function heartbeat(state: Heartbeat["state"], ctx: PiContext, message?: string) {
+  async function heartbeat(state: Heartbeat["state"], ctx: PiContext, message?: string, stateSinceOverride?: number) {
     // pi-tmux-subagents child bootstrap owns its richer Agent Hub heartbeat.
     if (process.env.PI_TMUX_SUBAGENTS_JOB_ID) return;
     const id = process.env[SESSION_ID_ENV];
     if (!id) return;
-    if (state !== currentState) {
+    if (state !== currentState || stateSinceOverride !== undefined) {
       currentState = state;
-      stateSince = Date.now();
+      stateSince = stateSinceOverride ?? Date.now();
     }
     const file = join(process.env[STATE_ENV] ?? sessionsStateDir(), "heartbeats", `${id}.json`);
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, `${JSON.stringify({
-      managedSessionId: id,
-      cwd: ctx.cwd,
-      piSessionFile: ctx.sessionManager?.getSessionFile?.(),
-      piSessionId: ctx.sessionManager?.getSessionId?.(),
-      state,
-      stateSince,
-      message,
-      updatedAt: Date.now(),
-      kind: process.env[KIND_ENV] as "subagent" | undefined,
-      parentId: process.env[PARENT_ID_ENV],
-      agentName: process.env.PI_SUBAGENT_AGENT,
-      taskPreview: process.env.PI_SUBAGENT_TASK_PREVIEW,
-      resultPath: process.env.PI_SUBAGENT_RESULT_PATH,
-      activeTheme: activeTheme(ctx),
-      piSessionName: normalizedName(pi.getSessionName?.()),
-      context: sessionContextSnapshot(ctx),
-      workflow: workflowSnapshot(ctx),
-    } satisfies Heartbeat, null, 2)}\n`, "utf8");
+    const write = heartbeatWrite.then(async () => {
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, `${JSON.stringify({
+        managedSessionId: id,
+        cwd: ctx.cwd,
+        piSessionFile: ctx.sessionManager?.getSessionFile?.(),
+        piSessionId: ctx.sessionManager?.getSessionId?.(),
+        state,
+        stateSince,
+        message,
+        updatedAt: Date.now(),
+        kind: process.env[KIND_ENV] as "subagent" | undefined,
+        parentId: process.env[PARENT_ID_ENV],
+        agentName: process.env.PI_SUBAGENT_AGENT,
+        taskPreview: process.env.PI_SUBAGENT_TASK_PREVIEW,
+        resultPath: process.env.PI_SUBAGENT_RESULT_PATH,
+        activeTheme: activeTheme(ctx),
+        piSessionName: normalizedName(pi.getSessionName?.()),
+        context: sessionContextSnapshot(ctx),
+        workflow: workflowSnapshot(ctx),
+      } satisfies Heartbeat, null, 2)}\n`, "utf8");
+    });
+    heartbeatWrite = write.catch(() => undefined);
+    await write;
   }
 
   pi.on("before_agent_start", async (event) => {
@@ -132,19 +139,56 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_info_changed", async (_event, ctx) => applyThemeAndHeartbeat(currentState, ctx as PiContext));
+  const clearCompaction = () => {
+    if (compactionWatchdog) clearTimeout(compactionWatchdog);
+    compactionWatchdog = undefined;
+    compactionSnapshot = undefined;
+  };
+
+  const restoreCompaction = async (ctx: PiContext) => {
+    const snapshot = compactionSnapshot;
+    clearCompaction();
+    if (snapshot) await heartbeat(snapshot.state, ctx, undefined, snapshot.stateSince);
+  };
+
   pi.on("agent_start", async (_event, ctx) => {
+    clearCompaction();
     for (const timer of settledHeartbeatTimers) clearTimeout(timer);
     settledHeartbeatTimers = [];
     await applyThemeAndHeartbeat("running", ctx as PiContext);
   });
-  pi.on("agent_end", async (_event, ctx) => applyThemeAndHeartbeat("waiting", ctx as PiContext));
+  pi.on("agent_end", async (_event, ctx) => {
+    clearCompaction();
+    await applyThemeAndHeartbeat("waiting", ctx as PiContext);
+  });
   pi.on("agent_settled", async (_event, ctx) => {
+    clearCompaction();
     await applyThemeAndHeartbeat("waiting", ctx as PiContext);
     for (const timer of settledHeartbeatTimers) clearTimeout(timer);
     settledHeartbeatTimers = SETTLED_HEARTBEAT_DELAYS_MS.map((delay) => setTimeout(() => void heartbeat(currentState, ctx as PiContext), delay));
   });
+  pi.on("session_before_compact", async (_event, ctx) => {
+    if (process.env.PI_TMUX_SUBAGENTS_JOB_ID) return;
+    clearCompaction();
+    const snapshot = { state: currentState, stateSince };
+    compactionSnapshot = snapshot;
+    compactionWatchdog = setTimeout(() => {
+      if (compactionSnapshot !== snapshot) return;
+      void restoreCompaction(ctx as PiContext);
+    }, HEARTBEAT_STALE_MS);
+    await heartbeat("running", ctx as PiContext, undefined, snapshot.stateSince);
+  });
+  pi.on("session_compact", async (event, ctx) => {
+    if (process.env.PI_TMUX_SUBAGENTS_JOB_ID) return;
+    if (event.willRetry) {
+      clearCompaction();
+      return;
+    }
+    await restoreCompaction(ctx as PiContext);
+  });
   pi.on("session_shutdown", async (_event, ctx) => {
     try {
+      clearCompaction();
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       if (themeCommandTimer) clearInterval(themeCommandTimer);
       for (const timer of startupHeartbeatTimers) clearTimeout(timer);

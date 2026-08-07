@@ -178,6 +178,21 @@ function renderTopSummary(model: RenderModel, width: number, styles: LayoutStyle
   return truncate(parts.join(" · "), width);
 }
 
+function groupAttentionCount(count: number, styles: LayoutStyles, muted = false): string {
+  if (!count) return "";
+  return (muted ? styles.muted : styles.warning)(`◐${count}`);
+}
+
+function groupStatusCounts(group: RenderModel["groups"][number], styles: LayoutStyles, muted = false): string {
+  return [groupAttentionCount(group.attentionCount, styles, muted), formatStatusCounts(group.statusCounts, styles, muted)]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function groupBoardCounts(group: RenderModel["groups"][number], parentCount: number, styles: LayoutStyles): string {
+  return [groupAttentionCount(group.attentionCount, styles), styles.dim(`·${parentCount}`)].filter(Boolean).join(" ");
+}
+
 function renderPanelStrip(model: RenderModel, width: number, styles: LayoutStyles): string {
   const segments = model.panelStrip?.map(({ slot, title }) => {
     if (!title) return styles.dim(`·${slot}`);
@@ -245,7 +260,7 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
     for (const [groupIndex, group] of model.groups.entries()) {
       if (model.density === "all-cards" && groupIndex) pushLine("");
       const groupHeadingIndex = lines.length;
-      pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles), width));
+      pushLine(twoColumn(styles.accent(group.name), groupStatusCounts(group, styles), width));
       for (const [index, session] of group.sessions.entries()) {
         pushRow(session, model.density === "all-cards" ? { last: index === group.sessions.length - 1, rich: session.kind !== "subagent" } : undefined, [groupHeadingIndex]);
       }
@@ -274,10 +289,10 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
         const parentCount = group.sessions.filter((session) => session.kind !== "subagent").length;
         const groupName = model.density === "all-cards" ? styles.accent(group.name) : styles.muted(group.name);
         groupHeadingIndex = lines.length;
-        pushLine(twoColumn(groupName, styles.dim(`·${parentCount}`), width));
+        pushLine(twoColumn(groupName, groupBoardCounts(group, parentCount, styles), width));
       } else if (group.name) {
         groupHeadingIndex = lines.length;
-        pushLine(twoColumn(styles.accent(group.name), formatStatusCounts(group.statusCounts, styles, mutedStatuses), width));
+        pushLine(twoColumn(styles.accent(group.name), groupStatusCounts(group, styles, mutedStatuses), width));
       }
       const context = [sectionHeadingIndex, ...(groupHeadingIndex === undefined ? [] : [groupHeadingIndex])];
       const junction = model.density === "all-cards" && section.key !== "archived";
@@ -900,7 +915,8 @@ function renderSessionRow(session: RenderSession, width: number, styles: LayoutS
   const board = options.board ?? false;
   const selectionMarker = options.selectionMarker ?? true;
   const attention = selectionMarker && session.attention ? attentionGlyph(session.attention.kind, styles) : "";
-  const prefix = session.selected && selectionMarker ? styles.accent("▌") : attention || (session.status === "stopped" ? styles.dim("·") : " ");
+  const selection = session.selected && selectionMarker ? styles.accent("▌") : "";
+  const prefix = selection ? `${selection}${attention ? ` ${attention}` : ""}` : attention || (session.status === "stopped" ? styles.dim("·") : " ");
   const symbol = session.section === "active"
     ? styles.status(session.displayStatus, session.symbol)
     : styles.muted(session.symbol);

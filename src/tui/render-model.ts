@@ -23,6 +23,7 @@ export interface RenderSession {
   status: SessionStatus;
   displayStatus: "running" | "waiting" | "idle" | "error" | "stopped";
   symbol: string;
+  needsAttention: boolean;
   selected: boolean;
   error?: string;
   sessionFile?: string;
@@ -63,6 +64,7 @@ export interface StatusCounts {
 export interface RenderGroup {
   name: string;
   statusCounts: StatusCounts;
+  attentionCount: number;
   sessions: RenderSession[];
 }
 
@@ -443,6 +445,7 @@ function boardGroupsForSessions(sessions: RenderSession[]): RenderGroup[] {
   return [...groupsByName.entries()].map(([name, groupSessions]) => ({
     name,
     statusCounts: countRenderSessions(groupSessions),
+    attentionCount: countAttentionSessions(groupSessions),
     sessions: groupSessions,
   } satisfies RenderGroup));
 }
@@ -460,6 +463,7 @@ function renderGroups(sessions: RenderSession[], groupName: (session: RenderSess
     .map(([name, groupSessions]) => ({
       name,
       statusCounts: countRenderSessions(groupSessions),
+      attentionCount: countAttentionSessions(groupSessions),
       sessions: groupSessions,
     } satisfies RenderGroup));
 }
@@ -484,7 +488,7 @@ function sectionsForSessions(
       statusCounts: countRenderSessions(allSectionSessions),
       sessionsTotal: allSectionSessions.length,
       groups: collapsed && !filterActive ? [] : key === "archived"
-        ? [{ name: "", statusCounts: countRenderSessions(allSectionSessions), sessions: sectionSessions }]
+        ? [{ name: "", statusCounts: countRenderSessions(allSectionSessions), attentionCount: countAttentionSessions(sectionSessions), sessions: sectionSessions }]
         : groupsForSessions(sectionSessions),
       collapsible: key !== "active",
       collapsed,
@@ -538,6 +542,7 @@ function toRenderSession(session: RuntimeSession, selected: boolean, sessions: R
     status: session.status,
     displayStatus,
     symbol: symbolFor(displayStatus),
+    needsAttention: session.status === "waiting" && session.acknowledgedAt === undefined,
     selected,
     error: session.error,
     sessionFile: session.sessionFile,
@@ -642,4 +647,8 @@ function countRenderSessions(sessions: RenderSession[]): StatusCounts {
   const counts = emptyStatusCounts();
   for (const session of sessions) counts[session.displayStatus] += 1;
   return counts;
+}
+
+function countAttentionSessions(sessions: RenderSession[]): number {
+  return sessions.reduce((count, session) => count + (session.needsAttention ? 1 : 0), 0);
 }

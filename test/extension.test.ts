@@ -7,6 +7,7 @@ import piAgentHubExtension from "../src/extension/index.js";
 import { SESSION_ID_ENV, STATE_ENV, WORKTREE_GUIDANCE_ENV } from "../src/core/names.js";
 import { WORKTREE_GUIDANCE_MAX_LENGTH } from "../src/core/worktree-context.js";
 import { heartbeatPath } from "../src/core/paths.js";
+import { HEARTBEAT_STALE_MS } from "../src/core/status.js";
 import { publishThemeCommand } from "../src/core/theme-command.js";
 import type { Heartbeat } from "../src/core/types.js";
 
@@ -26,16 +27,117 @@ test("piAgentHubExtension registers handlers once per active process", async () 
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
 
-  assert.deepEqual(events, ["before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_shutdown"]);
+  assert.deepEqual(events, ["before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_before_compact", "session_compact", "session_shutdown"]);
 
   await handlers.get("session_shutdown")?.({}, { cwd: "/repo" });
   piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
 
   assert.deepEqual(events, [
-    "before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_shutdown",
-    "before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_shutdown",
+    "before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_before_compact", "session_compact", "session_shutdown",
+    "before_agent_start", "session_start", "session_info_changed", "agent_start", "agent_end", "agent_settled", "session_before_compact", "session_compact", "session_shutdown",
   ]);
   delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+});
+
+test("compaction publishes transient running and restores or preserves continuation state", async () => {
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-compaction-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  process.env[SESSION_ID_ENV] = "compaction";
+  process.env[STATE_ENV] = root;
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) { handlers.set(name, handler); },
+    registerTool() {},
+    getSessionName() { return "Compaction"; },
+  };
+  const ctx = { cwd: root, hasUI: false };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await handlers.get("session_start")?.({}, ctx);
+    const started = JSON.parse(await readFile(heartbeatPath("compaction", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+
+    await handlers.get("session_before_compact")?.({ reason: "manual", willRetry: false }, ctx);
+    const compacting = JSON.parse(await readFile(heartbeatPath("compaction", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+    assert.equal(compacting.state, "running");
+    assert.equal(compacting.stateSince, started.stateSince);
+
+    await handlers.get("session_compact")?.({ reason: "manual", willRetry: false }, ctx);
+    const restored = JSON.parse(await readFile(heartbeatPath("compaction", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+    assert.equal(restored.state, "waiting");
+    assert.equal(restored.stateSince, started.stateSince);
+
+    await handlers.get("session_before_compact")?.({ reason: "overflow", willRetry: true }, ctx);
+    const retrying = JSON.parse(await readFile(heartbeatPath("compaction", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+    assert.equal(retrying.state, "running");
+    await handlers.get("session_compact")?.({ reason: "overflow", willRetry: true }, ctx);
+    const continuing = JSON.parse(await readFile(heartbeatPath("compaction", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+    assert.equal(continuing.state, "running");
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx);
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
+});
+
+test("compaction watchdog restores the prior state when completion is missing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-extension-watchdog-"));
+  const previousSessionId = process.env[SESSION_ID_ENV];
+  const previousStateDir = process.env[STATE_ENV];
+  process.env[SESSION_ID_ENV] = "compaction-watchdog";
+  process.env[STATE_ENV] = root;
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: unknown) => Promise<void>) { handlers.set(name, handler); },
+    registerTool() {},
+  };
+  const ctx = { cwd: root, hasUI: false };
+  const readCompactionHeartbeat = async (predicate?: (heartbeat: Heartbeat) => boolean): Promise<Heartbeat> => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        const heartbeat = JSON.parse(await readFile(heartbeatPath("compaction-watchdog", { PI_AGENT_HUB_DIR: root }), "utf8")) as Heartbeat;
+        if (!predicate || predicate(heartbeat)) return heartbeat;
+      } catch {}
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    assert.fail("timed out waiting for compaction watchdog heartbeat");
+  };
+
+  try {
+    piAgentHubExtension(pi as unknown as Parameters<typeof piAgentHubExtension>[0]);
+    await handlers.get("session_start")?.({}, ctx);
+    t.mock.timers.tick(3_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await handlers.get("session_before_compact")?.({ reason: "manual", willRetry: false }, ctx);
+    let heartbeat = await readCompactionHeartbeat();
+    assert.equal(heartbeat.state, "running");
+
+    t.mock.timers.tick(HEARTBEAT_STALE_MS);
+    heartbeat = await readCompactionHeartbeat((item) => item.state === "waiting");
+    assert.equal(heartbeat.state, "waiting");
+
+    await handlers.get("session_before_compact")?.({ reason: "overflow", willRetry: true }, ctx);
+    await handlers.get("session_compact")?.({ reason: "overflow", willRetry: true }, ctx);
+    t.mock.timers.tick(HEARTBEAT_STALE_MS);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    heartbeat = await readCompactionHeartbeat((item) => item.state === "running");
+    assert.equal(heartbeat.state, "running");
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx);
+    t.mock.timers.reset();
+    if (previousSessionId === undefined) delete process.env[SESSION_ID_ENV];
+    else process.env[SESSION_ID_ENV] = previousSessionId;
+    if (previousStateDir === undefined) delete process.env[STATE_ENV];
+    else process.env[STATE_ENV] = previousStateDir;
+    delete (globalThis as Record<symbol, unknown>)[EXTENSION_KEY];
+  }
 });
 
 test("piAgentHubExtension appends bounded worktree guidance before parent agent turns", async () => {

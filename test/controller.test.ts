@@ -74,7 +74,7 @@ test("movement keeps errors ahead of the activity-sorted tier", () => {
   assert.equal(controller.snapshot().selectedId, "b");
 });
 
-test("movement follows newest waiting or idle activity across groups", () => {
+test("movement follows stable group order and attention-first rows", () => {
   const controller = new SessionsController({
     version: 1,
     sessions: [
@@ -86,18 +86,18 @@ test("movement follows newest waiting or idle activity across groups", () => {
     ],
   });
 
-  assert.equal(controller.snapshot().selectedId, "z-waiting");
-  controller.move(1);
-  assert.equal(controller.snapshot().selectedId, "z-idle");
+  assert.equal(controller.snapshot().selectedId, "default");
   controller.move(1);
   assert.equal(controller.snapshot().selectedId, "work-waiting");
   controller.move(1);
   assert.equal(controller.snapshot().selectedId, "work-idle");
   controller.move(1);
-  assert.equal(controller.snapshot().selectedId, "default");
+  assert.equal(controller.snapshot().selectedId, "z-waiting");
+  controller.move(1);
+  assert.equal(controller.snapshot().selectedId, "z-idle");
 });
 
-test("group priority includes nested subagent status", () => {
+test("nested subagent status stays inside its stable group", () => {
   const controller = new SessionsController({
     version: 1,
     sessions: [
@@ -107,11 +107,11 @@ test("group priority includes nested subagent status", () => {
     ],
   });
 
+  assert.equal(controller.snapshot().selectedId, "default");
+  controller.move(1);
   assert.equal(controller.snapshot().selectedId, "work");
   controller.move(1);
   assert.equal(controller.snapshot().selectedId, "worker");
-  controller.move(1);
-  assert.equal(controller.snapshot().selectedId, "default");
 });
 
 test("filter matches additional repo basenames", () => {
@@ -187,7 +187,7 @@ test("reorderSelected stays within the selected priority and activity tie", asyn
       sessions: [
         session("error", { id: "error", title: "error", order: 0 }),
         session("idle", { id: "idle-a", title: "idle-a", order: 1, lastActivityAt: 200 }),
-        session("waiting", { id: "idle-b", title: "idle-b", order: 2, lastActivityAt: 100 }),
+        session("waiting", { id: "idle-b", title: "idle-b", order: 2, lastActivityAt: 100, acknowledgedAt: 50 }),
       ],
     };
     await updateRegistry(() => registry);

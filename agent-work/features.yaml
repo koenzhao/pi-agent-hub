@@ -739,3 +739,13 @@
   created_at: '2026-08-06'
   plan_file: agent-work/history/20260807_archive-ux-002_lifecycle_section_collapse.md
   completed_at: '2026-08-07'
+- id: dashboard-scanability-010
+  status: done
+  title: Attention-first ordering
+  subtitle: Stable groups, unread attention first
+  description: Dashboard sessions needing user attention appear before running work
+    while groups keep a stable order and compaction remains visibly active.
+  priority: 2
+  created_at: '2026-08-06'
+  plan_file: agent-work/history/20260807_dashboard-scanability-010_attention_first_ordering.md
+  completed_at: '2026-08-07'

@@ -361,7 +361,7 @@ test("board groups child rows by their top-level parent and counts parent cards 
   assert.deepEqual(lane?.groups.map((group) => [group.name, group.sessions.map((row) => row.id)]), [["api", ["parent", "child"]]]);
   assert.equal(lane?.sessionsTotal, 1);
   const layout = renderSessions(model);
-  assert.match(layout.lines.map(stripAnsi).join("\n"), /api\s+·1/);
+  assert.match(layout.lines.map(stripAnsi).join("\n"), /api\s+◐1\s+·1/);
   assert.equal(layout.rowTargets.filter((target) => target?.kind === "session").length, 2);
 });
 
@@ -432,7 +432,7 @@ test("board chooses the prevalent pipeline deterministically and uses its newest
   ]);
   assert.deepEqual(model.boardHidden, { nonActive: 0 });
   assert.deepEqual(model.sections.filter((section) => section.key !== "other-active").flatMap((section) => section.groups.flatMap((group) => group.sessions.filter((row) => row.kind !== "subagent").map((row) => row.id))), ["main-old", "main-new", "main-third"]);
-  assert.deepEqual(model.sections.find((section) => section.key === "other-active")?.groups.flatMap((group) => group.sessions.map((row) => row.id)), ["alt-1", "alt-2"]);
+  assert.deepEqual(model.sections.find((section) => section.key === "other-active")?.groups.flatMap((group) => group.sessions.map((row) => row.id)), ["alt-2", "alt-1"]);
 
   const tied = buildRenderModel({ sessions: sessions.slice(0, 4), grouping: "stage", density: "all-cards", width: 120 });
   assert.equal(tied.sections[0]?.key, "discover");
@@ -705,6 +705,25 @@ test("grouping order and status counts", () => {
   assert.doesNotMatch(rendered, /1 waiting · 1 error/);
 });
 
+test("groups keep stable order and expose unacknowledged waiting counts", () => {
+  const sessions = [
+    { ...session("default-waiting", "default", "waiting"), lastActivityAt: 100 },
+    { ...session("default-idle", "default", "idle"), lastActivityAt: 300 },
+    { ...session("work-waiting", "work", "waiting"), acknowledgedAt: 50, lastActivityAt: 400 },
+    { ...session("z-waiting", "z", "waiting"), lastActivityAt: 200 },
+  ];
+  const model = buildRenderModel({ sessions, width: 120 });
+
+  assert.deepEqual(model.groups.map((group) => [group.name, group.attentionCount]), [
+    ["default", 1], ["work", 0], ["z", 1],
+  ]);
+  assert.equal(model.groups.find((group) => group.name === "default")?.sessions[0]?.needsAttention, true);
+  assert.equal(model.groups.find((group) => group.name === "work")?.sessions[0]?.needsAttention, false);
+
+  const rendered = renderSessions(buildRenderModel({ sessions, width: 40 })).lines.map(stripAnsi).join("\\n");
+  assert.match(rendered, /default.*◐1/);
+});
+
 test("groups are rendered by newest waiting or idle activity", () => {
   const model = buildRenderModel({
     sessions: [
@@ -717,7 +736,7 @@ test("groups are rendered by newest waiting or idle activity", () => {
     width: 120,
   });
 
-  assert.deepEqual(model.groups.map((group) => group.name), ["z", "work", "default"]);
+  assert.deepEqual(model.groups.map((group) => group.name), ["default", "work", "z"]);
 });
 
 test("sectioned model preserves Active and Backlog groups but flattens Archived chronologically", () => {
@@ -788,7 +807,7 @@ test("all-active dashboards suppress lifecycle section headers", () => {
   assert.doesNotMatch(renderSessions(model).lines.join("\n"), /ACTIVE/);
 });
 
-test("session order mixes waiting and idle by activity and ignores title", () => {
+test("session order puts unread waiting before running and idle rows", () => {
   const model = buildRenderModel({
     sessions: [
       { ...session("worker", "default", "idle", "zzz"), lastActivityAt: 200 },
@@ -797,7 +816,7 @@ test("session order mixes waiting and idle by activity and ignores title", () =>
     ],
     width: 120,
   });
-  assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["api", "worker", "docs"]);
+  assert.deepEqual(model.groups[0]?.sessions.map((item) => item.id), ["api", "docs", "worker"]);
 });
 
 test("narrow layout hides preview and uses readable compact footer", () => {
@@ -1085,7 +1104,7 @@ test("very long group names preserve status counts", () => {
   const lines = renderSessions(buildRenderModel({ sessions, width: 50 })).lines;
   const groupLine = lines.map(stripAnsi).find((line) => line.includes("group-") && line.includes("●1") && line.includes("◐1") && line.includes("×1"));
   assert.ok(groupLine, "expected counts to remain visible after group name truncation");
-  assert.match(groupLine!, /…\s+●1\s◐1\s×1/);
+  assert.match(groupLine!, /…\s+◐1\s●1\s◐1\s×1/);
   for (const line of lines) assert.ok(visibleWidth(line) <= 50, line);
 });
 

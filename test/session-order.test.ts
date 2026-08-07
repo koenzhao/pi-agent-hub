@@ -28,6 +28,34 @@ test("duplicate persisted orders keep registry order", () => {
   assert.deepEqual(orderedSessions(sessions).map((item) => item.id), ["b", "a", "c"]);
 });
 
+test("unacknowledged waiting sessions outrank running and acknowledged idle rows", () => {
+  const sessions = [
+    session("idle", "default", 0, "idle", 500),
+    session("running", "default", 1, "running", 400),
+    { ...session("acknowledged-waiting", "default", 2, "waiting", 300), acknowledgedAt: 50 },
+    session("unread-old", "default", 3, "waiting", 100),
+    session("unread-new", "default", 4, "waiting", 200),
+    session("error", "default", 5, "error"),
+    session("stopped", "default", 6, "stopped"),
+  ];
+
+  assert.deepEqual(orderedSessions(sessions).map((item) => item.id), [
+    "error", "unread-new", "unread-old", "running", "idle", "acknowledged-waiting", "stopped",
+  ]);
+});
+
+test("group order stays default-first and alphabetical across status changes", () => {
+  const sessions = [
+    session("z-running", "z", 0, "running"),
+    session("a-waiting", "a", 0, "waiting", 300),
+    session("default-idle", "default", 0, "idle", 100),
+  ];
+  assert.deepEqual(orderedSessions(sessions).map((item) => item.group), ["default", "a", "z"]);
+
+  const changed = sessions.map((item) => item.id === "z-running" ? { ...item, status: "error" as const } : item);
+  assert.deepEqual(orderedSessions(changed).map((item) => item.group), ["default", "a", "z"]);
+});
+
 test("active and backlog groups mix waiting and idle sessions by recent activity", () => {
   const sessions = [
     session("idle-recent", "default", 0, "idle", 300),
@@ -41,11 +69,11 @@ test("active and backlog groups mix waiting and idle sessions by recent activity
   ];
 
   assert.deepEqual(orderedSessions(sessions).map((item) => item.id), [
-    "error", "running", "starting", "idle-recent", "waiting", "stopped", "backlog-waiting", "backlog-idle",
+    "error", "waiting", "running", "starting", "idle-recent", "stopped", "backlog-waiting", "backlog-idle",
   ]);
 });
 
-test("groups are ordered by their newest waiting or idle member", () => {
+test("groups keep stable default-first alphabetical order", () => {
   const sessions = [
     session("default-idle", "default", 0, "idle", 100),
     session("work-idle", "work", 0, "idle", 200),
@@ -54,7 +82,7 @@ test("groups are ordered by their newest waiting or idle member", () => {
     session("z-idle", "z", 1, "idle", 50),
   ];
 
-  assert.deepEqual(orderedSessions(sessions).map((item) => item.id), ["z-waiting", "z-idle", "work-waiting", "work-idle", "default-idle"]);
+  assert.deepEqual(orderedSessions(sessions).map((item) => item.id), ["default-idle", "work-waiting", "work-idle", "z-waiting", "z-idle"]);
 });
 
 test("nextOrderInGroup appends after unordered siblings", () => {

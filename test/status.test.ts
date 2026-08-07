@@ -78,6 +78,17 @@ test("apply computed status persists Pi session metadata from heartbeat", () => 
   assert.equal(updated.piSessionId, "abc123");
 });
 
+test("transient compaction running heartbeat does not advance activity recency", () => {
+  const existing = now - 500;
+  const transient = applyComputedStatus(
+    session({ lastActivityAt: existing }),
+    { status: "running" },
+    now,
+    heartbeat({ state: "running", stateSince: now - 5_000 }),
+  );
+  assert.equal(transient.lastActivityAt, existing);
+});
+
 test("apply computed status preserves the latest heartbeat activity time", () => {
   const fresh = applyComputedStatus(session({ lastActivityAt: now - 2_000 }), { status: "waiting" }, now, heartbeat({ stateSince: now - 1_000 }));
   assert.equal(fresh.lastActivityAt, now - 1_000);

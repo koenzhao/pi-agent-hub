@@ -122,8 +122,8 @@ export function orderedSessionRows(sessions: RuntimeSession[], filter?: string):
     for (const child of orderedSessions(childrenByParent.get(session.id) ?? [])) addWithChildren(child);
   }
 
-  for (const parent of orderedSessions(visible.filter((session) => !isSubagentSession(session)), visible)) addWithChildren(parent);
-  for (const orphan of orderedSessions(childRows.filter((child) => !child.parentId || !visibleIds.has(child.parentId)), visible)) addWithChildren(orphan);
+  for (const parent of orderedSessions(visible.filter((session) => !isSubagentSession(session)))) addWithChildren(parent);
+  for (const orphan of orderedSessions(childRows.filter((child) => !child.parentId || !visibleIds.has(child.parentId)))) addWithChildren(orphan);
   return rows;
 }
 
