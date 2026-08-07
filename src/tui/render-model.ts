@@ -1,9 +1,10 @@
 import { ARCHIVE_PRUNE_AFTER_MS, type SessionSection } from "../core/session-bucket.js";
-import { compareGroupPriority, groupOrder, orderedSessions } from "../core/session-order.js";
+import { groupOrder, orderedSessions } from "../core/session-order.js";
 import { createSessionTreeIndex, orderedSessionRows, sessionDepth, type SessionTreeIndex } from "../core/session-tree.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";
 import type { PiAgentHubContextV1, RuntimeSession, SessionAttention, SessionStatus, WorkflowRuntimeSnapshot, WorkflowSnapshot } from "../core/types.js";
 import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
+import type { CollapsibleSection } from "./dialog.js";
 
 export interface RenderSession {
   id: string;
@@ -77,6 +78,9 @@ export interface RenderSection {
   statusCounts: StatusCounts;
   sessionsTotal: number;
   groups: RenderGroup[];
+  collapsible?: boolean;
+  collapsed?: boolean;
+  selected?: boolean;
   archiveDisclosure?: ArchiveDisclosure;
 }
 
@@ -148,6 +152,8 @@ export interface BuildRenderModelInput {
   sidePaneFocusedSlot?: number;
   archiveExpanded?: boolean;
   archiveDisclosureSelected?: boolean;
+  selectedSection?: CollapsibleSection;
+  collapsedSections?: ReadonlySet<CollapsibleSection>;
   hidePreview?: boolean;
   expandedBoardParentIds?: ReadonlySet<string>;
   expandedProjectParentIds?: ReadonlySet<string>;
@@ -169,8 +175,15 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   );
   const archive = archiveSectionRows(allRows, { expanded: input.archiveExpanded ?? false, filterActive }, allTree);
   const projectRows = visibleTreeRows(archive.rows, allRows, input.expandedProjectParentIds ?? new Set(), filterActive);
-  const visible = board ? boardProjection.rows : projectRows;
-  const selectedId = pickSelectedId(input.archiveDisclosureSelected ? allRows : visible, input.selectedId);
+  const collapsedSections = input.collapsedSections ?? new Set<CollapsibleSection>();
+  const lifecycleRows = filterActive
+    ? projectRows
+    : projectRows.filter((session) => {
+      const section = effectiveSessionLifecycle(session, allRows, allTree).section;
+      return section === "active" || !collapsedSections.has(section);
+    });
+  const visible = board ? boardProjection.rows : lifecycleRows;
+  const selectedId = pickSelectedId(input.archiveDisclosureSelected || input.selectedSection ? allRows : visible, input.selectedId);
   const sidePaneSessionIds = input.sidePaneSessionIds;
   const subagentStats = descendantSubagentStats(input.sessions, createSessionTreeIndex(input.sessions));
   const occupiedSlots = new Map<number, string>();
@@ -184,16 +197,16 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const treeExpanded = (id: string) => filterActive || (board
     ? input.expandedBoardParentIds?.has(id) === true
     : input.expandedProjectParentIds?.has(id) === true);
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), treeExpanded(session.id)));
+  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected && !input.selectedSection, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), treeExpanded(session.id)));
   const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), treeExpanded(session.id)));
   const groups = groupsForSessions(mapped);
   const sections = board
     ? lanesForBoard(mapped, boardProjection)
-    : sectionsForSessions(mapped, allMapped, archive.showDisclosure ? {
+    : sectionsForSessions(mapped, allMapped, archive.showDisclosure && !collapsedSections.has("archived") ? {
       expanded: input.archiveExpanded ?? false,
       hiddenParents: archive.hiddenParents,
       selected: input.archiveDisclosureSelected ?? false,
-    } : undefined);
+    } : undefined, collapsedSections, input.selectedSection, filterActive);
 
   const compactFooter = input.width < 90;
   const selected = (board ? mapped : allMapped).find((session) => session.id === selectedId);
@@ -443,7 +456,7 @@ function renderGroups(sessions: RenderSession[], groupName: (session: RenderSess
     groupsByName.set(name, group);
   }
   return [...groupsByName.entries()]
-    .sort(([a, aSessions], [b, bSessions]) => compareGroupPriority(aSessions, bSessions) || groupOrder(a, b))
+    .sort(([a], [b]) => groupOrder(a, b))
     .map(([name, groupSessions]) => ({
       name,
       statusCounts: countRenderSessions(groupSessions),
@@ -451,20 +464,31 @@ function renderGroups(sessions: RenderSession[], groupName: (session: RenderSess
     } satisfies RenderGroup));
 }
 
-function sectionsForSessions(sessions: RenderSession[], allSessions: RenderSession[], archiveDisclosure?: ArchiveDisclosure): RenderSection[] {
+function sectionsForSessions(
+  sessions: RenderSession[],
+  allSessions: RenderSession[],
+  archiveDisclosure?: ArchiveDisclosure,
+  collapsedSections: ReadonlySet<CollapsibleSection> = new Set(),
+  selectedSection?: CollapsibleSection,
+  filterActive = false,
+): RenderSection[] {
   const titles: Record<SessionSection, string> = { active: "ACTIVE", backlog: "BACKLOG", archived: "ARCHIVED" };
   return (["active", "backlog", "archived"] as const).flatMap((key) => {
     const sectionSessions = sessions.filter((session) => session.section === key);
     const allSectionSessions = allSessions.filter((session) => session.section === key);
     if (!allSectionSessions.length) return [];
+    const collapsed = key !== "active" && collapsedSections.has(key);
     return [{
       key,
       title: titles[key],
       statusCounts: countRenderSessions(allSectionSessions),
       sessionsTotal: allSectionSessions.length,
-      groups: key === "archived"
+      groups: collapsed && !filterActive ? [] : key === "archived"
         ? [{ name: "", statusCounts: countRenderSessions(allSectionSessions), sessions: sectionSessions }]
         : groupsForSessions(sectionSessions),
+      collapsible: key !== "active",
+      collapsed,
+      selected: selectedSection === key,
       ...(key === "archived" && archiveDisclosure ? { archiveDisclosure } : {}),
     } satisfies RenderSection];
   });

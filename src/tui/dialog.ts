@@ -25,9 +25,12 @@ export type SidePaneActionResult =
 export type CloseSidePaneResult = { kind: "closed" } | { kind: "unavailable" };
 export type FocusSidePaneResult = { kind: "focused" } | { kind: "unavailable" };
 
+export type CollapsibleSection = "backlog" | "archived";
+
 export interface SessionsViewState {
   grouping: "project" | "stage";
   density: "compact" | "all-cards";
+  collapsedSections?: CollapsibleSection[];
 }
 
 export interface SessionsViewActions {

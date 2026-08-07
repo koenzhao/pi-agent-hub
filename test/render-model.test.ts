@@ -893,10 +893,51 @@ test("backlog and archived status icons are muted while Active stays colored", (
     assert.doesNotMatch(row(title), /\u001b\[38;2;1;2;3m×/);
   }
   for (const section of ["BACKLOG", "ARCHIVED"]) {
-    const heading = lines.find((line) => stripAnsi(line).includes(`── ${section}`)) ?? "";
+    const heading = lines.find((line) => stripAnsi(line).includes(section)) ?? "";
     assert.match(heading, /\u001b\[38;2;4;5;6m×1/);
     assert.doesNotMatch(heading, /\u001b\[38;2;1;2;3m×1/);
   }
+});
+
+test("independently collapses lifecycle sections while preserving counts", () => {
+  const sessions = [
+    session("active", "default", "running", "active"),
+    { ...session("backlog", "default", "idle", "backlog"), bucket: "backlog" as const },
+    { ...session("archived", "default", "stopped", "archived"), bucket: "archived" as const, bucketChangedAt: 1 },
+  ];
+  const model = buildRenderModel({ sessions, selectedId: "active", collapsedSections: new Set(["backlog"]), width: 100 });
+  assert.equal(model.sections.find((section) => section.key === "backlog")?.collapsed, true);
+  assert.equal(model.sections.find((section) => section.key === "backlog")?.sessionsTotal, 1);
+  assert.equal(model.sections.find((section) => section.key === "backlog")?.groups.length, 0);
+  assert.equal(model.sections.find((section) => section.key === "archived")?.collapsed, false);
+  const text = renderSessions(model).lines.map(stripAnsi).join("\n");
+  assert.match(text, /▸ BACKLOG/);
+  assert.doesNotMatch(text, /backlog/);
+  assert.match(text, /▾ ARCHIVED[\s\S]*- archived/);
+});
+
+test("lifecycle headers keep a shared title column", () => {
+  const sessions = [
+    session("active", "default", "running", "active"),
+    { ...session("backlog", "default", "idle", "backlog"), bucket: "backlog" as const },
+  ];
+  const expanded = renderSessions(buildRenderModel({ sessions, width: 100 })).lines.map(stripAnsi);
+  const active = expanded.find((line) => line.includes("ACTIVE")) ?? "";
+  const backlog = expanded.find((line) => line.includes("BACKLOG")) ?? "";
+  assert.equal(active.indexOf("ACTIVE"), backlog.indexOf("BACKLOG"));
+  assert.match(active, /── ACTIVE/);
+  assert.match(backlog, /─▾ BACKLOG/);
+
+  const collapsed = renderSessions(buildRenderModel({ sessions, collapsedSections: new Set(["backlog"]), width: 100 })).lines.map(stripAnsi).join("\n");
+  assert.match(collapsed, /─▸ BACKLOG/);
+});
+
+test("filter reveals rows in collapsed lifecycle sections without changing state", () => {
+  const archived = { ...session("archived", "default", "stopped", "needle"), bucket: "archived" as const, bucketChangedAt: 1 };
+  const model = buildRenderModel({ sessions: [archived], selectedId: "archived", collapsedSections: new Set(["archived"]), filter: "needle", width: 100 });
+  assert.equal(model.sections[0]?.collapsed, true);
+  assert.equal(model.sections[0]?.groups[0]?.sessions[0]?.title, "needle");
+  assert.match(renderSessions(model).lines.map(stripAnsi).join("\n"), /needle/);
 });
 
 test("preview renders captured tmux output with empty state", () => {

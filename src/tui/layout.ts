@@ -7,7 +7,8 @@ import { darkTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken,
 export type SessionListTarget =
   | { kind: "session"; id: string }
   | { kind: "session-continuation"; id: string }
-  | { kind: "archive-disclosure" };
+  | { kind: "archive-disclosure" }
+  | { kind: "section-header"; section: "backlog" | "archived" };
 
 export interface SessionsLayout {
   lines: string[];
@@ -257,7 +258,14 @@ function renderSessionList(model: RenderModel, width: number, styles: LayoutStyl
     const mutedStatuses = section.key !== "active";
     const headingRight = board ? styles.dim(`·${section.sessionsTotal}`) : formatStatusCounts(section.statusCounts, styles, mutedStatuses);
     const sectionHeadingIndex = lines.length;
-    pushLine(sectionHeader(section.title, headingRight, width, styles));
+    const headerTarget = section.collapsible && (section.key === "backlog" || section.key === "archived")
+      ? { kind: "section-header" as const, section: section.key as "backlog" | "archived" }
+      : undefined;
+    if (section.selected) {
+      selectedIndex = lines.length;
+      selectedEndIndex = lines.length;
+    }
+    pushLine(sectionHeader(section.title, headingRight, width, styles, section.collapsible ? section.collapsed : undefined, section.selected), headerTarget);
     firstSection = false;
     for (const [groupIndex, group] of section.groups.entries()) {
       if (model.density === "all-cards" && groupIndex) pushLine("");
@@ -856,8 +864,11 @@ function lifecycleLine(session: RenderSession): string | undefined {
   return `${session.section} · U restore`;
 }
 
-function sectionHeader(title: string, right: string, width: number, styles: LayoutStyles): string {
-  const left = styles.border(`── ${title} `);
+function sectionHeader(title: string, right: string, width: number, styles: LayoutStyles, collapsed?: boolean, selected = false): string {
+  const prefix = collapsed === undefined
+    ? styles.border("──")
+    : `${selected ? styles.accent("▌") : styles.border("─")}${styles.muted(collapsed ? "▸" : "▾")}`;
+  const left = styles.border(`${prefix} ${title} `);
   return twoColumn(left, right, width);
 }
 

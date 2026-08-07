@@ -729,3 +729,13 @@
   discovered_from: dashboard-scanability-008
   completed_at: '2026-08-04'
   plan_file: agent-work/history/20260804_metadata-redesign-001_session_context_redesign.md
+- id: archive-ux-002
+  status: done
+  title: Collapse lifecycle sections
+  subtitle: Hide Backlog and Archived rows
+  description: User can independently collapse Backlog and Archived dashboard sections
+    while preserving counts, filtering, and selection behavior.
+  priority: 2
+  created_at: '2026-08-06'
+  plan_file: agent-work/history/20260807_archive-ux-002_lifecycle_section_collapse.md
+  completed_at: '2026-08-07'

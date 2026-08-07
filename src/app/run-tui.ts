@@ -192,9 +192,13 @@ export async function runTui(): Promise<void> {
   let historyCwds = rankedRepoCwds((await loadRepoHistory()).repos);
   const savedViewState = await readJsonOr<unknown>(uiStatePath(), {});
   const saved = savedViewState && typeof savedViewState === "object" ? savedViewState as Partial<SessionsViewState> : {};
+  const collapsedSections = Array.isArray(saved.collapsedSections)
+    ? [...new Set(saved.collapsedSections.filter((section): section is "backlog" | "archived" => section === "backlog" || section === "archived"))]
+    : [];
   const initialViewState: SessionsViewState = {
     grouping: saved.grouping === "stage" ? "stage" : "project",
     density: saved.density === "all-cards" ? "all-cards" : "compact",
+    collapsedSections,
   };
   const skillCountCache = new Map<string, number>();
   const skillCountLoads = new Set<string>();

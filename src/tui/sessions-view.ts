@@ -10,6 +10,7 @@ import { renderSessions, type SessionListTarget } from "./layout.js";
 import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
+import type { CollapsibleSection, SessionsViewState } from "./dialog.js";
 import { errorMessage, isPromise, type CloseSidePaneResult, type DialogContext, type FocusSidePaneResult, type SessionDialog, type SessionsViewActions, type SidePaneActionResult } from "./dialog.js";
 import { handlePromptInput, openFilterPrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
 import { isEnterKey } from "./text-input.js";
@@ -36,6 +37,8 @@ export class SessionsView implements Component {
   private busy = false;
   private archiveExpanded = false;
   private archiveDisclosureSelected = false;
+  private selectedSection: CollapsibleSection | undefined;
+  private collapsedSections = new Set<CollapsibleSection>();
   private rowTargets: (SessionListTarget | undefined)[] = [];
   private listWidth = 0;
   private listScrollTop = 0;
@@ -46,6 +49,7 @@ export class SessionsView implements Component {
   constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {
     this.grouping = actions.initialViewState?.grouping ?? "project";
     this.density = actions.initialViewState?.density ?? "compact";
+    this.collapsedSections = new Set(actions.initialViewState?.collapsedSections ?? []);
   }
 
   setTheme(theme: SessionsTheme): void {
@@ -150,10 +154,10 @@ export class SessionsView implements Component {
       return;
     }
 
-    if (this.archiveDisclosureSelected) {
+    if (this.archiveDisclosureSelected || this.selectedSection) {
       if (matchesKey(data, Key.down) || data === "j") this.moveSelection(1);
       else if (matchesKey(data, Key.up) || data === "k") this.moveSelection(-1);
-      else if (isEnterKey(data)) this.toggleArchiveDisclosure();
+      else if (isEnterKey(data)) this.selectedSection ? this.toggleSection(this.selectedSection) : this.toggleArchiveDisclosure();
       else if (matchesKey(data, Key.slash)) this.startFilter();
       else if (data === "n") this.startNewDialog();
       else if (data === "i") this.detailsExpanded = !this.detailsExpanded;
@@ -279,6 +283,8 @@ export class SessionsView implements Component {
       sidePaneFocusedSlot: this.actions.sidePaneFocusedSlot?.(),
       archiveExpanded: this.archiveExpanded,
       archiveDisclosureSelected: this.archiveDisclosureSelected,
+      selectedSection: this.selectedSection,
+      collapsedSections: this.collapsedSections,
       hidePreview: Boolean(sidePaneSessionIds?.size),
       expandedBoardParentIds: this.expandedBoardParentIds,
       expandedProjectParentIds: this.expandedProjectParentIds,
@@ -530,22 +536,29 @@ export class SessionsView implements Component {
       return;
     }
     const previousId = this.controller.snapshot().selectedId;
-    if (target.kind === "archive-disclosure") this.archiveDisclosureSelected = true;
-    else {
+    if (target.kind === "archive-disclosure") {
+      this.archiveDisclosureSelected = true;
+      this.selectedSection = undefined;
+    } else if (target.kind === "section-header") {
+      this.selectedSection = target.section;
+      this.archiveDisclosureSelected = false;
+    } else {
       if (!this.controller.selectSession(target.id)) {
         this.lastMouseClick = undefined;
         return;
       }
       this.archiveDisclosureSelected = false;
+      this.selectedSection = undefined;
       if (target.id !== previousId) this.actions.selectionChanged?.();
     }
-    const targetKey = target.kind === "archive-disclosure" ? target.kind : `session:${target.id}`;
+    const targetKey = target.kind === "archive-disclosure" ? target.kind : target.kind === "section-header" ? `section:${target.section}` : `session:${target.id}`;
     const now = this.actions.now?.() ?? Date.now();
     const elapsed = this.lastMouseClick ? now - this.lastMouseClick.at : undefined;
     const doubleClick = this.lastMouseClick?.target === targetKey && elapsed !== undefined && elapsed >= 0 && elapsed <= DOUBLE_CLICK_MS;
     this.lastMouseClick = doubleClick ? undefined : { target: targetKey, at: now };
     if (doubleClick) {
       if (target.kind === "archive-disclosure") this.toggleArchiveDisclosure();
+      else if (target.kind === "section-header") this.toggleSection(target.section);
       else this.attachSelected();
     }
   }
@@ -671,12 +684,20 @@ export class SessionsView implements Component {
     const previousId = this.controller.snapshot().selectedId;
     const index = Math.max(0, targets.findIndex((target) => target.kind === "archive-disclosure"
       ? this.archiveDisclosureSelected
-      : !this.archiveDisclosureSelected && target.id === previousId));
+      : target.kind === "section-header"
+        ? this.selectedSection === target.section
+        : !this.archiveDisclosureSelected && !this.selectedSection && target.id === previousId));
     const next = targets[(index + delta + targets.length) % targets.length];
     if (!next) return;
-    if (next.kind === "archive-disclosure") this.archiveDisclosureSelected = true;
-    else {
+    if (next.kind === "archive-disclosure") {
+      this.archiveDisclosureSelected = true;
+      this.selectedSection = undefined;
+    } else if (next.kind === "section-header") {
       this.archiveDisclosureSelected = false;
+      this.selectedSection = next.section;
+    } else {
+      this.archiveDisclosureSelected = false;
+      this.selectedSection = undefined;
       this.controller.selectSession(next.id);
       if (next.id !== previousId) this.actions.selectionChanged?.();
     }
@@ -689,8 +710,21 @@ export class SessionsView implements Component {
     const allRows = orderedSessionRows(snapshot.sessions, filterActive ? snapshot.filter : undefined);
     const archive = archiveSectionRows(allRows, { expanded: this.archiveExpanded, filterActive });
     const visibleRows = visibleTreeRows(archive.rows, allRows, this.expandedProjectParentIds, filterActive);
-    const targets: SessionListTarget[] = visibleRows.map((row) => ({ kind: "session", id: row.id }));
-    if (archive.showDisclosure) targets.push({ kind: "archive-disclosure" });
+    const tree = createSessionTreeIndex(allRows);
+    const sectionOf = (row: typeof allRows[number]) => effectiveSessionLifecycle(row, allRows, tree).section;
+    const hasLifecycleSections = allRows.some((row) => sectionOf(row) !== "active");
+    if (!hasLifecycleSections) return visibleRows.map((row) => ({ kind: "session", id: row.id }));
+    const targets: SessionListTarget[] = [];
+    for (const section of ["active", "backlog", "archived"] as const) {
+      const allSectionRows = allRows.filter((row) => sectionOf(row) === section);
+      if (!allSectionRows.length) continue;
+      const sectionRows = visibleRows.filter((row) => sectionOf(row) === section);
+      if (section !== "active") targets.push({ kind: "section-header", section });
+      if (section === "active" || !this.collapsedSections.has(section) || filterActive) {
+        targets.push(...sectionRows.map((row) => ({ kind: "session" as const, id: row.id })));
+        if (section === "archived" && archive.showDisclosure && !this.collapsedSections.has("archived")) targets.push({ kind: "archive-disclosure" });
+      }
+    }
     return targets;
   }
 
@@ -698,14 +732,27 @@ export class SessionsView implements Component {
     const targets = this.visibleListTargets();
     if (!targets.length) {
       this.archiveDisclosureSelected = false;
+      this.selectedSection = undefined;
       return;
     }
     if (this.archiveDisclosureSelected) {
       if (targets.some((target) => target.kind === "archive-disclosure")) return;
       this.archiveDisclosureSelected = false;
     }
+    if (this.selectedSection && targets.some((target) => target.kind === "section-header" && target.section === this.selectedSection)) return;
     const selectedId = this.controller.snapshot().selectedId;
     if (targets.some((target) => target.kind === "session" && target.id === selectedId)) return;
+    const snapshot = this.controller.snapshot();
+    const allRows = orderedSessionRows(snapshot.sessions, snapshot.filter?.trim() ? snapshot.filter : undefined);
+    const tree = createSessionTreeIndex(allRows);
+    const selectedRow = allRows.find((row) => row.id === selectedId);
+    if (selectedRow && !snapshot.filter?.trim()) {
+      const section = effectiveSessionLifecycle(selectedRow, allRows, tree).section;
+      if (section !== "active" && this.collapsedSections.has(section)) {
+        this.selectedSection = section;
+        return;
+      }
+    }
     const boardParentId = this.topLevelBoardParentId(selectedId);
     if (boardParentId && targets.some((target) => target.kind === "session" && target.id === boardParentId)) {
       if (this.controller.selectSession(boardParentId) && boardParentId !== selectedId) this.actions.selectionChanged?.();
@@ -717,6 +764,13 @@ export class SessionsView implements Component {
 
   private toggleArchiveDisclosure() {
     this.archiveExpanded = !this.archiveExpanded;
+    this.normalizeListSelection();
+  }
+
+  private toggleSection(section: CollapsibleSection) {
+    if (this.collapsedSections.has(section)) this.collapsedSections.delete(section);
+    else this.collapsedSections.add(section);
+    this.saveViewState();
     this.normalizeListSelection();
   }
 
@@ -786,12 +840,18 @@ export class SessionsView implements Component {
     this.setSelectedSubagents(!this.expandedBoardParentIds.has(parentId));
   }
 
+  private saveViewState() {
+    const state: SessionsViewState = { grouping: this.grouping, density: this.density };
+    if (this.collapsedSections.size) state.collapsedSections = [...this.collapsedSections];
+    this.actions.saveViewState?.(state);
+  }
+
   private toggleDensity() {
     this.clearPendingRestart();
     this.clearFlash();
     this.message = undefined;
     this.density = this.density === "compact" ? "all-cards" : "compact";
-    this.actions.saveViewState?.({ grouping: this.grouping, density: this.density });
+    this.saveViewState();
   }
 
   private toggleGrouping() {
@@ -800,7 +860,8 @@ export class SessionsView implements Component {
     this.message = undefined;
     this.grouping = this.grouping === "project" ? "stage" : "project";
     this.archiveDisclosureSelected = false;
-    this.actions.saveViewState?.({ grouping: this.grouping, density: this.density });
+    this.selectedSection = undefined;
+    this.saveViewState();
     const previousId = this.controller.snapshot().selectedId;
     if (this.grouping !== "stage") {
       this.normalizeListSelection();

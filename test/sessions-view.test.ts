@@ -964,6 +964,50 @@ test("double-click opens the clicked live session", () => {
   assert.deepEqual(switched, ["pi-agent-hub-docs"]);
 });
 
+test("section headers collapse independently and persist their state", () => {
+  const sessions = [
+    session("active", "active"),
+    { ...session("backlog", "backlog"), bucket: "backlog" as const },
+    { ...session("archived", "archived"), bucket: "archived" as const, bucketChangedAt: 1 },
+  ];
+  const saved: SessionsViewState[] = [];
+  const controller = new SessionsController({ version: 1, sessions });
+  const view = new SessionsView(controller, () => {}, { saveViewState: (state) => saved.push(state) });
+
+  view.handleInput("j");
+  assert.match(stripAnsi(view.render(80).join("\n")), /▌▾ BACKLOG/);
+  view.handleInput("\r");
+  const collapsed = stripAnsi(view.render(80).join("\n"));
+  assert.match(collapsed, /▸ BACKLOG/);
+  assert.doesNotMatch(collapsed, /\n.*backlog/);
+  assert.deepEqual(saved.at(-1), { grouping: "project", density: "compact", collapsedSections: ["backlog"] });
+
+  view.handleInput("j");
+  view.handleInput("\r");
+  const both = stripAnsi(view.render(80).join("\n"));
+  assert.match(both, /▸ BACKLOG/);
+  assert.match(both, /▸ ARCHIVED/);
+  assert.deepEqual(saved.at(-1), { grouping: "project", density: "compact", collapsedSections: ["backlog", "archived"] });
+});
+
+test("section header selection blocks session actions and Enter reopens it", () => {
+  const events: string[] = [];
+  const sessions = [
+    session("active", "active"),
+    { ...session("backlog", "backlog"), bucket: "backlog" as const },
+  ];
+  const controller = new SessionsController({ version: 1, sessions });
+  const view = new SessionsView(controller, () => {}, {
+    attachOutsideTmux: () => { events.push("attach"); },
+    archiveSession: () => { events.push("archive"); },
+    reorderSelected: () => { events.push("reorder"); },
+  });
+  view.handleInput("j");
+  for (const key of ["A", "J", "\r"]) view.handleInput(key);
+  assert.deepEqual(events, []);
+  assert.match(stripAnsi(view.render(80).join("\n")), /▸ BACKLOG/);
+});
+
 test("archive disclosure toggles with keyboard and blocks stale session actions", () => {
   const archived = Array.from({ length: 7 }, (_, index) => ({
     ...session(`archive-${index}`, `archive-${index}`),
