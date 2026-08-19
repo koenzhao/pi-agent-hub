@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+import { isErrno } from "../core/atomic-json.js";
 import type { TmuxChrome } from "../core/chrome.js";
 import {
   reconcileSidebarReturnBinding,
@@ -77,6 +79,7 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
   let stopPromise: Promise<void> | undefined;
   let started = false;
   let stopped = false;
+  let bindingFingerprint: string | undefined;
   const activeIntents = new Set<Promise<unknown>>();
 
   const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -109,13 +112,32 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
     dashboardStatusVisible = visible;
   };
 
-  const reconcileBinding = (desired: boolean, ownPane: string) => reconcileSidebarReturnBinding({
-    desired,
-    dashboardSession: deps.dashboardSession,
-    sidebarPane: ownPane,
-    stateDir: deps.sidebarBindingStateDir,
-    switchStateDir: deps.switchBindingStateDir,
-  }, exec);
+  const bindingStateFingerprint = async (desired: boolean, ownPane: string): Promise<string> => {
+    const fileFingerprint = async (dir: string | undefined) => {
+      if (!dir) return "-";
+      try {
+        const info = await stat(`${dir}/active.json`);
+        return `${info.mtimeMs}:${info.size}`;
+      } catch (error) {
+        if (isErrno(error, "ENOENT")) return "-";
+        throw error;
+      }
+    };
+    return [desired ? "1" : "0", ownPane, await fileFingerprint(deps.sidebarBindingStateDir), await fileFingerprint(deps.switchBindingStateDir)].join("|");
+  };
+
+  const reconcileBinding = async (desired: boolean, ownPane: string, force = false) => {
+    const fingerprint = await bindingStateFingerprint(desired, ownPane);
+    if (!force && fingerprint === bindingFingerprint) return;
+    await reconcileSidebarReturnBinding({
+      desired,
+      dashboardSession: deps.dashboardSession,
+      sidebarPane: ownPane,
+      stateDir: deps.sidebarBindingStateDir,
+      switchStateDir: deps.switchBindingStateDir,
+    }, exec);
+    bindingFingerprint = await bindingStateFingerprint(desired, ownPane);
+  };
 
   const syncFooters = async (previous: readonly string[], next: readonly string[]) => {
     for (const name of previous) {
@@ -130,17 +152,20 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
     const ownPane = deps.ownPane();
     let next = [...EMPTY_SLOTS];
     let nextFocusedSlot: SidePaneSlot | undefined;
+    let ownTitle: string | undefined;
     if (ownPane) {
       const status = await sidePaneStatus({ ownPane }, exec);
       next = status.slots;
       nextFocusedSlot = status.activeSlot;
+      ownTitle = status.ownTitle;
       if (status.slots.some(Boolean) && status.ownWidth !== undefined && status.windowWidth !== undefined) {
         const repairWidth = sidebarRepairWidth(status.ownWidth, status.windowWidth);
         if (repairWidth !== undefined) await resizePaneWidth(ownPane, repairWidth, exec);
       }
       for (const [index, paneId] of status.paneIds.entries()) {
         const tmuxSession = status.slots[index];
-        if (tmuxSession && paneId) await setPaneTitle(paneId, `[${index + 1}] ${titleFor(tmuxSession) ?? tmuxSession}`, exec);
+        const desiredTitle = tmuxSession ? `[${index + 1}] ${titleFor(tmuxSession) ?? tmuxSession}` : undefined;
+        if (desiredTitle && paneId && status.titles[index] !== desiredTitle) await setPaneTitle(paneId, desiredTitle, exec);
       }
     }
     const changed = !sameSlots(slots, next) || focusedSlot !== nextFocusedSlot;
@@ -149,8 +174,8 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
     if (ownPane && hadSidePanes !== hasSidePanes) {
       await setDashboardStatusVisible(!hasSidePanes);
       await setWindowPaneBorderStatus(ownPane, hasSidePanes, hasSidePanes ? deps.currentChrome() : undefined, exec);
-      if (hasSidePanes) await setPaneTitle(ownPane, "", exec);
     }
+    if (ownPane && hasSidePanes && ownTitle !== undefined && ownTitle !== "") await setPaneTitle(ownPane, "", exec);
     if (ownPane) await reconcileBinding(hasSidePanes, ownPane);
     await syncFooters(
       slots.filter((session): session is string => Boolean(session)),
@@ -184,13 +209,17 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
     });
   };
 
+  const withPausedPresence = async <T>(operation: () => Promise<T>): Promise<T> => {
+    await pausePresence();
+    try { return await serialize(operation); }
+    finally { resumePresence(); }
+  };
+
   const update = async (
     sessionId: string,
     mutate: (target: string, ownPane: string) => Promise<SidePaneResult>,
   ): Promise<SidePaneResult> => {
-    await pausePresence();
-    try {
-      return await serialize(async () => {
+    return withPausedPresence(async () => {
         if (stopped) throw new Error("dashboard stopped");
         const session = sessionById(sessionId);
         if (!session) throw new Error("session not found");
@@ -231,9 +260,6 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
         }
         return result;
       });
-    } finally {
-      resumePresence();
-    }
   };
 
   const syncOpenSessionChrome = () => {
@@ -267,20 +293,13 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
 
     close(slot) {
       if (stopped) return Promise.resolve({ kind: "unavailable" });
-      return trackIntent((async () => {
-        await pausePresence();
-        try {
-          return await serialize(async () => {
+      return trackIntent(withPausedPresence(async () => {
             const ownPane = deps.ownPane();
             if (!ownPane) throw new Error("side pane needs tmux — run pi-hub");
             const result = await closeSidePaneSlot({ ownPane, slot, titleFor }, exec);
             if (await refreshPresence()) deps.render();
             return result;
-          });
-        } finally {
-          resumePresence();
-        }
-      })());
+          }));
     },
 
     focus(slot) {
@@ -293,10 +312,7 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
     },
 
     handoff(tmuxSession) {
-      return trackIntent((async () => {
-        await pausePresence();
-        try {
-          await serialize(async () => {
+      return trackIntent(withPausedPresence(async () => {
             if (stopped) return;
             const session = sessionByTmux(tmuxSession);
             const ownPane = deps.ownPane();
@@ -318,11 +334,7 @@ export function createSidePaneLifecycle(deps: SidePaneLifecycleDependencies): Si
               },
             }, exec);
             if (ownPane && await closeSidePaneShowing({ target: tmuxSession, ownPane }, exec)) await refreshPresence();
-          });
-        } finally {
-          resumePresence();
-        }
-      })());
+      }));
     },
 
     refreshPanelChrome() {

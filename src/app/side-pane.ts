@@ -25,6 +25,8 @@ export interface SidePaneStatus {
   activeSlot?: SidePaneSlot;
   ownWidth?: number;
   windowWidth?: number;
+  ownTitle?: string;
+  titles: (string | undefined)[];
 }
 
 interface SidePaneWindow {
@@ -167,9 +169,11 @@ export async function sidePaneStatus(options: { ownPane: string }, exec: TmuxExe
   return {
     slots,
     paneIds,
+    titles: ALL_SLOTS.map((slot) => inspected.slots.get(slot)?.pane.title),
     ...(activeSlot ? { activeSlot } : {}),
     ownWidth: inspected.own?.width,
     windowWidth: inspected.own?.windowWidth,
+    ownTitle: inspected.own?.title,
   };
 }
 

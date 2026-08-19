@@ -1,7 +1,7 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { createTextInput, editTextInput, isEnterKey, renderTextInput, type TextInputState } from "./text-input.js";
 import { styleToken, type SessionsTheme } from "./theme.js";
-import type { DialogContext } from "./dialog.js";
+import type { PromptDialogContext } from "./dialog.js";
 
 export interface PromptDialog {
   kind: "prompt";
@@ -11,14 +11,14 @@ export interface PromptDialog {
   targetId?: string;
 }
 
-export function openFilterPrompt(ctx: DialogContext): PromptDialog | undefined {
+export function openFilterPrompt(ctx: PromptDialogContext): PromptDialog | undefined {
   if (ctx.controller.snapshot().registry.sessions.length === 0) return undefined;
   const draft = createTextInput(ctx.controller.snapshot().filter ?? "");
   setFilter(ctx, draft.value);
   return { kind: "prompt", purpose: "filter", draft };
 }
 
-export function openSendPrompt(ctx: DialogContext): PromptDialog | undefined {
+export function openSendPrompt(ctx: PromptDialogContext): PromptDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   if (selected.kind === "subagent") {
@@ -36,7 +36,7 @@ export function openSendPrompt(ctx: DialogContext): PromptDialog | undefined {
   return { kind: "prompt", purpose: "send", targetId: selected.id, draft: createTextInput() };
 }
 
-export function handlePromptInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
+export function handlePromptInput(dialog: PromptDialog, data: string, ctx: PromptDialogContext): PromptDialog | undefined {
   switch (dialog.purpose) {
     case "filter": return handleFilterInput(dialog, data, ctx);
     case "send": return handleSendInput(dialog, data, ctx);
@@ -47,7 +47,7 @@ export function promptFilterValue(dialog: PromptDialog | undefined): string | un
   return dialog?.purpose === "filter" ? dialog.draft.value : undefined;
 }
 
-export function promptFooter(dialog: PromptDialog, ctx: DialogContext): string {
+export function promptFooter(dialog: PromptDialog, ctx: PromptDialogContext): string {
   const now = ctx.now();
   switch (dialog.purpose) {
     case "filter": return filterFooter(dialog.draft, now, ctx.theme);
@@ -55,7 +55,7 @@ export function promptFooter(dialog: PromptDialog, ctx: DialogContext): string {
   }
 }
 
-function handleFilterInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
+function handleFilterInput(dialog: PromptDialog, data: string, ctx: PromptDialogContext): PromptDialog | undefined {
   if (matchesKey(data, Key.escape)) {
     setFilter(ctx, undefined);
     return undefined;
@@ -70,13 +70,13 @@ function handleFilterInput(dialog: PromptDialog, data: string, ctx: DialogContex
   return { ...dialog, draft: edited };
 }
 
-function setFilter(ctx: DialogContext, value: string | undefined): void {
+function setFilter(ctx: PromptDialogContext, value: string | undefined): void {
   const previousId = ctx.controller.snapshot().selectedId;
   ctx.controller.setFilter(value);
   if (ctx.controller.snapshot().selectedId !== previousId) ctx.actions.selectionChanged?.();
 }
 
-function handleSendInput(dialog: PromptDialog, data: string, ctx: DialogContext): PromptDialog | undefined {
+function handleSendInput(dialog: PromptDialog, data: string, ctx: PromptDialogContext): PromptDialog | undefined {
   if (matchesKey(data, Key.escape)) {
     ctx.setMessage(undefined);
     return undefined;
@@ -99,7 +99,7 @@ function handleSendInput(dialog: PromptDialog, data: string, ctx: DialogContext)
   return { ...dialog, draft: edited, error: undefined };
 }
 
-function sendTargetTitle(dialog: PromptDialog, ctx: DialogContext): string {
+function sendTargetTitle(dialog: PromptDialog, ctx: PromptDialogContext): string {
   return ctx.controller.snapshot().registry.sessions.find((session) => session.id === dialog.targetId)?.title ?? "session";
 }
 

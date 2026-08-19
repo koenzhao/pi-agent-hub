@@ -964,6 +964,36 @@ test("double-click opens the clicked live session", () => {
   assert.deepEqual(switched, ["pi-agent-hub-docs"]);
 });
 
+test("navigation follows the shared projection across lifecycle sections and subagents", () => {
+  const parent = session("active", "active");
+  const child = { ...session("child", "child"), kind: "subagent" as const, parentId: "active", agentName: "child" };
+  const backlog = { ...session("backlog", "backlog"), bucket: "backlog" as const };
+  const archived = { ...session("archived", "archived"), bucket: "archived" as const };
+  const controller = new SessionsController({ version: 1, sessions: [parent, child, backlog, archived] });
+  const view = new SessionsView(controller, () => {});
+
+  // The default project tree is collapsed, so navigation starts on the parent.
+  view.render(100);
+  assert.equal(controller.snapshot().selectedId, "active");
+  view.handleInput("j"); // backlog header
+  assert.equal(controller.snapshot().selectedId, "active");
+  view.handleInput("j"); // backlog row
+  assert.equal(controller.snapshot().selectedId, "backlog");
+  view.handleInput("j"); // archived header
+  assert.equal(controller.snapshot().selectedId, "backlog");
+  view.handleInput("j"); // archived row
+  assert.equal(controller.snapshot().selectedId, "archived");
+  view.handleInput("k");
+  assert.equal(controller.snapshot().selectedId, "archived");
+
+  view.handleInput("S");
+  view.render(100);
+  assert.equal(controller.snapshot().selectedId, "active");
+  assert.doesNotMatch(stripAnsi(view.render(100).join("\\n")), /child/);
+  view.handleInput(" ");
+  assert.match(stripAnsi(view.render(100).join("\\n")), /child/);
+});
+
 test("section headers collapse independently and persist their state", () => {
   const sessions = [
     session("active", "active"),

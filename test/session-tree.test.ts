@@ -124,3 +124,14 @@ test("sessionCascadeIds preserves generic parent links insertion and cycle membe
   assert.deepEqual([...sessionCascadeIds(rows, "root")], ["root", "main-child", "nested"]);
   assert.deepEqual([...sessionCascadeIds(rows, "cycle-a")], ["cycle-a", "cycle-b"]);
 });
+
+test("sessionCascadeIds handles deep and missing-parent cascades", () => {
+  const rows = [session("root")];
+  for (let index = 1; index <= 100; index += 1) {
+    rows.push(session(`child-${index}`, { parentId: index === 1 ? "root" : `child-${index - 1}` }));
+  }
+  rows.push(session("orphan", { parentId: "missing" }));
+
+  assert.equal(sessionCascadeIds(rows, "root").size, 101);
+  assert.deepEqual([...sessionCascadeIds(rows, "missing")], ["missing", "orphan"]);
+});

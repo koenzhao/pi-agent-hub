@@ -1,6 +1,6 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { createTextInput, editTextInput, isEnterKey } from "./text-input.js";
-import { errorMessage, isPromise, type DialogContext } from "./dialog.js";
+import { errorMessage, isPromise, type PickerDialogContext } from "./dialog.js"
 import { movePickerSelection, renderTwoColumnPicker, switchPickerColumn, togglePickerItem, type PickerItem, type PickerState } from "./two-column-picker.js";
 
 export interface PickerDialog {
@@ -10,7 +10,7 @@ export interface PickerDialog {
   saveId: number;
 }
 
-export function createPickerDialog(purpose: "skills" | "mcp", items: PickerItem[], ctx: DialogContext): PickerDialog | undefined {
+export function createPickerDialog(purpose: "skills" | "mcp", items: PickerItem[], ctx: PickerDialogContext): PickerDialog | undefined {
   const poolDir = purpose === "skills" ? ctx.actions.skillPoolDir?.() : undefined;
   if (!items.length && !(purpose === "skills" && poolDir !== undefined)) {
     ctx.setMessage(`${purpose}: nothing available`);
@@ -30,7 +30,7 @@ export function createPickerDialog(purpose: "skills" | "mcp", items: PickerItem[
   };
 }
 
-export function handlePickerDialogInput(dialog: PickerDialog, data: string, ctx: DialogContext): PickerDialog | undefined {
+export function handlePickerDialogInput(dialog: PickerDialog, data: string, ctx: PickerDialogContext): PickerDialog | undefined {
   if (dialog.picker.poolPending) return dialog;
   if (dialog.purpose === "skills" && dialog.picker.poolInput) return handleSkillPoolInput(dialog, data, ctx);
   if (matchesKey(data, Key.escape)) return undefined;
@@ -44,11 +44,11 @@ export function handlePickerDialogInput(dialog: PickerDialog, data: string, ctx:
   return edited ? { ...dialog, picker: { ...edited, poolError: undefined, poolMessage: undefined } } : dialog;
 }
 
-export function renderPickerDialog(dialog: PickerDialog, width: number, ctx: DialogContext): string[] {
+export function renderPickerDialog(dialog: PickerDialog, width: number, ctx: PickerDialogContext): string[] {
   return renderTwoColumnPicker(dialog.picker, width, ctx.theme);
 }
 
-function handleSkillPoolInput(dialog: PickerDialog, data: string, ctx: DialogContext): PickerDialog | undefined {
+function handleSkillPoolInput(dialog: PickerDialog, data: string, ctx: PickerDialogContext): PickerDialog | undefined {
   if (!dialog.picker.poolInput) return dialog;
   if (matchesKey(data, Key.escape)) return { ...dialog, picker: { ...dialog.picker, poolInput: undefined, poolError: undefined, poolMessage: undefined } };
   if (isEnterKey(data)) {
@@ -74,7 +74,7 @@ function handleSkillPoolInput(dialog: PickerDialog, data: string, ctx: DialogCon
   return edited ? { ...dialog, picker: { ...dialog.picker, poolInput: edited, poolError: undefined, poolMessage: undefined } } : dialog;
 }
 
-function savedSkillPoolDialog(pending: PickerDialog, items: PickerItem[], dir: string, ctx: DialogContext): PickerDialog {
+function savedSkillPoolDialog(pending: PickerDialog, items: PickerItem[], dir: string, ctx: PickerDialogContext): PickerDialog {
   return {
     ...pending,
     picker: {
@@ -95,7 +95,7 @@ function skillPoolErrorDialog(pending: PickerDialog, error: unknown): PickerDial
   return { ...pending, picker: { ...pending.picker, poolPending: false, poolError: errorMessage(error), poolMessage: undefined } };
 }
 
-function applyPickerSelection(dialog: PickerDialog, ctx: DialogContext): undefined {
+function applyPickerSelection(dialog: PickerDialog, ctx: PickerDialogContext): undefined {
   const items = dialog.picker.items;
   const apply = dialog.purpose === "skills" ? ctx.actions.applySkills : ctx.actions.applyMcpServers;
   const success = dialog.purpose === "skills" ? "restart session to reload skills" : "restart session to reload MCP tools";

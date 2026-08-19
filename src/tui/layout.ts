@@ -991,11 +991,7 @@ export function renderForm(spec: FormSpec, width: number, theme?: SessionsTheme)
   body.push(styles.border("─".repeat(inner)));
   const footer = inner < 32 ? (spec.narrowFooter ?? "enter · esc") : spec.footer;
   body.push(truncate(styles.dim(footer), inner));
-  return [
-    `${styles.border("╭")}${styles.border("─".repeat(inner))}${styles.border("╮")}`,
-    ...body.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`),
-    `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`,
-  ];
+  return frame(width, body, styles, { border: "dialog-title" });
 }
 
 function renderCursorValue(value: string, cursor: number | undefined, width: number, mode: "end" | "start" | undefined): string {
@@ -1026,19 +1022,28 @@ export function renderDialog(title: string, rows: string[], width: number, theme
   const styles = theme ? createStyles(theme) : plainStyles();
   const inner = Math.max(20, Math.min(Math.max(20, width - 2), 86));
   const body = [styles.accent(title), styles.border("─".repeat(Math.min(inner, Math.max(0, displayWidth(title) + 8)))), ...rows];
-  return [
-    `${styles.border("╭")}${styles.border("─".repeat(inner))}${styles.border("╮")}`,
-    ...body.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`),
-    `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`,
-  ];
+  return frame(width, body, styles, { border: "dialog-title" });
+}
+
+interface FrameOptions {
+  border: "dashboard-title" | "dialog-title";
+  title?: string;
 }
 
 function box(width: number, body: string[], styles: LayoutStyles): string[] {
-  const inner = width - 2;
-  const title = "pi agent hub";
-  const top = `${styles.border("╭")} ${styles.accent(title)} ${styles.border("─".repeat(Math.max(0, inner - displayWidth(title) - 2)))}${styles.border("╮")}`;
+  return frame(width, body, styles, { border: "dashboard-title", title: "pi agent hub" });
+}
+
+function frame(width: number, body: string[], styles: LayoutStyles, options: FrameOptions): string[] {
+  const inner = options.border === "dashboard-title"
+    ? width - 2
+    : Math.max(20, Math.min(Math.max(20, width - 2), 86));
+  const top = options.border === "dashboard-title"
+    ? `${styles.border("╭")} ${styles.accent(options.title ?? "")} ${styles.border("─".repeat(Math.max(0, inner - displayWidth(options.title ?? "") - 2)))}${styles.border("╮")}`
+    : `${styles.border("╭")}${styles.border("─".repeat(inner))}${styles.border("╮")}`;
   const bottom = `${styles.border("╰")}${styles.border("─".repeat(inner))}${styles.border("╯")}`;
-  return [top, ...body.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`), bottom].map((line) => truncate(line, width));
+  const lines = [top, ...body.map((line) => `${styles.border("│")}${pad(line, inner)}${styles.border("│")}`), bottom];
+  return options.border === "dashboard-title" ? lines.map((line) => truncate(line, width)) : lines;
 }
 
 function twoColumn(left: string, right: string, width: number): string {

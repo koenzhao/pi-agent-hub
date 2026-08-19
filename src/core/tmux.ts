@@ -44,6 +44,30 @@ export async function hasTmux(exec: TmuxExec = realTmuxExec): Promise<boolean> {
 
 export type TmuxPresence = "present" | "missing" | "unknown";
 
+export interface TmuxPresenceResult {
+  presence: TmuxPresence;
+  error?: string;
+}
+
+export async function listSessions(exec: TmuxExec = realTmuxExec): Promise<Set<string>> {
+  const result = await exec.exec("tmux", ["list-sessions", "-F", "#{session_name}"]);
+  return new Set(result.stdout.split(/\r?\n/).map((name) => name.trim()).filter(Boolean));
+}
+
+export async function sessionPresenceSnapshot(
+  names: readonly string[],
+  exec: TmuxExec = realTmuxExec,
+): Promise<Map<string, TmuxPresenceResult>> {
+  try {
+    const listed = await listSessions(exec);
+    return new Map(names.map((name) => [name, { presence: listed.has(name) ? "present" : "missing" }]));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const presence: TmuxPresence = /no server running|no server/i.test(message) ? "missing" : "unknown";
+    return new Map(names.map((name) => [name, { presence, ...(presence === "unknown" ? { error: message } : {}) }]));
+  }
+}
+
 export async function sessionPresence(name: string, exec: TmuxExec = realTmuxExec): Promise<TmuxPresence> {
   try {
     await exec.exec("tmux", ["has-session", "-t", name]);
@@ -92,21 +116,28 @@ export interface WindowPane {
   windowWidth: number;
   windowHeight: number;
   slot?: number;
+  title?: string;
 }
 
 export async function listWindowPanes(pane: string, exec: TmuxExec = realTmuxExec): Promise<WindowPane[]> {
-  const format = "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height} #{@pi_hub_slot}";
+  const format = "#{pane_id}\t#{pane_tty}\t#{pane_active}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{pane_height}\t#{window_width}\t#{window_height}\t#{@pi_hub_slot}\t#{pane_title}";
   const result = await exec.exec("tmux", ["list-panes", "-t", pane, "-F", format]);
   return result.stdout.split(/\r?\n/).flatMap((line) => {
     if (!line.trim()) return [];
-    const fields = line.split(" ");
+    // The first ten fields have fixed meaning. Rejoin the rest because pane
+    // titles may contain tabs (and spaces must never be collapsed).
+    const fields = line.includes("\t") ? line.split("\t") : line.trim().split(/\s+/);
     const [id, tty, active, ...rest] = fields;
     const geometryText = rest.slice(0, 6);
     const geometry = geometryText.map(Number);
     if (!id || !tty || geometry.length !== 6 || geometry.some((value) => !Number.isFinite(value))) return [];
     const [left, top, width, height, windowWidth, windowHeight] = geometry as [number, number, number, number, number, number];
     const slot = Number(rest[6]);
-    return [{ id, tty, active: active === "1", left, top, width, height, windowWidth, windowHeight, ...(Number.isInteger(slot) && slot >= 1 && slot <= 4 ? { slot } : {}) }];
+    const title = rest.slice(7).join("\t");
+    return [{ id, tty, active: active === "1", left, top, width, height, windowWidth, windowHeight,
+      ...(Number.isInteger(slot) && slot >= 1 && slot <= 4 ? { slot } : {}),
+      ...(rest.length >= 8 ? { title } : {}),
+    }];
   });
 }
 

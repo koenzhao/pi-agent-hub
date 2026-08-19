@@ -248,6 +248,17 @@ test("removeSession removes child rows with their parent", () => {
   assert.equal(controller.snapshot().selectedId, "sibling");
 });
 
+test("refresh preserves unknown tmux failures as errors instead of stopped", async () => {
+  await withTempSessionsDir(async () => {
+    const registry = { version: 1 as const, sessions: [session("running", { id: "api" })] };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry, async () => "", async () => "unknown");
+    await controller.refresh(10);
+    assert.equal(controller.snapshot().registry.sessions[0]?.status, "error");
+    assert.match(controller.snapshot().registry.sessions[0]?.error ?? "", /presence was not observed|tmux session is missing/);
+  });
+});
+
 test("refresh prunes subagent rows whose tmux sessions are gone", async () => {
   await withTempSessionsDir(async () => {
     const registry = {

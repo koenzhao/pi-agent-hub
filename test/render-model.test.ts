@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { boardLaneRows, buildRenderModel, retainSelectionAfterRefresh } from "../src/tui/render-model.js";
+import { boardLaneRows, buildDashboardProjection, buildRenderModel, retainSelectionAfterRefresh } from "../src/tui/render-model.js";
 import { renderSessions, workflowStepMarker } from "../src/tui/layout.js";
 import { darkTheme, stripAnsi } from "../src/tui/theme.js";
 import type { ManagedSession, SessionStatus } from "../src/core/types.js";
@@ -18,6 +18,13 @@ function session(id: string, group: string, status: SessionStatus, title = id): 
     updatedAt: 1,
   };
 }
+
+test("dashboard projection supplies the same visible rows as rendering", () => {
+  const sessions = [session("parent", "app", "running"), { ...session("child", "app", "running"), kind: "subagent" as const, parentId: "parent" }];
+  const projection = buildDashboardProjection({ sessions, expandedProjectParentIds: new Set(["parent"]) });
+  const model = buildRenderModel({ sessions, selectedId: "parent", width: 120, structuralProjection: projection, expandedProjectParentIds: new Set(["parent"]) });
+  assert.deepEqual(model.groups.flatMap((group) => group.sessions.map((row) => row.id)), projection.visible.map((row) => row.id));
+});
 
 const WORKFLOW = {
   steps: [

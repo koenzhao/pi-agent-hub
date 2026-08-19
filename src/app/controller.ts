@@ -5,11 +5,11 @@ import { heartbeatPath } from "../core/paths.js";
 import { loadRegistry, normalizeGroup, renameGroup as renameRegistryGroup, updateRegistry } from "../core/registry.js";
 import { ARCHIVE_PRUNE_AFTER_MS, moveToBucket, restoreBucket, sessionSection } from "../core/session-bucket.js";
 import { assignGroupOrder, compareSessionPriority, nextOrderInGroup, orderedSessions } from "../core/session-order.js";
-import { orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../core/session-tree.js";
+import { createSessionTreeIndex, orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../core/session-tree.js";
 import { readPiSessionName } from "../core/pi-session-name.js";
 import { parseSessionContext } from "../core/session-context.js";
 import { applyComputedStatus, computeStatus, isFreshHeartbeat, markAcknowledged, readHeartbeat } from "../core/status.js";
-import { capturePane, sessionPresence, type TmuxPresence } from "../core/tmux.js";
+import { capturePane, sessionPresence, sessionPresenceSnapshot, type TmuxPresence, type TmuxPresenceResult } from "../core/tmux.js";
 import type { SessionsRegistry, ManagedSession, RuntimeSession, PiAgentHubContextV1, SessionBucket, WorkflowModeDisplay, Heartbeat } from "../core/types.js";
 
 export interface SessionsSnapshot {
@@ -29,6 +29,7 @@ interface RefreshObservation {
   tmuxSession: string;
   observedUpdatedAt: number;
   presence: TmuxPresence;
+  error?: string;
   heartbeat?: Heartbeat;
 }
 
@@ -45,6 +46,7 @@ export class SessionsController {
     registry: SessionsRegistry = { version: 1, sessions: [] },
     private capture: typeof capturePane = capturePane,
     private presence: typeof sessionPresence = sessionPresence,
+    private presenceSnapshot: (names: readonly string[]) => Promise<Map<string, TmuxPresenceResult>> = (names) => sessionPresenceSnapshot(names),
   ) {
     this.registry = registry;
     this.selectedId = visibleSessions(registry.sessions, undefined)[0]?.id;
@@ -54,16 +56,20 @@ export class SessionsController {
     this.registry = await loadRegistry();
     this.repairSelection();
     const observations = new Map<string, RefreshObservation>();
+    const presenceByTmux = this.presence === sessionPresence
+      ? await this.presenceSnapshot(this.registry.sessions.map((session) => session.tmuxSession))
+      : new Map<string, TmuxPresenceResult>(await Promise.all(this.registry.sessions.map(async (session) => [session.tmuxSession, { presence: await this.presence(session.tmuxSession) }] as const)));
     for (const session of this.registry.sessions) {
-      const presence = await this.presence(session.tmuxSession);
-      if (isSubagentSession(session) && presence === "missing") {
-        observations.set(session.id, { tmuxSession: session.tmuxSession, observedUpdatedAt: session.updatedAt, presence });
+      const result = presenceByTmux.get(session.tmuxSession) ?? { presence: "unknown" as const, error: "tmux session presence was not observed" };
+      if (isSubagentSession(session) && result.presence === "missing") {
+        observations.set(session.id, { tmuxSession: session.tmuxSession, observedUpdatedAt: session.updatedAt, presence: result.presence, error: result.error });
         continue;
       }
       observations.set(session.id, {
         tmuxSession: session.tmuxSession,
         observedUpdatedAt: session.updatedAt,
-        presence,
+        presence: result.presence,
+        error: result.error,
         heartbeat: await readHeartbeat(session.id),
       });
     }
@@ -86,7 +92,7 @@ export class SessionsController {
           if (prunedIds.has(session.id)) return [];
           const observation = matchingObservation(session, observations);
           if (!observation) return [session];
-          const computed = computeStatus({ session, tmux: { exists: observation.presence === "present" }, heartbeat: observation.heartbeat, now });
+          const computed = computeStatus({ session, tmux: { exists: observation.presence === "present", error: observation.error }, heartbeat: observation.heartbeat, now });
           const updated = applyComputedStatus(session, computed, now, observation.heartbeat);
           const piName = typeof observation.heartbeat?.piSessionName === "string" ? observation.heartbeat.piSessionName.trim() : "";
           return [{ ...updated, ...(piName && isFreshHeartbeat(observation.heartbeat, now) && session.updatedAt === observation.observedUpdatedAt ? { title: piName } : {}) }];
@@ -342,11 +348,13 @@ function expiredArchivedCascadeIds(
   presenceById: ReadonlyMap<string, TmuxPresence>,
 ): Set<string> {
   const pruneIds = new Set<string>();
+  const tree = createSessionTreeIndex(sessions);
   for (const session of sessions) {
     if (isSubagentSession(session) || session.bucket !== "archived" || typeof session.bucketChangedAt !== "number") continue;
     if (now - session.bucketChangedAt < ARCHIVE_PRUNE_AFTER_MS) continue;
-    const ids = sessionCascadeIds(sessions, session.id);
-    const cascade = sessions.filter((item) => ids.has(item.id));
+    const descendants = tree.descendants(session.id);
+    const ids = new Set([session.id, ...descendants.map((item) => item.id)]);
+    const cascade = [session, ...descendants];
     if (cascade.every((item) => presenceById.get(item.id) === "missing")) for (const id of ids) pruneIds.add(id);
   }
   return pruneIds;

@@ -1,5 +1,5 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
-import type { DialogContext } from "./dialog.js";
+import type { NewSessionDialogContext } from "./dialog.js";
 import { editTextInput, isEnterKey } from "./text-input.js";
 import { renderForm } from "./layout.js";
 import { createRepoPicker, moveRepoPickerSelection, renderRepoPicker, selectedRepoCwd, type RepoPickerState } from "./repo-picker.js";
@@ -31,16 +31,16 @@ export interface RepoPickerDialog {
   target: RepoFieldKey;
 }
 
-export function openNewSessionDialog(ctx: DialogContext): NewSessionDialog {
+export function openNewSessionDialog(ctx: NewSessionDialogContext): NewSessionDialog {
   const formCtx = ctx.actions.newFormContext?.() ?? { cwd: process.cwd() };
   return { kind: "new", form: createNewForm(formCtx) };
 }
 
-export function handleNewSessionInput(dialog: NewSessionDialog | RepoPickerDialog, data: string, ctx: DialogContext): NewSessionDialog | RepoPickerDialog | undefined {
+export function handleNewSessionInput(dialog: NewSessionDialog | RepoPickerDialog, data: string, ctx: NewSessionDialogContext): NewSessionDialog | RepoPickerDialog | undefined {
   return dialog.kind === "new" ? handleNewFormInput(dialog, data, ctx) : handleRepoPickerInput(dialog, data);
 }
 
-export function renderNewSessionDialog(dialog: NewSessionDialog | RepoPickerDialog, width: number, ctx: DialogContext): string[] {
+export function renderNewSessionDialog(dialog: NewSessionDialog | RepoPickerDialog, width: number, ctx: NewSessionDialogContext): string[] {
   if (dialog.kind === "repoPicker") return renderRepoPicker(dialog.picker, width, ctx.theme);
   return renderForm({
     title: "New session",
@@ -51,7 +51,7 @@ export function renderNewSessionDialog(dialog: NewSessionDialog | RepoPickerDial
   }, width, ctx.theme);
 }
 
-function handleNewFormInput(dialog: NewSessionDialog, data: string, ctx: DialogContext): NewSessionDialog | RepoPickerDialog | undefined {
+function handleNewFormInput(dialog: NewSessionDialog, data: string, ctx: NewSessionDialogContext): NewSessionDialog | RepoPickerDialog | undefined {
   const form = dialog.form;
   if (matchesKey(data, Key.escape)) {
     ctx.setMessage(undefined);

@@ -3,7 +3,7 @@ import { orderedSessionRows } from "../core/session-tree.js";
 import { isEnterKey } from "./text-input.js";
 import { createForm, editField, moveFocus, setValue, validateRequired, type FormState } from "./form.js";
 import { renderForm } from "./layout.js";
-import type { DialogContext } from "./dialog.js";
+import type { FormDialogContext } from "./dialog.js";
 
 export type FormDialogPurpose = "fork" | "moveGroup" | "renameSession" | "renameGroup";
 
@@ -15,7 +15,7 @@ export interface FormDialog {
   returnTmuxSession?: string;
 }
 
-export function openForkDialog(ctx: DialogContext): FormDialog | undefined {
+export function openForkDialog(ctx: FormDialogContext): FormDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   if (selected.kind === "subagent") {
@@ -35,7 +35,7 @@ export function openForkDialog(ctx: DialogContext): FormDialog | undefined {
   };
 }
 
-export function openMoveGroupDialog(ctx: DialogContext): FormDialog | undefined {
+export function openMoveGroupDialog(ctx: FormDialogContext): FormDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   if (selected.kind === "subagent") {
@@ -50,7 +50,7 @@ export function openMoveGroupDialog(ctx: DialogContext): FormDialog | undefined 
   };
 }
 
-export function openRenameSessionForm(ctx: DialogContext, returnTmuxSession?: string): FormDialog | undefined {
+export function openRenameSessionForm(ctx: FormDialogContext, returnTmuxSession?: string): FormDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   if (selected.kind === "subagent") {
@@ -69,7 +69,7 @@ export function openRenameSessionForm(ctx: DialogContext, returnTmuxSession?: st
   };
 }
 
-export function openRenameGroupDialog(ctx: DialogContext): FormDialog | undefined {
+export function openRenameGroupDialog(ctx: FormDialogContext): FormDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   if (selected.kind === "subagent") {
@@ -84,7 +84,7 @@ export function openRenameGroupDialog(ctx: DialogContext): FormDialog | undefine
   };
 }
 
-export function handleFormDialogInput(dialog: FormDialog, data: string, ctx: DialogContext): FormDialog | undefined {
+export function handleFormDialogInput(dialog: FormDialog, data: string, ctx: FormDialogContext): FormDialog | undefined {
   if (dialog.purpose === "moveGroup") {
     if (matchesKey(data, Key.ctrl("n"))) return cycleMoveGroup(dialog, 1, ctx);
     if (matchesKey(data, Key.ctrl("p"))) return cycleMoveGroup(dialog, -1, ctx);
@@ -102,7 +102,7 @@ export function handleFormDialogInput(dialog: FormDialog, data: string, ctx: Dia
   return { ...dialog, form: edited };
 }
 
-export function renderFormDialog(dialog: FormDialog, width: number, ctx: DialogContext): string[] {
+export function renderFormDialog(dialog: FormDialog, width: number, ctx: FormDialogContext): string[] {
   const spec = formRenderSpec(dialog, ctx);
   return renderForm({
     title: spec.title,
@@ -113,7 +113,7 @@ export function renderFormDialog(dialog: FormDialog, width: number, ctx: DialogC
   }, width, ctx.theme);
 }
 
-function submitFormDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | undefined {
+function submitFormDialog(dialog: FormDialog, ctx: FormDialogContext): FormDialog | undefined {
   switch (dialog.purpose) {
     case "fork": return submitForkDialog(dialog, ctx);
     case "moveGroup": return submitGroupDialog(dialog, ctx);
@@ -122,7 +122,7 @@ function submitFormDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | 
   }
 }
 
-function submitForkDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | undefined {
+function submitForkDialog(dialog: FormDialog, ctx: FormDialogContext): FormDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   const result = validateRequired(dialog.form);
@@ -132,7 +132,7 @@ function submitForkDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | 
   return undefined;
 }
 
-function submitGroupDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | undefined {
+function submitGroupDialog(dialog: FormDialog, ctx: FormDialogContext): FormDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   const result = validateRequired(dialog.form);
@@ -142,7 +142,7 @@ function submitGroupDialog(dialog: FormDialog, ctx: DialogContext): FormDialog |
   return undefined;
 }
 
-function submitRenameSessionDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | undefined {
+function submitRenameSessionDialog(dialog: FormDialog, ctx: FormDialogContext): FormDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   const result = validateRequired(dialog.form);
@@ -159,7 +159,7 @@ function submitRenameSessionDialog(dialog: FormDialog, ctx: DialogContext): Form
   return undefined;
 }
 
-function submitRenameGroupDialog(dialog: FormDialog, ctx: DialogContext): FormDialog | undefined {
+function submitRenameGroupDialog(dialog: FormDialog, ctx: FormDialogContext): FormDialog | undefined {
   const from = dialog.groupFrom;
   if (!from) return undefined;
   const to = dialog.form.fields.to.value.trim();
@@ -168,7 +168,7 @@ function submitRenameGroupDialog(dialog: FormDialog, ctx: DialogContext): FormDi
   return undefined;
 }
 
-function cycleMoveGroup(dialog: FormDialog, delta: 1 | -1, ctx: DialogContext): FormDialog {
+function cycleMoveGroup(dialog: FormDialog, delta: 1 | -1, ctx: FormDialogContext): FormDialog {
   const selected = ctx.controller.selected();
   const choices = moveGroupChoices(ctx, selected?.group);
   if (!choices.length) return dialog;
@@ -181,7 +181,7 @@ function cycleMoveGroup(dialog: FormDialog, delta: 1 | -1, ctx: DialogContext): 
   return { ...dialog, form: setValue(dialog.form, "group", next) };
 }
 
-function moveGroupChoices(ctx: DialogContext, currentGroup: string | undefined): string[] {
+function moveGroupChoices(ctx: FormDialogContext, currentGroup: string | undefined): string[] {
   const snapshot = ctx.controller.snapshot();
   const choices: string[] = [];
   for (const session of orderedSessionRows(snapshot.sessions, snapshot.filter)) {
@@ -191,7 +191,7 @@ function moveGroupChoices(ctx: DialogContext, currentGroup: string | undefined):
   return choices;
 }
 
-function formRenderSpec(dialog: FormDialog, ctx: DialogContext): { title: string; footer: string; narrowFooter: string } {
+function formRenderSpec(dialog: FormDialog, ctx: FormDialogContext): { title: string; footer: string; narrowFooter: string } {
   switch (dialog.purpose) {
     case "fork": return { title: "Fork session", footer: "tab next · ←→ edit · enter fork · esc cancel", narrowFooter: "tab · enter · esc" };
     case "moveGroup": {

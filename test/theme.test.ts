@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildRenderModel } from "../src/tui/render-model.js";
-import { renderSessions, renderForm } from "../src/tui/layout.js";
+import { renderDialog, renderSessions, renderForm } from "../src/tui/layout.js";
 import { darkTheme, lightTheme, loadActiveTheme, loadManagedSessionTheme, loadSessionsTheme, stripAnsi, stripAnsiExceptItalics, styleBgToken, styleToken, themeFromPiTheme } from "../src/tui/theme.js";
 import type { ManagedSession } from "../src/core/types.js";
 
@@ -272,6 +272,21 @@ test("footer keys are styled without changing visible text", () => {
   const themedFooter = themed.at(-2) ?? "";
   assert.match(themedFooter, /\u001b\[38;2;122;162;247mEnter\u001b\[0m/);
   assert.equal(stripAnsi(themedFooter), stripAnsi(plain.at(-2) ?? ""));
+});
+
+test("framed public renders stay aligned at narrow, normal, and wide widths", () => {
+  for (const width of [24, 60, 120]) {
+    const model = buildRenderModel({ sessions: [session()], width });
+    const dashboard = renderSessions(model, darkTheme).lines;
+    const form = renderForm({ title: "New session", fields: [{ key: "cwd", label: "cwd", value: "/tmp/api" }], focus: "cwd", footer: "enter · esc" }, width, darkTheme);
+    const dialog = renderDialog("Confirm", ["Continue with this action?"], width, darkTheme);
+    for (const lines of [dashboard, form, dialog]) {
+      for (const line of lines) assert.equal(stripAnsi(line).length, lines === dashboard ? Math.max(40, width) : Math.max(22, Math.min(Math.max(22, width), 88)), `${width}: ${stripAnsi(line)}`);
+    }
+    assert.match(stripAnsi(dashboard[0] ?? ""), /pi agent hub/);
+    assert.equal(stripAnsi(form[0] ?? "").at(0), "╭");
+    assert.equal(stripAnsi(dialog[0] ?? "").at(0), "╭");
+  }
 });
 
 test("dashboard chrome uses rounded corners", () => {

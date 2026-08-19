@@ -21,7 +21,7 @@ function sidePaneExec(panes: string, clients: string): TmuxExec & { calls: Call[
   });
 }
 
-const listPanesCall = ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height} #{@pi_hub_slot}"];
+const listPanesCall = ["list-panes", "-t", "%1", "-F", "#{pane_id}\t#{pane_tty}\t#{pane_active}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{pane_height}\t#{window_width}\t#{window_height}\t#{@pi_hub_slot}\t#{pane_title}"];
 const attach = (direction: "-h" | "-v", pane: string, target: string, size: number) => [
   "split-window", "-d", direction, "-l", String(size), "-P", "-F", "#{pane_id}", "-t", pane,
   `env -u TMUX tmux attach-session -t '${target}'`,
@@ -79,6 +79,16 @@ test("sidePaneStatus ignores user panes", async () => {
   const exec = sidePaneExec(dashboard + pane(2, 2, 43, 0, 117, 59, 3) + pane(9, 9, 43, 0, 117, 59), clients([2, "pi-agent-hub-api"], [9, "shell"]));
   assert.deepEqual((await sidePaneStatus({ ownPane: "%1" }, exec)).slots, [undefined, undefined, "pi-agent-hub-api", undefined]);
   assert.deepEqual(exec.calls[0]?.args, listPanesCall);
+});
+
+test("sidePaneStatus exposes spaced and tab-containing titles", async () => {
+  const panes = [
+    "%1\t/dev/ttys001\t1\t0\t0\t42\t59\t160\t60\t\tDashboard title",
+    "%2\t/dev/ttys002\t0\t43\t0\t117\t59\t160\t60\t1\tPanel title\twith tab",
+  ].join("\n") + "\n";
+  const status = await sidePaneStatus({ ownPane: "%1" }, sidePaneExec(panes, clients([2, "pi-agent-hub-api"])));
+  assert.equal(status.ownTitle, "Dashboard title");
+  assert.deepEqual(status.titles, ["Panel title\twith tab", undefined, undefined, undefined]);
 });
 
 test("assign opens the requested fixed slot, tags it, and keeps sidebar focus", async () => {

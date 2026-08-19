@@ -5,7 +5,7 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { darkTmuxChrome } from "../src/core/chrome.js";
-import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, clientSize, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSidebarReturnBinding, inspectSwitchReturnBinding, installSidebarReturnBinding, killPane, listWindowPanes, presizeSessionWindow, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resetSessionWindowSize, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, setDashboardMouse, setSessionStatusBarVisible, setPaneSlot, setPaneTitle, setWindowPaneBorderStatus, shellQuote, splitPaneAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
+import { attachSessionCommand, capturePane, cliTuiCommand, clientSessionByTty, clientSessionsByTty, clientSize, configureDashboardStatusBar, configureManagedSessionStatusBar, currentTmuxClient, currentTmuxSession, inspectSidebarReturnBinding, inspectSwitchReturnBinding, installSidebarReturnBinding, killPane, listSessions, listWindowPanes, presizeSessionWindow, reconcileSidebarReturnBinding, removeSidebarReturnBinding, resetSessionWindowSize, resizePaneWidth, restoreSwitchReturnBinding, selectPane, sendTextToSession, sessionPresence, sessionPresenceSnapshot, setDashboardMouse, setSessionStatusBarVisible, setPaneSlot, setPaneTitle, setWindowPaneBorderStatus, shellQuote, splitPaneAttach, splitWindowAttach, switchClient, switchClientTo, switchClientWithReturn, type TmuxExec } from "../src/core/tmux.js";
 import type { CommandResult } from "../src/core/types.js";
 
 interface Call {
@@ -51,14 +51,14 @@ test("shellQuote uses POSIX single quote escaping", () => {
   assert.equal(shellQuote("pkg's path"), "'pkg'\\''s path'");
 });
 
-test("listWindowPanes parses pane geometry for the current window", async () => {
-  const exec = fakeTmux(() => ({ stdout: "%1 /dev/ttys001 1 0 0 42 60 160 60 \n%2 /dev/ttys002 0 43 12 117 48 160 60 4\n%3 /dev/ttys003 0 nope 10 40 20 160 60 2\n%4 /dev/ttys004 0 20 20 nope 20 160 60 3\n", stderr: "" }));
+test("listWindowPanes parses pane geometry and titles for the current window", async () => {
+  const exec = fakeTmux(() => ({ stdout: "%1\t/dev/ttys001\t1\t0\t0\t42\t60\t160\t60\t\tSidebar title\n%2\t/dev/ttys002\t0\t43\t12\t117\t48\t160\t60\t4\tPanel with spaces\tand tabs\n%3\t/dev/ttys003\t0\tnope\t10\t40\t20\t160\t60\t2\tIgnored\n%4\t/dev/ttys004\t0\t20\t20\tnope\t20\t160\t60\t3\tIgnored\n", stderr: "" }));
 
   assert.deepEqual(await listWindowPanes("%1", exec), [
-    { id: "%1", tty: "/dev/ttys001", active: true, left: 0, top: 0, width: 42, height: 60, windowWidth: 160, windowHeight: 60 },
-    { id: "%2", tty: "/dev/ttys002", active: false, left: 43, top: 12, width: 117, height: 48, windowWidth: 160, windowHeight: 60, slot: 4 },
+    { id: "%1", tty: "/dev/ttys001", active: true, left: 0, top: 0, width: 42, height: 60, windowWidth: 160, windowHeight: 60, title: "Sidebar title" },
+    { id: "%2", tty: "/dev/ttys002", active: false, left: 43, top: 12, width: 117, height: 48, windowWidth: 160, windowHeight: 60, slot: 4, title: "Panel with spaces\tand tabs" },
   ]);
-  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id} #{pane_tty} #{pane_active} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height} #{@pi_hub_slot}"] }]);
+  assert.deepEqual(exec.calls, [{ command: "tmux", args: ["list-panes", "-t", "%1", "-F", "#{pane_id}\t#{pane_tty}\t#{pane_active}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{pane_height}\t#{window_width}\t#{window_height}\t#{@pi_hub_slot}\t#{pane_title}"] }]);
 });
 
 test("splitWindowAttach creates a detached side pane at its final size", async () => {
@@ -157,6 +157,22 @@ test("clientSessionByTty reads one tty from the client map", async () => {
 
   assert.equal(await clientSessionByTty("/dev/ttys002", exec), "session with spaces");
   assert.equal(await clientSessionByTty("/dev/ttys003", exec), undefined);
+});
+
+test("listSessions and sessionPresenceSnapshot classify one list-sessions result", async () => {
+  const exec = fakeTmux(() => ({ stdout: "api\nother\n", stderr: "" }));
+  assert.deepEqual(await listSessions(exec), new Set(["api", "other"]));
+  assert.deepEqual(await sessionPresenceSnapshot(["api", "missing"], exec), new Map([
+    ["api", { presence: "present" }], ["missing", { presence: "missing" }],
+  ]));
+  assert.deepEqual(exec.calls.map((call) => call.args[0]), ["list-sessions", "list-sessions"]);
+});
+
+test("sessionPresenceSnapshot maps no-server to missing and retains unknown errors", async () => {
+  const noServer = fakeTmux(() => { throw new Error("tmux list-sessions failed: no server running"); });
+  assert.deepEqual(await sessionPresenceSnapshot(["api"], noServer), new Map([["api", { presence: "missing" }]]));
+  const unknown = fakeTmux(() => { throw new Error("tmux list-sessions failed: permission denied"); });
+  assert.deepEqual(await sessionPresenceSnapshot(["api"], unknown), new Map([["api", { presence: "unknown", error: "tmux list-sessions failed: permission denied" }]]));
 });
 
 test("sessionPresence distinguishes missing sessions from unknown tmux failures", async () => {

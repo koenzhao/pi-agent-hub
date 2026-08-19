@@ -136,6 +136,50 @@ export interface RenderModel {
   sidePaneFocusedSlot?: number;
 }
 
+export interface DashboardProjection {
+  allRows: RuntimeSession[];
+  allTree: SessionTreeIndex<RuntimeSession>;
+  activeRows: RuntimeSession[];
+  boardProjection: BoardProjection<RuntimeSession>;
+  archive: ReturnType<typeof archiveSectionRows>;
+  projectRows: RuntimeSession[];
+  lifecycleRows: RuntimeSession[];
+  visible: RuntimeSession[];
+  filterActive: boolean;
+  board: boolean;
+}
+
+export interface DashboardProjectionInput {
+  sessions: RuntimeSession[];
+  filter?: string;
+  grouping?: "project" | "stage";
+  archiveExpanded?: boolean;
+  collapsedSections?: ReadonlySet<CollapsibleSection>;
+  expandedBoardParentIds?: ReadonlySet<string>;
+  expandedProjectParentIds?: ReadonlySet<string>;
+}
+
+/** Structural dashboard rows shared by rendering and navigation. */
+export function buildDashboardProjection(input: DashboardProjectionInput): DashboardProjection {
+  const board = (input.grouping ?? "project") === "stage";
+  const filterActive = Boolean(input.filter?.trim());
+  const allRows = orderedSessionRows(input.sessions, filterActive ? input.filter : undefined);
+  const allTree = createSessionTreeIndex(allRows);
+  const activeRows = allRows.filter((session) => effectiveSessionLifecycle(session, allRows, allTree).section === "active");
+  const boardProjection = projectExpandedBoardRows(
+    projectBoardRows(activeRows, allRows), input.expandedBoardParentIds ?? new Set(), filterActive,
+  );
+  const archive = archiveSectionRows(allRows, { expanded: input.archiveExpanded ?? false, filterActive }, allTree);
+  const projectRows = visibleTreeRows(archive.rows, allRows, input.expandedProjectParentIds ?? new Set(), filterActive);
+  const collapsedSections = input.collapsedSections ?? new Set<CollapsibleSection>();
+  const lifecycleRows = filterActive ? projectRows : projectRows.filter((session) => {
+    const section = effectiveSessionLifecycle(session, allRows, allTree).section;
+    return section === "active" || !collapsedSections.has(section);
+  });
+  return { allRows, allTree, activeRows, boardProjection, archive, projectRows, lifecycleRows,
+    visible: board ? boardProjection.rows : lifecycleRows, filterActive, board };
+}
+
 export interface BuildRenderModelInput {
   sessions: RuntimeSession[];
   selectedId?: string;
@@ -159,32 +203,15 @@ export interface BuildRenderModelInput {
   hidePreview?: boolean;
   expandedBoardParentIds?: ReadonlySet<string>;
   expandedProjectParentIds?: ReadonlySet<string>;
+  structuralProjection?: DashboardProjection;
 }
 
 export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const grouping = input.grouping ?? "project";
   const density = input.density ?? "compact";
-  const board = grouping === "stage";
-  const filterActive = Boolean(input.filter?.trim());
-  const allRows = orderedSessionRows(input.sessions, filterActive ? input.filter : undefined);
-  const allTree = createSessionTreeIndex(allRows);
-  const activeRows = allRows.filter((session) => effectiveSessionLifecycle(session, allRows, allTree).section === "active");
-  const completeBoardProjection = projectBoardRows(activeRows, allRows);
-  const boardProjection = projectExpandedBoardRows(
-    completeBoardProjection,
-    input.expandedBoardParentIds ?? new Set(),
-    filterActive,
-  );
-  const archive = archiveSectionRows(allRows, { expanded: input.archiveExpanded ?? false, filterActive }, allTree);
-  const projectRows = visibleTreeRows(archive.rows, allRows, input.expandedProjectParentIds ?? new Set(), filterActive);
+  const projection = input.structuralProjection ?? buildDashboardProjection(input);
+  const { allRows, allTree, boardProjection, archive, visible, filterActive, board } = projection;
   const collapsedSections = input.collapsedSections ?? new Set<CollapsibleSection>();
-  const lifecycleRows = filterActive
-    ? projectRows
-    : projectRows.filter((session) => {
-      const section = effectiveSessionLifecycle(session, allRows, allTree).section;
-      return section === "active" || !collapsedSections.has(section);
-    });
-  const visible = board ? boardProjection.rows : lifecycleRows;
   const selectedId = pickSelectedId(input.archiveDisclosureSelected || input.selectedSection ? allRows : visible, input.selectedId);
   const sidePaneSessionIds = input.sidePaneSessionIds;
   const subagentStats = descendantSubagentStats(input.sessions, createSessionTreeIndex(input.sessions));
@@ -199,8 +226,20 @@ export function buildRenderModel(input: BuildRenderModelInput): RenderModel {
   const treeExpanded = (id: string) => filterActive || (board
     ? input.expandedBoardParentIds?.has(id) === true
     : input.expandedProjectParentIds?.has(id) === true);
-  const mapped = visible.map((session) => toRenderSession(session, session.id === selectedId && !input.archiveDisclosureSelected && !input.selectedSection, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), treeExpanded(session.id)));
-  const allMapped = allRows.map((session) => toRenderSession(session, session.id === selectedId, allRows, allTree, session.id === selectedId ? input.selectedSkillCount : undefined, input.now, sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), treeExpanded(session.id)));
+  // Build each source row once. Visible selection is a small overlay: lifecycle
+  // headers and archive disclosure can suppress the list highlight while keeping
+  // the selected row available to the details pane.
+  const allMapped = allRows.map((session) => toRenderSession(
+    session, session.id === selectedId, allRows, allTree,
+    session.id === selectedId ? input.selectedSkillCount : undefined, input.now,
+    sidePaneSessionIds?.get(session.id), board, density, subagentStats.get(session.id), treeExpanded(session.id),
+  ));
+  const mappedById = new Map(allMapped.map((session) => [session.id, session]));
+  const listSelected = !input.archiveDisclosureSelected && !input.selectedSection;
+  const mapped = visible.flatMap((session) => {
+    const rendered = mappedById.get(session.id);
+    return rendered ? [{ ...rendered, selected: listSelected && rendered.id === selectedId }] : [];
+  });
   const groups = groupsForSessions(mapped);
   const sections = board
     ? lanesForBoard(mapped, boardProjection)

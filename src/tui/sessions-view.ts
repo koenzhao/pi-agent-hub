@@ -1,17 +1,46 @@
 import { Key, matchesKey, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { attachPlan } from "../app/actions.js";
 import type { SessionsController, SyncPiNameResult } from "../app/controller.js";
-import { createSessionTreeIndex, orderedSessionRows } from "../core/session-tree.js";
 import type { ManagedSession } from "../core/types.js";
 import { matchesDashboardShortcut } from "./dashboard-shortcuts.js";
-import { archiveSectionRows, effectiveSessionLifecycle } from "./archive-section.js";
-import { boardLaneRows, buildRenderModel, visibleTreeRows } from "./render-model.js";
+import { effectiveSessionLifecycle } from "./archive-section.js";
+import { buildDashboardProjection, buildRenderModel, type DashboardProjection } from "./render-model.js";
 import { renderSessions, type SessionListTarget } from "./layout.js";
 import { isMouseSequence, parseMouseEvent, type MouseEvent } from "./mouse.js";
 import { stripAnsi, styleToken, type SessionsTheme } from "./theme.js";
 import type { PickerItem } from "./two-column-picker.js";
 import type { CollapsibleSection, SessionsViewState } from "./dialog.js";
 import { errorMessage, isPromise, type CloseSidePaneResult, type DialogContext, type FocusSidePaneResult, type SessionDialog, type SessionsViewActions, type SidePaneActionResult } from "./dialog.js";
+
+type AsyncAction<T> = () => T | Promise<T>;
+
+function runSyncAsyncAction<T>(action: AsyncAction<T>, handlers: {
+  pending: string;
+  setBusy: (busy: boolean) => void;
+  setMessage: (message: string | undefined) => void;
+  success: (result: T) => void;
+  failure: (error: unknown) => void;
+}): void {
+  try {
+    const result = action();
+    if (!isPromise<T>(result)) {
+      handlers.success(result);
+      return;
+    }
+    handlers.setBusy(true);
+    handlers.setMessage(handlers.pending);
+    void result.then((value) => {
+      handlers.setBusy(false);
+      handlers.success(value);
+      handlers.setMessage(undefined);
+    }).catch((error: unknown) => {
+      handlers.setBusy(false);
+      handlers.failure(error);
+    });
+  } catch (error) {
+    handlers.failure(error);
+  }
+}
 import { handlePromptInput, openFilterPrompt, openSendPrompt, promptFilterValue, promptFooter } from "./prompt-dialog.js";
 import { isEnterKey } from "./text-input.js";
 import { handleFormDialogInput, openForkDialog, openMoveGroupDialog, openRenameGroupDialog, openRenameSessionForm, renderFormDialog } from "./form-dialogs.js";
@@ -45,6 +74,10 @@ export class SessionsView implements Component {
   private expandedBoardParentIds = new Set<string>();
   private expandedProjectParentIds = new Set<string>();
   private themeLoadRequest = 0;
+  private projection?: DashboardProjection;
+  private projectionRegistry?: object;
+  private projectionKey = "";
+  private viewStateRevision = 0;
 
   constructor(private controller: SessionsController, private stop: () => void, private actions: SessionsViewActions = {}, private theme?: SessionsTheme) {
     this.grouping = actions.initialViewState?.grouping ?? "project";
@@ -265,6 +298,7 @@ export class SessionsView implements Component {
     const now = this.actions.now?.() ?? Date.now();
     const sidePaneSessionIds = this.actions.sidePaneSessionIds?.();
     const filter = (this.dialog?.kind === "prompt" ? (promptFilterValue(this.dialog) ?? snapshot.filter) : snapshot.filter)?.trim() || undefined;
+    const structuralProjection = this.dashboardProjection(snapshot);
     const layout = renderSessions(buildRenderModel({
       sessions: snapshot.sessions,
       selectedId: snapshot.selectedId,
@@ -288,6 +322,7 @@ export class SessionsView implements Component {
       hidePreview: Boolean(sidePaneSessionIds?.size),
       expandedBoardParentIds: this.expandedBoardParentIds,
       expandedProjectParentIds: this.expandedProjectParentIds,
+      structuralProjection,
     }), this.theme);
     this.rowTargets = layout.rowTargets;
     this.listWidth = layout.listWidth;
@@ -429,24 +464,16 @@ export class SessionsView implements Component {
     };
     const pending = slot ? `opening panel ${slot}...` : "resetting panels...";
     try {
-      const result = slot
-        ? this.actions.assignSidePaneSlot!(selected.id, slot)
-        : this.actions.resetSidePane!(selected.id);
-      if (isPromise<SidePaneActionResult>(result)) {
-        this.busy = true;
-        this.message = pending;
-        void result.then((sidePaneResult) => {
-          this.busy = false;
-          apply(sidePaneResult);
-          if (this.message === pending) this.message = undefined;
-        }).catch((error: unknown) => {
-          this.busy = false;
-          if (this.message === pending) this.message = undefined;
-          applyError(error);
-        });
-        return;
-      }
-      apply(result);
+      const invoke: AsyncAction<SidePaneActionResult> = slot
+        ? () => this.actions.assignSidePaneSlot!(selected.id, slot)
+        : () => this.actions.resetSidePane!(selected.id);
+      runSyncAsyncAction(invoke, {
+        pending,
+        setBusy: (busy) => { this.busy = busy; },
+        setMessage: (message) => { if (!message || this.message === pending) this.message = message; },
+        success: apply,
+        failure: (error) => { if (this.message === pending) this.message = undefined; applyError(error); },
+      });
     } catch (error) {
       applyError(error);
     }
@@ -465,21 +492,14 @@ export class SessionsView implements Component {
       this.flashMessage(result.kind === "closed" ? `panel ${slot} closed` : `panel ${slot} is not open`);
     };
     try {
-      const result = close(slot);
-      if (isPromise<CloseSidePaneResult>(result)) {
-        this.busy = true;
-        this.message = `closing panel ${slot}...`;
-        void result.then((closeResult) => {
-          this.busy = false;
-          apply(closeResult);
-          if (this.message === `closing panel ${slot}...`) this.message = undefined;
-        }).catch((error: unknown) => {
-          this.busy = false;
-          this.message = errorMessage(error);
-        });
-        return;
-      }
-      apply(result);
+      const pending = `closing panel ${slot}...`;
+      runSyncAsyncAction(() => close(slot), {
+        pending,
+        setBusy: (busy) => { this.busy = busy; },
+        setMessage: (message) => { if (!message || this.message === pending) this.message = message; },
+        success: apply,
+        failure: (error) => { this.message = errorMessage(error); },
+      });
     } catch (error) {
       this.message = errorMessage(error);
     }
@@ -498,20 +518,13 @@ export class SessionsView implements Component {
       if (result.kind === "unavailable") this.flashMessage(`panel ${slot} is not open`);
     };
     try {
-      const result = focus(slot);
-      if (!isPromise<FocusSidePaneResult>(result)) {
-        apply(result);
-        return;
-      }
-      this.busy = true;
-      this.message = `focusing panel ${slot}...`;
-      void result.then((focusResult) => {
-        this.busy = false;
-        apply(focusResult);
-        if (this.message === `focusing panel ${slot}...`) this.message = undefined;
-      }).catch((error: unknown) => {
-        this.busy = false;
-        this.message = errorMessage(error);
+      const pending = `focusing panel ${slot}...`;
+      runSyncAsyncAction(() => focus(slot), {
+        pending,
+        setBusy: (busy) => { this.busy = busy; },
+        setMessage: (message) => { if (!message || this.message === pending) this.message = message; },
+        success: apply,
+        failure: (error) => { this.message = errorMessage(error); },
       });
     } catch (error) {
       this.message = errorMessage(error);
@@ -705,12 +718,8 @@ export class SessionsView implements Component {
 
   private visibleListTargets(): SessionListTarget[] {
     if (this.grouping === "stage") return this.boardRows().map((row) => ({ kind: "session", id: row.id }));
-    const snapshot = this.controller.snapshot();
-    const filterActive = Boolean(snapshot.filter?.trim());
-    const allRows = orderedSessionRows(snapshot.sessions, filterActive ? snapshot.filter : undefined);
-    const archive = archiveSectionRows(allRows, { expanded: this.archiveExpanded, filterActive });
-    const visibleRows = visibleTreeRows(archive.rows, allRows, this.expandedProjectParentIds, filterActive);
-    const tree = createSessionTreeIndex(allRows);
+    const projection = this.dashboardProjection(this.controller.snapshot());
+    const { allRows, archive, visible: visibleRows, allTree: tree, filterActive } = projection;
     const sectionOf = (row: typeof allRows[number]) => effectiveSessionLifecycle(row, allRows, tree).section;
     const hasLifecycleSections = allRows.some((row) => sectionOf(row) !== "active");
     if (!hasLifecycleSections) return visibleRows.map((row) => ({ kind: "session", id: row.id }));
@@ -743,8 +752,8 @@ export class SessionsView implements Component {
     const selectedId = this.controller.snapshot().selectedId;
     if (targets.some((target) => target.kind === "session" && target.id === selectedId)) return;
     const snapshot = this.controller.snapshot();
-    const allRows = orderedSessionRows(snapshot.sessions, snapshot.filter?.trim() ? snapshot.filter : undefined);
-    const tree = createSessionTreeIndex(allRows);
+    const projection = this.dashboardProjection(snapshot, undefined);
+    const { allRows, allTree: tree } = projection;
     const selectedRow = allRows.find((row) => row.id === selectedId);
     if (selectedRow && !snapshot.filter?.trim()) {
       const section = effectiveSessionLifecycle(selectedRow, allRows, tree).section;
@@ -764,42 +773,46 @@ export class SessionsView implements Component {
 
   private toggleArchiveDisclosure() {
     this.archiveExpanded = !this.archiveExpanded;
+    this.viewStateRevision += 1;
     this.normalizeListSelection();
   }
 
   private toggleSection(section: CollapsibleSection) {
     if (this.collapsedSections.has(section)) this.collapsedSections.delete(section);
     else this.collapsedSections.add(section);
+    this.viewStateRevision += 1;
     this.saveViewState();
     this.normalizeListSelection();
   }
 
   private boardRows() {
-    const snapshot = this.controller.snapshot();
-    const filterActive = Boolean(snapshot.filter?.trim());
-    const rows = orderedSessionRows(snapshot.sessions, filterActive ? snapshot.filter : undefined);
-    const tree = createSessionTreeIndex(rows);
-    const active = rows.filter((session) => effectiveSessionLifecycle(session, rows, tree).section === "active");
-    return boardLaneRows(active, rows, {
-      expandedParentIds: this.expandedBoardParentIds,
-      revealAll: filterActive,
-    }).flatMap((lane) => lane.rows);
+    return this.dashboardProjection(this.controller.snapshot()).boardProjection.rows;
+  }
+
+  private dashboardProjection(snapshot: ReturnType<SessionsController["snapshot"]>, filterOverride?: string): DashboardProjection {
+    const filter = filterOverride === undefined ? snapshot.filter?.trim() || undefined : filterOverride;
+    const key = `${this.grouping}|${this.archiveExpanded}|${snapshot.sessions.length}|${this.viewStateRevision}|${filter ?? ""}|${[...this.collapsedSections].join(",")}|${[...this.expandedBoardParentIds].join(",")}|${[...this.expandedProjectParentIds].join(",")}`;
+    if (this.projection && this.projectionRegistry === snapshot.registry && this.projectionKey === key) return this.projection;
+    this.projection = buildDashboardProjection({ sessions: snapshot.sessions, filter, grouping: this.grouping,
+      archiveExpanded: this.archiveExpanded, collapsedSections: this.collapsedSections,
+      expandedBoardParentIds: this.expandedBoardParentIds, expandedProjectParentIds: this.expandedProjectParentIds });
+    this.projectionRegistry = snapshot.registry;
+    this.projectionKey = key;
+    return this.projection;
   }
 
   private topLevelBoardParentId(sessionId: string | undefined): string | undefined {
     if (!sessionId) return undefined;
-    const tree = createSessionTreeIndex(this.controller.snapshot().sessions);
-    const session = tree.get(sessionId);
-    return session ? tree.trace(session).owner?.id : undefined;
+    const projection = this.dashboardProjection(this.controller.snapshot(), undefined);
+    const session = projection.allTree.get(sessionId);
+    return session ? projection.allTree.trace(session).owner?.id : undefined;
   }
 
   private subagentParentIds(): Set<string> {
-    const snapshot = this.controller.snapshot();
-    const rows = orderedSessionRows(snapshot.sessions);
-    const tree = createSessionTreeIndex(rows);
-    const scopedRows = this.grouping === "stage"
-      ? rows.filter((session) => effectiveSessionLifecycle(session, rows, tree).section === "active")
-      : rows;
+    const projection = this.dashboardProjection(this.controller.snapshot(), undefined);
+    const rows = projection.allRows;
+    const tree = projection.allTree;
+    const scopedRows = this.grouping === "stage" ? projection.activeRows : rows;
     const scopedIds = new Set(scopedRows.map((session) => session.id));
     const parentIds = new Set<string>();
     for (const session of scopedRows) {
@@ -817,6 +830,7 @@ export class SessionsView implements Component {
     const expandedIds = this.grouping === "stage" ? this.expandedBoardParentIds : this.expandedProjectParentIds;
     if (expanded) expandedIds.add(parentId);
     else expandedIds.delete(parentId);
+    this.viewStateRevision += 1;
     if (!expanded && selectedId !== parentId && this.controller.selectSession(parentId)) this.actions.selectionChanged?.();
     this.listScrollTop = 0;
   }
@@ -826,6 +840,7 @@ export class SessionsView implements Component {
     if (expanded) {
       for (const parentId of this.subagentParentIds()) expandedIds.add(parentId);
     } else expandedIds.clear();
+    this.viewStateRevision += 1;
     if (!expanded) {
       const selectedId = this.controller.snapshot().selectedId;
       const parentId = this.topLevelBoardParentId(selectedId);

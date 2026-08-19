@@ -1,4 +1,5 @@
 import type { SessionsController, SyncPiNameResult } from "../app/controller.js";
+import type { CloseSidePaneResult, FocusSidePaneResult, SidePaneResult } from "../app/side-pane.js";
 import type { DashboardShortcut } from "../core/dashboard-shortcuts.js";
 import type { ManagedSession } from "../core/types.js";
 import type { NewFormContext, NewFormSubmission } from "./new-form.js";
@@ -18,12 +19,9 @@ export interface SessionDialogInput {
   worktree?: { branch: string };
 }
 
-export type SidePaneActionResult =
-  | { kind: "opened" | "retargeted" | "moved" | "unchanged"; slot: 1 | 2 | 3 | 4 }
-  | { kind: "closed" }
-  | { kind: "too-narrow"; panels: number };
-export type CloseSidePaneResult = { kind: "closed" } | { kind: "unavailable" };
-export type FocusSidePaneResult = { kind: "focused" } | { kind: "unavailable" };
+/** Compatibility aliases. The result contracts are owned by app/side-pane. */
+export type SidePaneActionResult = SidePaneResult;
+export type { CloseSidePaneResult, FocusSidePaneResult, SidePaneResult };
 
 export type CollapsibleSection = "backlog" | "archived";
 
@@ -33,8 +31,78 @@ export interface SessionsViewState {
   collapsedSections?: CollapsibleSection[];
 }
 
+export interface SessionLifecycleActions {
+  restart: (sessionId: string) => unknown;
+  restartNew: (sessionId: string) => unknown;
+  restartAll: () => unknown;
+  deleteSession: (sessionId: string) => void | Promise<void>;
+  closeSubagents: (sessionId: string) => void | Promise<void>;
+  discardWorktree: (sessionId: string) => void | Promise<void>;
+  finishWorktree: (sessionId: string) => void | Promise<void>;
+  createSession: (input: NewFormSubmission) => unknown;
+  forkSession: (sourceSessionId: string, input: Omit<SessionDialogInput, "cwd">) => unknown;
+  changeGroup: (sessionId: string, group: string) => unknown;
+  archiveSession: (sessionId: string) => unknown;
+  backlogSession: (sessionId: string) => unknown;
+  restoreSession: (sessionId: string) => unknown;
+  renameSession: (sessionId: string, title: string) => unknown;
+  syncPiName: (sessionId: string) => SyncPiNameResult | Promise<SyncPiNameResult>;
+  renameGroup: (from: string, to: string) => unknown;
+  reorderSelected: (delta: -1 | 1) => unknown;
+  acknowledge: () => unknown;
+}
+
+export interface SidePaneActions {
+  assignSidePaneSlot: (sessionId: string, slot: 1 | 2 | 3 | 4) => SidePaneResult | Promise<SidePaneResult>;
+  closeSidePaneSlot: (slot: 1 | 2 | 3 | 4) => CloseSidePaneResult | Promise<CloseSidePaneResult>;
+  resetSidePane: (sessionId: string) => SidePaneResult | Promise<SidePaneResult>;
+  focusSidePaneSlot: (slot: 1 | 2 | 3 | 4) => FocusSidePaneResult | Promise<FocusSidePaneResult>;
+}
+
+export interface SkillsActions {
+  skills: () => PickerItem[] | Promise<PickerItem[]>;
+  applySkills: (items: PickerItem[]) => void | Promise<void>;
+  skillPoolDir: () => string | undefined;
+  skillPoolDirExtraCount: () => number;
+  saveSkillPoolDir: (dir: string) => PickerItem[] | Promise<PickerItem[]>;
+}
+
+export interface McpActions {
+  mcpServers: () => PickerItem[] | Promise<PickerItem[]>;
+  applyMcpServers: (items: PickerItem[]) => void | Promise<void>;
+}
+
+export interface ThemeActions {
+  themeSettings: () => ThemeDialogInput | Promise<ThemeDialogInput>;
+  previewDashboardTheme: (setting: string) => void;
+  cancelDashboardTheme: (setting: string) => void;
+  applyDashboardTheme: (setting: string, syncPi: boolean) => void | Promise<void>;
+}
+
+export interface NavigationActions {
+  attachOutsideTmux: (tmuxSession: string) => void | Promise<void>;
+  switchInsideTmux: (tmuxSession: string) => void | Promise<void>;
+  sendMessage: (tmuxSession: string, message: string) => unknown;
+  selectionChanged: () => void;
+}
+
+export interface DashboardShortcutActions {
+  dashboardShortcuts: readonly DashboardShortcut[];
+  runDashboardShortcut: (sessionId: string, shortcut: DashboardShortcut) => unknown;
+}
+
+/** Composition-bound action bag. Groups are optional; members are required when supplied. */
 export interface SessionsViewActions {
+  sessionLifecycle?: Partial<SessionLifecycleActions>;
+  sidePane?: Partial<SidePaneActions>;
+  skillActions?: Partial<SkillsActions>;
+  mcpActions?: Partial<McpActions>;
+  themeActions?: Partial<ThemeActions>;
+  navigationActions?: Partial<NavigationActions>;
+  shortcutActions?: Partial<DashboardShortcutActions>;
+
   initialViewState?: SessionsViewState;
+  /** Legacy flat fields remain accepted at the SessionsView composition boundary. */
   saveViewState?: (state: SessionsViewState) => void;
   attachOutsideTmux?: (tmuxSession: string) => void | Promise<void>;
   switchInsideTmux?: (tmuxSession: string) => void | Promise<void>;
@@ -101,6 +169,16 @@ export interface DialogContext {
   attachSession(session: ManagedSession): void;
   stop(): void;
 }
+
+/** Context boundary for a dialog family. Only the declared action fields are visible. */
+export type DialogContextFor<Actions extends object> = Omit<DialogContext, "actions"> & { actions: Actions };
+
+export type PromptDialogContext = DialogContextFor<Partial<Pick<NavigationActions, "sendMessage" | "selectionChanged">>>;
+export type FormDialogContext = DialogContextFor<Partial<Pick<SessionLifecycleActions, "forkSession" | "changeGroup" | "renameSession" | "renameGroup">>>;
+export type ConfirmDialogContext = DialogContextFor<Partial<Pick<SessionLifecycleActions, "deleteSession" | "closeSubagents" | "discardWorktree" | "finishWorktree" | "restart" | "restartNew" | "restartAll">>>;
+export type PickerDialogContext = DialogContextFor<Partial<Pick<SkillsActions, "skillPoolDir" | "skillPoolDirExtraCount" | "saveSkillPoolDir" | "applySkills">> & Partial<Pick<McpActions, "applyMcpServers">>>;
+export type NewSessionDialogContext = DialogContextFor<Partial<Pick<SessionLifecycleActions, "createSession">> & { newFormContext?: () => NewFormContext }>;
+export type ThemeDialogContext = DialogContextFor<Partial<Pick<ThemeActions, "previewDashboardTheme" | "cancelDashboardTheme" | "applyDashboardTheme">>>;
 
 export function isPromise<T = unknown>(value: unknown): value is Promise<T> {
   return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";

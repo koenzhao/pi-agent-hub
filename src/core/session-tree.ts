@@ -20,6 +20,7 @@ export interface SessionTreeTrace<T extends SessionTreeRow> {
 export interface SessionTreeIndex<T extends SessionTreeRow> {
   get(id: string): T | undefined;
   trace(session: T): SessionTreeTrace<T>;
+  descendants(id: string): readonly T[];
 }
 
 export function isSubagentSession(session: Pick<ManagedSession, "kind">): boolean {
@@ -29,9 +30,34 @@ export function isSubagentSession(session: Pick<ManagedSession, "kind">): boolea
 export function createSessionTreeIndex<T extends SessionTreeRow>(sessions: readonly T[]): SessionTreeIndex<T> {
   const byId = new Map(sessions.map((session) => [session.id, session]));
   const traces = new Map<T, SessionTreeTrace<T>>();
+  const childrenByParent = new Map<string, T[]>();
+  for (const session of sessions) {
+    if (!session.parentId) continue;
+    const children = childrenByParent.get(session.parentId) ?? [];
+    children.push(session);
+    childrenByParent.set(session.parentId, children);
+  }
+  const descendantCache = new Map<string, readonly T[]>();
   return {
     get(id) {
       return byId.get(id);
+    },
+    descendants(id) {
+      const cached = descendantCache.get(id);
+      if (cached) return cached;
+      const result: T[] = [];
+      const queued = new Set<string>([id]);
+      const queue = [id];
+      for (let index = 0; index < queue.length; index += 1) {
+        for (const child of childrenByParent.get(queue[index]!) ?? []) {
+          if (queued.has(child.id)) continue;
+          queued.add(child.id);
+          queue.push(child.id);
+          result.push(child);
+        }
+      }
+      descendantCache.set(id, result);
+      return result;
     },
     trace(session) {
       const cached = traces.get(session);
@@ -87,18 +113,7 @@ export function sessionDepth(
 }
 
 export function sessionCascadeIds(sessions: ManagedSession[], id: string): Set<string> {
-  const ids = new Set([id]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const session of sessions) {
-      if (session.parentId && ids.has(session.parentId) && !ids.has(session.id)) {
-        ids.add(session.id);
-        changed = true;
-      }
-    }
-  }
-  return ids;
+  return new Set([id, ...createSessionTreeIndex(sessions).descendants(id).map((session) => session.id)]);
 }
 
 export function orderedSessionRows(sessions: RuntimeSession[], filter?: string): RuntimeSession[] {

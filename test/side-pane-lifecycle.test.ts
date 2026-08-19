@@ -13,12 +13,14 @@ interface FakePane {
   tty: string;
   session: string;
   slot?: number;
+  title?: string;
   active: boolean;
 }
 
 interface InitialPane {
   session: string;
   slot?: number;
+  title?: string;
   active?: boolean;
 }
 
@@ -37,6 +39,7 @@ class SidePaneTmux implements TmuxExec {
   readonly commands: string[] = [];
   readonly panes: FakePane[];
   ownActive: boolean;
+  ownTitle = "";
   ownWidth = 42;
   windowWidth = 160;
   splitFailure?: { afterCreate: boolean; error: Error };
@@ -51,15 +54,16 @@ class SidePaneTmux implements TmuxExec {
       tty: `/dev/ttys00${index + 2}`,
       session: pane.session,
       ...(pane.slot === undefined ? {} : { slot: pane.slot }),
+      ...(pane.title === undefined ? {} : { title: pane.title }),
       active: pane.active ?? false,
     }));
     this.ownActive = !this.panes.some((pane) => pane.active);
   }
 
   paneOutput(): string {
-    const own = `%1 /dev/ttys001 ${this.ownActive ? 1 : 0} 0 0 ${this.ownWidth} 59 ${this.windowWidth} 60 \n`;
+    const own = `%1\t/dev/ttys001\t${this.ownActive ? 1 : 0}\t0\t0\t${this.ownWidth}\t59\t${this.windowWidth}\t60\t\t${this.ownTitle}\n`;
     return own + this.panes.map((pane, index) =>
-      `${pane.id} ${pane.tty} ${pane.active ? 1 : 0} ${this.ownWidth + 1} ${index * 30} ${this.windowWidth - this.ownWidth - 1} ${this.panes.length > 1 ? 29 : 59} ${this.windowWidth} 60 ${pane.slot ?? ""}\n`,
+      `${pane.id}\t${pane.tty}\t${pane.active ? 1 : 0}\t${this.ownWidth + 1}\t${index * 30}\t${this.windowWidth - this.ownWidth - 1}\t${this.panes.length > 1 ? 29 : 59}\t${this.windowWidth}\t60\t${pane.slot ?? ""}\t${pane.title ?? ""}\n`,
     ).join("");
   }
 
@@ -110,7 +114,10 @@ class SidePaneTmux implements TmuxExec {
     }
     if (action === "select-pane" && args.includes("-T")) {
       const paneId = args[args.indexOf("-t") + 1]!;
-      this.events.push(`title:${paneId}:${args.at(-1)}`);
+      const title = args.at(-1)!;
+      if (paneId === "%1") this.ownTitle = title;
+      else this.panes.find((pane) => pane.id === paneId)!.title = title;
+      this.events.push(`title:${paneId}:${title}`);
       return { stdout: "", stderr: "" };
     }
     if (action === "select-pane") {
@@ -198,6 +205,7 @@ async function harness(t: TestContext, options: {
   initialPanes?: InitialPane[];
   sessions?: ManagedSession[];
   windowWidth?: number;
+  presenceIntervalMs?: number;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-lifecycle-"));
   const events: string[] = [];
@@ -230,6 +238,7 @@ async function harness(t: TestContext, options: {
       events.push(`sync:${[...openTargets].join(",")}`);
     },
     currentChrome: () => darkTmuxChrome,
+    presenceIntervalMs: options.presenceIntervalMs,
   });
   t.after(async () => {
     await lifecycle.stop();
@@ -283,6 +292,24 @@ test("startup restores managed chrome before immediately adopting inherited pane
     slots: ["pi-agent-hub-api", undefined, undefined, undefined],
     dashboardStatusVisible: false,
   });
+});
+
+test("presence reconciliation repairs changed titles without repeating stable writes", async (t) => {
+  const value = await harness(t, {
+    initialPanes: [{ session: "pi-agent-hub-api", slot: 1, title: "[1] API" }],
+    presenceIntervalMs: 5,
+  });
+  await startAndSettle(value);
+  value.events.length = 0;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(value.events.some((event) => event.startsWith("title:")), false);
+
+  value.exec.ownTitle = "changed sidebar";
+  value.exec.panes[0]!.title = "changed panel";
+  await waitFor(() => value.events.includes("title:%1:") && value.events.includes("title:%2:[1] API"));
+  value.events.length = 0;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(value.events.some((event) => event.startsWith("title:")), false);
 });
 
 test("presence reconciliation restores removed footers before hiding additions and renders the committed state", async (t) => {

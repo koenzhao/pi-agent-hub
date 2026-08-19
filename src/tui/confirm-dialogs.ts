@@ -2,7 +2,7 @@ import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { sessionCascadeIds } from "../core/session-tree.js";
 import { isWorktreeSession, primaryWorktree } from "../core/worktree.js";
 import type { ManagedSession } from "../core/types.js";
-import { errorMessage, isPromise, type DialogContext } from "./dialog.js";
+import { errorMessage, isPromise, type ConfirmDialogContext } from "./dialog.js";
 import { renderDialog } from "./layout.js";
 import { styleToken, type SessionsTheme } from "./theme.js";
 
@@ -13,13 +13,13 @@ export interface ConfirmDialog {
   busy: false | "session" | "subagents" | "worktree" | "finish";
 }
 
-export function openDeleteDialog(ctx: DialogContext): ConfirmDialog | undefined {
+export function openDeleteDialog(ctx: ConfirmDialogContext): ConfirmDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   return { kind: "confirm", purpose: "delete", targetId: selected.id, busy: false };
 }
 
-export function openFinishDialog(ctx: DialogContext): ConfirmDialog | undefined {
+export function openFinishDialog(ctx: ConfirmDialogContext): ConfirmDialog | undefined {
   const selected = ctx.controller.selected();
   if (!selected) return undefined;
   if (selected.kind === "subagent") {
@@ -37,16 +37,16 @@ export function openFinishDialog(ctx: DialogContext): ConfirmDialog | undefined 
   return { kind: "confirm", purpose: "finish", targetId: selected.id, busy: false };
 }
 
-export function handleConfirmInput(dialog: ConfirmDialog, data: string, ctx: DialogContext): ConfirmDialog | undefined {
+export function handleConfirmInput(dialog: ConfirmDialog, data: string, ctx: ConfirmDialogContext): ConfirmDialog | undefined {
   if (dialog.purpose === "delete") return handleDeleteInput(dialog, data, ctx);
   return handleFinishInput(dialog, data, ctx);
 }
 
-export function renderConfirmDialog(dialog: ConfirmDialog, width: number, ctx: DialogContext): string[] {
+export function renderConfirmDialog(dialog: ConfirmDialog, width: number, ctx: ConfirmDialogContext): string[] {
   return dialog.purpose === "delete" ? renderDeleteDialog(dialog, width, ctx) : renderFinishDialog(dialog, width, ctx);
 }
 
-export function renderRestartDialog(width: number, ctx: DialogContext): string[] {
+export function renderRestartDialog(width: number, ctx: ConfirmDialogContext): string[] {
   const selected = ctx.controller.selected();
   return renderDialog("Restart session", [
     selected ? `target  ${selected.title}` : "target  none",
@@ -58,7 +58,7 @@ export function renderRestartDialog(width: number, ctx: DialogContext): string[]
   ], width, ctx.theme);
 }
 
-function handleDeleteInput(dialog: ConfirmDialog, data: string, ctx: DialogContext): ConfirmDialog | undefined {
+function handleDeleteInput(dialog: ConfirmDialog, data: string, ctx: ConfirmDialogContext): ConfirmDialog | undefined {
   if (matchesKey(data, Key.escape)) {
     if (dialog.busy) return dialog;
     ctx.setMessage(undefined);
@@ -76,7 +76,7 @@ function handleDeleteInput(dialog: ConfirmDialog, data: string, ctx: DialogConte
   return runConfirmAction(busyDialog, action, successMessage, ctx);
 }
 
-function handleFinishInput(dialog: ConfirmDialog, data: string, ctx: DialogContext): ConfirmDialog | undefined {
+function handleFinishInput(dialog: ConfirmDialog, data: string, ctx: ConfirmDialogContext): ConfirmDialog | undefined {
   if (matchesKey(data, Key.escape)) {
     if (dialog.busy) return dialog;
     ctx.setMessage(undefined);
@@ -87,7 +87,7 @@ function handleFinishInput(dialog: ConfirmDialog, data: string, ctx: DialogConte
   return runConfirmAction(busyDialog, ctx.actions.finishWorktree, "worktree finished", ctx);
 }
 
-function runConfirmAction(dialog: ConfirmDialog, action: ((id: string) => void | Promise<void>) | undefined, successMessage: string, ctx: DialogContext): ConfirmDialog | undefined {
+function runConfirmAction(dialog: ConfirmDialog, action: ((id: string) => void | Promise<void>) | undefined, successMessage: string, ctx: ConfirmDialogContext): ConfirmDialog | undefined {
   try {
     const result = action?.(dialog.targetId);
     if (isPromise(result)) {
@@ -110,7 +110,7 @@ function runConfirmAction(dialog: ConfirmDialog, action: ((id: string) => void |
   }
 }
 
-function renderDeleteDialog(dialog: ConfirmDialog, width: number, ctx: DialogContext): string[] {
+function renderDeleteDialog(dialog: ConfirmDialog, width: number, ctx: ConfirmDialogContext): string[] {
   const target = ctx.controller.snapshot().registry.sessions.find((session) => session.id === dialog.targetId);
   const subagents = subagentTargets(target?.id, ctx);
   const action = dialog.busy === "subagents" ? "closing subagents..." : dialog.busy === "finish" ? "finishing worktree..." : dialog.busy === "worktree" ? "discarding worktree..." : dialog.busy ? "deleting..." : ctxMessageOr(ctx, "d delete session");
@@ -128,7 +128,7 @@ function renderDeleteDialog(dialog: ConfirmDialog, width: number, ctx: DialogCon
   ], width, ctx.theme);
 }
 
-function renderFinishDialog(dialog: ConfirmDialog, width: number, ctx: DialogContext): string[] {
+function renderFinishDialog(dialog: ConfirmDialog, width: number, ctx: ConfirmDialogContext): string[] {
   const target = ctx.controller.snapshot().registry.sessions.find((session) => session.id === dialog.targetId);
   const worktree = target ? primaryWorktree(target) : undefined;
   const branch = worktree?.branch ?? target?.worktreeBranch ?? "unknown";
@@ -144,7 +144,7 @@ function renderFinishDialog(dialog: ConfirmDialog, width: number, ctx: DialogCon
   ], width, ctx.theme);
 }
 
-function subagentTargets(parentId: string | undefined, ctx: DialogContext): ManagedSession[] {
+function subagentTargets(parentId: string | undefined, ctx: ConfirmDialogContext): ManagedSession[] {
   if (!parentId) return [];
   const sessions = ctx.controller.snapshot().registry.sessions;
   const target = sessions.find((session) => session.id === parentId);
@@ -154,11 +154,11 @@ function subagentTargets(parentId: string | undefined, ctx: DialogContext): Mana
   return sessions.filter((session) => ids.has(session.id));
 }
 
-function ctxMessage(ctx: DialogContext): string | undefined {
+function ctxMessage(ctx: ConfirmDialogContext): string | undefined {
   return ctx.message();
 }
 
-function ctxMessageOr(ctx: DialogContext, fallback: string): string {
+function ctxMessageOr(ctx: ConfirmDialogContext, fallback: string): string {
   return ctxMessage(ctx) ?? fallback;
 }
 
