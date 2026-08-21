@@ -1,6 +1,5 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { KIND_ENV, PARENT_ID_ENV, SESSION_ID_ENV, STATE_ENV, WORKTREE_GUIDANCE_ENV } from "../core/names.js";
 import { WORKTREE_GUIDANCE_MAX_LENGTH } from "../core/worktree-context.js";
 import { sessionsStateDir } from "../core/paths.js";
@@ -9,6 +8,7 @@ import { colorFromAnsi } from "../core/theme-color.js";
 import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_STALE_MS } from "../core/status.js";
 import { registerMcpTools } from "../mcp/register-tools.js";
 import { parseSessionContext } from "../core/session-context.js";
+import { writeJsonAtomic } from "../core/atomic-json.js";
 import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, SessionPlanSummary, WorkflowActivityDisplay, WorkflowModeDisplay, WorkflowRuntimeSnapshot, WorkflowStep } from "../core/types.js";
 
 type PiTheme = {
@@ -98,8 +98,7 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
     }
     const file = join(process.env[STATE_ENV] ?? sessionsStateDir(), "heartbeats", `${id}.json`);
     const write = heartbeatWrite.then(async () => {
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, `${JSON.stringify({
+      await writeJsonAtomic(file, {
         managedSessionId: id,
         cwd: ctx.cwd,
         piSessionFile: ctx.sessionManager?.getSessionFile?.(),
@@ -117,7 +116,7 @@ export default function piAgentHubExtension(pi: ExtensionAPI) {
         piSessionName: normalizedName(pi.getSessionName?.()),
         context: sessionContextSnapshot(ctx),
         workflow: workflowSnapshot(ctx),
-      } satisfies Heartbeat, null, 2)}\n`, "utf8");
+      } satisfies Heartbeat);
     });
     heartbeatWrite = write.catch(() => undefined);
     await write;

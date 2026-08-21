@@ -13,7 +13,12 @@ export interface ComputedStatus {
 }
 
 export async function readHeartbeat(sessionId: string): Promise<Heartbeat | undefined> {
-  return readJsonOr<Heartbeat | undefined>(heartbeatPath(sessionId), undefined);
+  try {
+    return await readJsonOr<Heartbeat | undefined>(heartbeatPath(sessionId), undefined);
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
 }
 
 export function computeStatus(input: StatusInput): ComputedStatus {

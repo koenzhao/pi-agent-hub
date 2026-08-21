@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyComputedStatus, computeStatus, HEARTBEAT_STALE_MS, markAcknowledged } from "../src/core/status.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { heartbeatPath } from "../src/core/paths.js";
+import { applyComputedStatus, computeStatus, HEARTBEAT_STALE_MS, markAcknowledged, readHeartbeat } from "../src/core/status.js";
 import type { ManagedSession, Heartbeat } from "../src/core/types.js";
 
 const now = 1_000_000;
@@ -29,6 +33,22 @@ function heartbeat(overrides: Partial<Heartbeat> = {}): Heartbeat {
     ...overrides,
   };
 }
+
+test("malformed heartbeat is treated as missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-heartbeat-"));
+  const previous = process.env.PI_AGENT_HUB_DIR;
+  process.env.PI_AGENT_HUB_DIR = root;
+  try {
+    const path = heartbeatPath("broken");
+    await mkdir(join(root, "heartbeats"));
+    await writeFile(path, "", "utf8");
+    assert.equal(await readHeartbeat("broken"), undefined);
+  } finally {
+    if (previous === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("heartbeat running maps to running", () => {
   assert.equal(computeStatus({ session: session(), tmux: { exists: true }, heartbeat: heartbeat({ state: "running" }), now }).status, "running");
