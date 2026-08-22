@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionsController } from "../src/app/controller.js";
@@ -143,6 +143,7 @@ test("moveSessionToGroup appends only when changing groups", async () => {
 
     await controller.moveSessionToGroup("a", "default");
     assert.deepEqual(controller.snapshot().registry.sessions.find((item) => item.id === "a")?.order, 0);
+    assert.equal(controller.snapshot().registry.sessions.find((item) => item.id === "a")?.updatedAt, 1);
 
     await controller.moveSessionToGroup("a", "work");
     assert.deepEqual(controller.snapshot().registry.sessions.find((item) => item.id === "a")?.order, 1);
@@ -277,6 +278,23 @@ test("refresh prunes subagent rows whose tmux sessions are gone", async () => {
   });
 });
 
+test("stable refreshes do not rewrite the registry", async () => {
+  await withTempSessionsDir(async () => {
+    const registry = { version: 1 as const, sessions: [session("running", { id: "api" })] };
+    await updateRegistry(() => registry);
+    const controller = new SessionsController(registry, async () => "", async () => "present");
+
+    await controller.refresh(100);
+    const path = join(process.env.PI_AGENT_HUB_DIR!, "registry.json");
+    const first = await stat(path, { bigint: true });
+    await controller.refresh(100);
+    const second = await stat(path, { bigint: true });
+
+    assert.equal(second.ino, first.ino);
+    assert.equal(second.mtimeNs, first.mtimeNs);
+  });
+});
+
 test("refresh projects active workflow mode only from a fresh heartbeat with confirmed tmux presence", async () => {
   await withTempSessionsDir(async () => {
     const now = 1_000_000;
@@ -366,6 +384,108 @@ test("refresh caches the native Pi name and projects generic context without per
     })}\n`, "utf8");
     await controller.refresh(now);
     assert.equal(controller.snapshot().registry.sessions[0]?.title, "Manual Recovery");
+  });
+});
+
+test("refresh advances the row version when only the Pi name changes", async () => {
+  await withTempSessionsDir(async () => {
+    const now = 1_000;
+    const registry = { version: 1 as const, sessions: [session("waiting", { id: "api", updatedAt: 100, lastActivityAt: 1 })] };
+    await updateRegistry(() => registry);
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
+    await writeFile(heartbeatPath("api"), `${JSON.stringify({
+      managedSessionId: "api", cwd: "/tmp/api", state: "waiting", stateSince: 1, updatedAt: now,
+      piSessionName: "Canonical Name",
+    })}\n`, "utf8");
+    const controller = new SessionsController(registry, async () => "", async () => "present");
+
+    await controller.refresh(now);
+    assert.equal(controller.snapshot().registry.sessions[0]?.title, "Canonical Name");
+    assert.equal(controller.snapshot().registry.sessions[0]?.updatedAt, 1_000);
+
+    await controller.refresh(now);
+    assert.equal(controller.snapshot().registry.sessions[0]?.updatedAt, 1_000);
+  });
+});
+
+test("refresh preserves runtime metadata on same-target conflicts and clears it on retarget", async () => {
+  await withTempSessionsDir(async () => {
+    const now = 1_000_000;
+    const workflow = { steps: [{ id: "execute", short: "EX" }], activeIndex: 0, updatedAt: now };
+    const firstMode = { id: "focus", short: "FOC" };
+    const secondMode = { id: "review", short: "REV" };
+    const registry = { version: 1 as const, sessions: [session("running", { id: "api" })] };
+    await updateRegistry(() => registry);
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
+    const writeRuntime = async (subtitle: string, activeMode: typeof firstMode) => {
+      await writeFile(heartbeatPath("api"), `${JSON.stringify({
+        managedSessionId: "api", cwd: "/tmp/api", state: "waiting", stateSince: now, updatedAt: now,
+        context: { version: 1, updatedAt: now, ticket: { id: "cleanup-009", subtitle } },
+        workflow: { ...workflow, activeMode },
+      })}\n`, "utf8");
+    };
+    let duringPresence: (() => Promise<void>) | undefined;
+    const controller = new SessionsController(registry, async () => "", async () => {
+      await duringPresence?.();
+      duringPresence = undefined;
+      return "present";
+    });
+
+    await writeRuntime("first", firstMode);
+    await controller.refresh(now);
+    assert.equal(controller.snapshot().sessions[0]?.context?.ticket?.subtitle, "first");
+    assert.deepEqual(controller.snapshot().sessions[0]?.workflow?.activeMode, firstMode);
+
+    await writeRuntime("second", secondMode);
+    duringPresence = async () => {
+      await updateRegistry((latest) => ({
+        ...latest,
+        sessions: latest.sessions.map((item) => item.id === "api" ? { ...item, title: "manual", updatedAt: item.updatedAt + 1 } : item),
+      }));
+    };
+    await controller.refresh(now + 1);
+    assert.equal(controller.snapshot().sessions[0]?.context?.ticket?.subtitle, "first");
+    assert.deepEqual(controller.snapshot().sessions[0]?.workflow?.activeMode, firstMode);
+
+    await controller.refresh(now + 2);
+    assert.equal(controller.snapshot().sessions[0]?.context?.ticket?.subtitle, "second");
+    assert.deepEqual(controller.snapshot().sessions[0]?.workflow?.activeMode, secondMode);
+
+    duringPresence = async () => {
+      await updateRegistry((latest) => ({
+        ...latest,
+        sessions: latest.sessions.map((item) => item.id === "api" ? { ...item, tmuxSession: "new-target", updatedAt: item.updatedAt + 1 } : item),
+      }));
+    };
+    await controller.refresh(now + 3);
+    assert.equal(controller.snapshot().sessions[0]?.context, undefined);
+    assert.equal(controller.snapshot().sessions[0]?.workflow?.activeMode, undefined);
+  });
+});
+
+test("pruning clears cached runtime metadata", async () => {
+  await withTempSessionsDir(async () => {
+    const now = 1_000_000;
+    const parent = session("running", { id: "parent" });
+    const child = session("running", { id: "child", kind: "subagent", parentId: "parent", tmuxSession: "child-target" });
+    const registry = { version: 1 as const, sessions: [parent, child] };
+    await updateRegistry(() => registry);
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
+    await writeFile(heartbeatPath("child"), `${JSON.stringify({
+      managedSessionId: "child", cwd: "/tmp/child", state: "waiting", stateSince: now, updatedAt: now,
+      context: { version: 1, updatedAt: now, ticket: { id: "cleanup-009" } },
+      workflow: { steps: [{ id: "execute", short: "EX" }], activeIndex: 0, updatedAt: now, activeMode: { id: "focus", short: "FOC" } },
+    })}\n`, "utf8");
+    let childPresence: TmuxPresence = "present";
+    const controller = new SessionsController(registry, async () => "", async (name) => name === "child-target" ? childPresence : "present");
+
+    await controller.refresh(now);
+    childPresence = "missing";
+    await controller.refresh(now + 1);
+
+    const caches = controller as unknown as { sessionContexts: Map<string, unknown>; workflowModes: Map<string, unknown> };
+    assert.equal(caches.sessionContexts.has("child"), false);
+    assert.equal(caches.workflowModes.has("child"), false);
   });
 });
 
@@ -526,6 +646,9 @@ test("syncPiName renames a session from latest Pi session_info", async () => {
     assert.equal(controller.snapshot().registry.sessions[0]?.title, "Pi Name");
     assert.equal(controller.snapshot().registry.sessions[0]?.status, "running");
     assert.equal(controller.snapshot().registry.sessions[0]?.group, "latest");
+    const updatedAt = controller.snapshot().registry.sessions[0]?.updatedAt;
+    await controller.syncPiName("api");
+    assert.equal(controller.snapshot().registry.sessions[0]?.updatedAt, updatedAt);
   });
 });
 
@@ -648,6 +771,39 @@ test("refresh ignores observations when the tmux target changed", async () => {
 
     assert.equal(controller.snapshot().registry.sessions[0]?.tmuxSession, "new-target");
     assert.equal(controller.snapshot().registry.sessions[0]?.status, "running");
+  });
+});
+
+test("refresh ignores an observation after the row version changes", async () => {
+  await withTempSessionsDir(async () => {
+    const now = 1_000;
+    const registry = { version: 1 as const, sessions: [session("running", { id: "api", sessionFile: "new-session.json" })] };
+    await updateRegistry(() => registry);
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
+    await writeFile(heartbeatPath("api"), `${JSON.stringify({
+      managedSessionId: "api", cwd: "/tmp/api", state: "waiting", stateSince: now, updatedAt: now,
+      piSessionFile: "old-session.json",
+    })}\n`, "utf8");
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const controller = new SessionsController(registry, async () => "", async () => {
+      entered();
+      await blocked;
+      return "present";
+    });
+
+    const refreshing = controller.refresh(now);
+    await started;
+    await updateRegistry((latest) => ({
+      ...latest,
+      sessions: latest.sessions.map((item) => item.id === "api" ? { ...item, sessionFile: "newer-session.json", updatedAt: now + 1 } : item),
+    }));
+    release();
+    await refreshing;
+
+    assert.equal(controller.snapshot().registry.sessions[0]?.sessionFile, "newer-session.json");
   });
 });
 

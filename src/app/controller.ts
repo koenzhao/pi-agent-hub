@@ -3,6 +3,7 @@ import { isErrno } from "../core/atomic-json.js";
 import { removeMultiRepoWorkspace } from "../core/multi-repo.js";
 import { heartbeatPath } from "../core/paths.js";
 import { loadRegistry, normalizeGroup, renameGroup as renameRegistryGroup, updateRegistry } from "../core/registry.js";
+import { nextUpdatedAt } from "../core/session-version.js";
 import { ARCHIVE_PRUNE_AFTER_MS, moveToBucket, restoreBucket, sessionSection } from "../core/session-bucket.js";
 import { assignGroupOrder, compareSessionPriority, nextOrderInGroup, orderedSessions } from "../core/session-order.js";
 import { createSessionTreeIndex, orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../core/session-tree.js";
@@ -75,6 +76,7 @@ export class SessionsController {
     }
 
     let prunedSessions: ManagedSession[] = [];
+    const appliedObservationIds = new Set<string>();
     this.registry = await updateRegistry((latest) => {
       const presenceById = new Map<string, TmuxPresence>();
       const prunedIds = new Set<string>();
@@ -92,10 +94,14 @@ export class SessionsController {
           if (prunedIds.has(session.id)) return [];
           const observation = matchingObservation(session, observations);
           if (!observation) return [session];
+          appliedObservationIds.add(session.id);
           const computed = computeStatus({ session, tmux: { exists: observation.presence === "present", error: observation.error }, heartbeat: observation.heartbeat, now });
           const updated = applyComputedStatus(session, computed, now, observation.heartbeat);
           const piName = typeof observation.heartbeat?.piSessionName === "string" ? observation.heartbeat.piSessionName.trim() : "";
-          return [{ ...updated, ...(piName && isFreshHeartbeat(observation.heartbeat, now) && session.updatedAt === observation.observedUpdatedAt ? { title: piName } : {}) }];
+          const title = piName && isFreshHeartbeat(observation.heartbeat, now) && session.updatedAt === observation.observedUpdatedAt && piName !== updated.title
+            ? piName
+            : undefined;
+          return [{ ...updated, ...(title ? { title, updatedAt: nextUpdatedAt(updated.updatedAt, now) } : {}) }];
         }),
       };
     });
@@ -103,14 +109,19 @@ export class SessionsController {
     const latestById = new Map(this.registry.sessions.map((session) => [session.id, session]));
     for (const [id, observation] of observations) {
       const latest = latestById.get(id);
-      const context = parseSessionContext(observation.heartbeat?.context);
-      if (latest?.tmuxSession === observation.tmuxSession && context) this.sessionContexts.set(id, context);
-      else this.sessionContexts.delete(id);
-      const activeMode = latest && latest.tmuxSession === observation.tmuxSession && observation.presence === "present" && isFreshHeartbeat(observation.heartbeat, now)
-        ? observation.heartbeat.workflow?.activeMode
-        : undefined;
-      if (activeMode) this.workflowModes.set(id, activeMode);
-      else this.workflowModes.delete(id);
+      if (appliedObservationIds.has(id)) {
+        const context = parseSessionContext(observation.heartbeat?.context);
+        if (context) this.sessionContexts.set(id, context);
+        else this.sessionContexts.delete(id);
+        const activeMode = observation.presence === "present" && isFreshHeartbeat(observation.heartbeat, now)
+          ? observation.heartbeat.workflow?.activeMode
+          : undefined;
+        if (activeMode) this.workflowModes.set(id, activeMode);
+        else this.workflowModes.delete(id);
+      } else if (!latest || latest.tmuxSession !== observation.tmuxSession) {
+        this.sessionContexts.delete(id);
+        this.workflowModes.delete(id);
+      }
     }
     for (const session of prunedSessions) await removeDashboardState(session);
     this.repairSelection();
@@ -174,14 +185,14 @@ export class SessionsController {
     const normalized = normalizeGroup(group);
     await this.mutateRegistry((latest) => {
       const selected = latest.sessions.find((session) => session.id === id);
-      if (!selected) return latest;
+      if (!selected || selected.group === normalized) return latest;
       const section = sessionSection(selected);
-      const order = selected.group !== normalized ? nextOrderInGroup(latest.sessions, normalized, section) : selected.order;
+      const order = nextOrderInGroup(latest.sessions, normalized, section);
       return {
         ...latest,
         sessions: latest.sessions.map((session) => {
-          if (session.id === id) return { ...session, group: normalized, order, updatedAt: now };
-          if (!isSubagentSession(selected) && session.parentId === id) return { ...session, group: normalized, updatedAt: now };
+          if (session.id === id) return { ...session, group: normalized, order, updatedAt: nextUpdatedAt(session.updatedAt, now) };
+          if (!isSubagentSession(selected) && session.parentId === id) return { ...session, group: normalized, updatedAt: nextUpdatedAt(session.updatedAt, now) };
           return session;
         }),
       };
@@ -207,7 +218,7 @@ export class SessionsController {
       const index = ids.indexOf(current.id);
       const targetIndex = ids.indexOf(target.id);
       [ids[index], ids[targetIndex]] = [ids[targetIndex]!, ids[index]!];
-      return { ...latest, sessions: assignGroupOrder(latest.sessions, ids, current.group, section) };
+      return { ...latest, sessions: assignGroupOrder(latest.sessions, ids, current.group, section, Date.now()) };
     });
   }
 
@@ -247,10 +258,14 @@ export class SessionsController {
       throw error;
     }
     if (!name) return { status: "unnamed" };
-    await this.mutateRegistry((latest) => ({
-      ...latest,
-      sessions: latest.sessions.map((session) => session.id === id ? { ...session, title: name, updatedAt: now } : session),
-    }));
+    await this.mutateRegistry((latest) => {
+      const current = latest.sessions.find((session) => session.id === id);
+      if (!current || current.title === name) return latest;
+      return {
+        ...latest,
+        sessions: latest.sessions.map((session) => session.id === id ? { ...session, title: name, updatedAt: nextUpdatedAt(session.updatedAt, now) } : session),
+      };
+    });
     return { status: "synced", name };
   }
 
@@ -322,7 +337,7 @@ function matchingObservation(
   observations: ReadonlyMap<string, RefreshObservation>,
 ): RefreshObservation | undefined {
   const observation = observations.get(session.id);
-  return observation?.tmuxSession === session.tmuxSession ? observation : undefined;
+  return observation?.tmuxSession === session.tmuxSession && observation.observedUpdatedAt === session.updatedAt ? observation : undefined;
 }
 
 function keepSelection(sessions: RuntimeSession[], selectedId: string | undefined): string | undefined {

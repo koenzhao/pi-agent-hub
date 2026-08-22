@@ -6,6 +6,7 @@ export interface JsonStore<T> {
   path: string;
   empty: () => T;
   parse?: (value: T) => T;
+  snapshot?: (value: T) => string;
 }
 
 export function isErrno(error: unknown, code: string): boolean {
@@ -65,7 +66,9 @@ export async function updateStore<T>(
 ): Promise<T> {
   return withFileLock(store.path, async () => {
     const value = await loadStore(store);
+    const before = store.snapshot?.(value);
     const next = (await mutate(value)) ?? value;
+    if (before !== undefined && before === store.snapshot?.(next)) return next;
     await writeJsonAtomic(store.path, next);
     return next;
   });

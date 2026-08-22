@@ -4,6 +4,7 @@ import { loadStore, updateStore, type JsonStore } from "./atomic-json.js";
 import { multiRepoWorkspaceDir, normalizeAdditionalCwds } from "./multi-repo.js";
 import { MANAGED_SESSION_PREFIX } from "./names.js";
 import { registryPath } from "./paths.js";
+import { nextUpdatedAt } from "./session-version.js";
 import type { SessionsRegistry, ManagedSession } from "./types.js";
 
 export const emptyRegistry = (): SessionsRegistry => ({ version: 1, sessions: [] });
@@ -18,6 +19,7 @@ function registryStore(path: string): JsonStore<SessionsRegistry> {
       }
       return registry;
     },
+    snapshot: (registry) => JSON.stringify(registry),
   };
 }
 
@@ -72,12 +74,13 @@ export function tmuxSessionName(id: string): string {
   return `${MANAGED_SESSION_PREFIX}${id.slice(0, 12)}`;
 }
 
-export function renameGroup(registry: SessionsRegistry, from: string, to: string): SessionsRegistry {
+export function renameGroup(registry: SessionsRegistry, from: string, to: string, now = Date.now()): SessionsRegistry {
   const group = normalizeGroup(to);
+  if (group === from) return registry;
   return {
     ...registry,
     sessions: registry.sessions.map((session) =>
-      session.group === from ? { ...session, group, updatedAt: Date.now() } : session,
+      session.group === from ? { ...session, group, updatedAt: nextUpdatedAt(session.updatedAt, now) } : session,
     ),
   };
 }

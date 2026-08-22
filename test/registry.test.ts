@@ -1,10 +1,11 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { writeJsonAtomic } from "../src/core/atomic-json.js";
 import { createSessionRecord, loadRegistry, normalizeGroup, removeSession, renameGroup, updateRegistry } from "../src/core/registry.js";
+import { nextUpdatedAt } from "../src/core/session-version.js";
 
 async function tempPath(name: string) {
   const dir = await mkdtemp(join(tmpdir(), "pi-agent-hub-"));
@@ -42,6 +43,27 @@ test("registry update/load round trip", async () => {
   assert.deepEqual(await loadRegistry(path), { version: 1, sessions: [session] });
 });
 
+test("unchanged registry updates do not rewrite the file", async () => {
+  const path = await tempPath("registry.json");
+  const original = '{"version":1,"sessions":[]}\n';
+  await writeFile(path, original, "utf8");
+
+  await updateRegistry((latest) => latest, path);
+
+  assert.equal(await readFile(path, "utf8"), original);
+});
+
+test("changed registry updates still rewrite the file", async () => {
+  const path = await tempPath("registry.json");
+  const original = '{"version":1,"sessions":[]}\n';
+  await writeFile(path, original, "utf8");
+  const session = createSessionRecord({ cwd: "/tmp/project", now: 10 });
+
+  await updateRegistry((latest) => ({ ...latest, sessions: [session] }), path);
+
+  assert.notEqual(await readFile(path, "utf8"), original);
+});
+
 test("concurrent registry updates preserve both transformations", async () => {
   const path = await tempPath("registry.json");
   const a = createSessionRecord({ cwd: "/tmp/a", now: 1 });
@@ -56,12 +78,26 @@ test("concurrent registry updates preserve both transformations", async () => {
   assert.deepEqual(new Set([first.sessions.length, second.sessions.length]), new Set([1, 2]));
 });
 
+test("a no-op registry update does not erase a concurrent change", async () => {
+  const path = await tempPath("registry.json");
+  const session = createSessionRecord({ cwd: "/tmp/project", now: 1 });
+  await updateRegistry(() => ({ version: 1, sessions: [] }), path);
+
+  await Promise.all([
+    updateRegistry((latest) => latest, path),
+    updateRegistry((latest) => ({ ...latest, sessions: [session] }), path),
+  ]);
+
+  assert.deepEqual((await loadRegistry(path)).sessions, [session]);
+});
+
 test("group rename only affects matching sessions", () => {
   const a = createSessionRecord({ cwd: "/tmp/a", group: "old", now: 1 });
   const b = createSessionRecord({ cwd: "/tmp/b", group: "other", now: 1 });
   const renamed = renameGroup({ version: 1, sessions: [a, b] }, "old", "new");
   assert.equal(renamed.sessions[0]?.group, "new");
   assert.equal(renamed.sessions[1]?.group, "other");
+  assert.equal(renameGroup({ version: 1, sessions: [a, b] }, "old", "old").sessions[0], a);
 });
 
 test("removeSession removes only the matching session", () => {
@@ -75,6 +111,11 @@ test("removeSession removes only the matching session", () => {
 test("removeSession rejects unknown ids", () => {
   const a = createSessionRecord({ cwd: "/tmp/a", group: "work", now: 1 });
   assert.throws(() => removeSession({ version: 1, sessions: [a] }, "missing"), /Unknown session: missing/);
+});
+
+test("updatedAt advances when requested times are equal", () => {
+  assert.equal(nextUpdatedAt(10, 10), 11);
+  assert.equal(nextUpdatedAt(10, 12), 12);
 });
 
 test("group names are flat labels", () => {

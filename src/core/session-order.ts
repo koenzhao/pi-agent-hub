@@ -1,4 +1,5 @@
 import { sectionRank, sessionSection } from "./session-bucket.js";
+import { nextUpdatedAt } from "./session-version.js";
 import type { ManagedSession } from "./types.js";
 
 export function orderedSessions<T extends ManagedSession>(sessions: T[]): T[] {
@@ -51,9 +52,13 @@ export function nextOrderInGroup(sessions: ManagedSession[], group: string, sect
   return orders.length ? Math.max(...orders) + 1 : 0;
 }
 
-export function assignGroupOrder<T extends ManagedSession>(sessions: T[], orderedIds: string[], group: string, section: ReturnType<typeof sessionSection> = "active"): T[] {
+export function assignGroupOrder<T extends ManagedSession>(sessions: T[], orderedIds: string[], group: string, section: ReturnType<typeof sessionSection> = "active", now = Date.now()): T[] {
   const orderById = new Map(orderedIds.map((id, index) => [id, index]));
-  return sessions.map((session) => session.group === group && sessionSection(session) === section ? { ...session, order: orderById.get(session.id) ?? session.order } : session);
+  return sessions.map((session) => {
+    if (session.group !== group || sessionSection(session) !== section) return session;
+    const order = orderById.get(session.id) ?? session.order;
+    return order === session.order ? session : { ...session, order, updatedAt: nextUpdatedAt(session.updatedAt, now) };
+  });
 }
 
 export function groupOrder(a: string, b: string): number {

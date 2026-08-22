@@ -98,6 +98,13 @@ test("apply computed status persists Pi session metadata from heartbeat", () => 
   assert.equal(updated.piSessionId, "abc123");
 });
 
+test("unchanged computed status keeps the existing row timestamp", () => {
+  const existing = session({ status: "waiting", updatedAt: now });
+  const updated = applyComputedStatus(existing, { status: "waiting" }, now);
+
+  assert.equal(updated, existing);
+});
+
 test("transient compaction running heartbeat does not advance activity recency", () => {
   const existing = now - 500;
   const transient = applyComputedStatus(
@@ -166,4 +173,9 @@ test("apply computed status retains producer activity and plan while dropping tr
 
 test("mark acknowledged turns waiting into idle", () => {
   assert.equal(markAcknowledged(session({ status: "waiting" }), now).status, "idle");
+});
+
+test("mark acknowledged does not touch an already idle row", () => {
+  const existing = session({ status: "idle", acknowledgedAt: now - 1, updatedAt: now - 1 });
+  assert.equal(markAcknowledged(existing, now), existing);
 });

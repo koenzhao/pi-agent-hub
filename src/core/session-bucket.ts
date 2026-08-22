@@ -1,3 +1,4 @@
+import { nextUpdatedAt } from "./session-version.js";
 import type { ManagedSession } from "./types.js";
 
 export type SessionSection = "active" | "backlog" | "archived";
@@ -17,10 +18,12 @@ export function sectionRank(session: ManagedSession): number {
 }
 
 export function moveToBucket<T extends ManagedSession>(session: T, bucket: "backlog" | "archived", now = Date.now()): T {
-  return { ...session, bucket, bucketChangedAt: now, updatedAt: now };
+  if (session.bucket === bucket) return session;
+  return { ...session, bucket, bucketChangedAt: now, updatedAt: nextUpdatedAt(session.updatedAt, now) };
 }
 
 export function restoreBucket<T extends ManagedSession>(session: T, now = Date.now()): T {
+  if (session.bucket === undefined) return session;
   const { bucket: _bucket, bucketChangedAt: _bucketChangedAt, ...rest } = session;
-  return { ...rest, updatedAt: now } as T;
+  return { ...rest, updatedAt: nextUpdatedAt(session.updatedAt, now) } as T;
 }

@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isErrno } from "./atomic-json.js";
 import { worktreePath, worktreesDir } from "./paths.js";
+import { nextUpdatedAt } from "./session-version.js";
 import type { ManagedSession, ManagedWorktree } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -223,6 +224,7 @@ export function remainingWorktreeSession(session: ManagedSession, removed: Manag
     worktreeRepoRoot: primary?.repoRoot,
     worktreeBranch: primary?.branch,
     worktreeBaseBranch: primary?.baseBranch,
+    updatedAt: nextUpdatedAt(session.updatedAt),
   };
 }
 

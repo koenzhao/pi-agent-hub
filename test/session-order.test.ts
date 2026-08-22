@@ -92,8 +92,9 @@ test("nextOrderInGroup appends after unordered siblings", () => {
 
 test("assignGroupOrder maps swapped display order back to registry rows", () => {
   const sessions = [session("a"), session("work", "work"), session("b"), session("c")];
-  const next = assignGroupOrder(sessions, ["b", "a", "c"], "default");
+  const next = assignGroupOrder(sessions, ["b", "a", "c"], "default", "active", 1);
   assert.deepEqual(next.map((item) => [item.id, item.order]), [["a", 1], ["work", undefined], ["b", 0], ["c", 2]]);
+  assert.deepEqual(next.map((item) => [item.id, item.updatedAt]), [["a", 2], ["work", 1], ["b", 2], ["c", 2]]);
 });
 
 test("orderedSessions sorts by section before project groups", () => {

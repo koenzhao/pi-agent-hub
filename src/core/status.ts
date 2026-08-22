@@ -1,5 +1,6 @@
 import { readJsonOr } from "./atomic-json.js";
 import { heartbeatPath } from "./paths.js";
+import { nextUpdatedAt } from "./session-version.js";
 import type { ManagedSession, SessionStatus, Heartbeat, StatusInput } from "./types.js";
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -52,8 +53,7 @@ export function computeStatus(input: StatusInput): ComputedStatus {
 }
 
 export function applyComputedStatus(session: ManagedSession, computed: ComputedStatus, now = Date.now(), heartbeat?: Heartbeat): ManagedSession {
-  return {
-    ...session,
+  return updateSession(session, {
     status: computed.status,
     error: computed.error,
     sessionFile: heartbeat?.piSessionFile ?? session.sessionFile,
@@ -66,12 +66,26 @@ export function applyComputedStatus(session: ManagedSession, computed: ComputedS
     resultPath: heartbeat?.resultPath ?? session.resultPath,
     activeTheme: isFreshHeartbeat(heartbeat, now) ? heartbeat.activeTheme : undefined,
     workflow: isFreshHeartbeat(heartbeat, now) ? retainedWorkflow(heartbeat.workflow) : session.workflow,
-    updatedAt: now,
-  };
+  }, now);
 }
 
 export function markAcknowledged(session: ManagedSession, now = Date.now()): ManagedSession {
-  return { ...session, acknowledgedAt: now, status: session.status === "waiting" ? "idle" : session.status, updatedAt: now };
+  if (session.acknowledgedAt !== undefined && session.status !== "waiting") return session;
+  return updateSession(session, {
+    acknowledgedAt: now,
+    status: session.status === "waiting" ? "idle" : session.status,
+  }, now);
+}
+
+function updateSession(session: ManagedSession, changes: Partial<ManagedSession>, now: number): ManagedSession {
+  const next = { ...session, ...changes };
+  if (sessionStateKey(session) === sessionStateKey(next)) return session;
+  return { ...next, updatedAt: nextUpdatedAt(session.updatedAt, now) };
+}
+
+function sessionStateKey(session: ManagedSession): string {
+  const { updatedAt: _updatedAt, ...state } = session;
+  return JSON.stringify(state);
 }
 
 function latestActivityAt(current: number | undefined, heartbeatStateSince: number | undefined): number | undefined {

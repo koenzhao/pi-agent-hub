@@ -11,6 +11,7 @@ import { createOwnedWorktrees, isWorktreeSession, removeOwnedWorktrees } from ".
 import { renderWorktreeGuidance } from "../core/worktree-context.js";
 import { recordRepoUsage } from "../core/repo-history.js";
 import { createSessionRecord, loadRegistry, provisionalSessionTitle, updateRegistry, upsertSession } from "../core/registry.js";
+import { nextUpdatedAt } from "../core/session-version.js";
 import { nextOrderInGroup } from "../core/session-order.js";
 import { isSubagentSession } from "../core/session-tree.js";
 import { configureManagedSessionStatusBar, killSession, newSession, sendTextToSession, sessionExists, shellQuote } from "../core/tmux.js";
@@ -102,11 +103,13 @@ export async function startManagedSession(
     if (!current || isSubagentSession(current) || !sameWorkspaceIdentity(current, session)) {
       throw new Error("Session changed while starting; retry");
     }
+    if (sameWorkspaceIdentity(current, prepared) && current.workspaceCwd === prepared.workspaceCwd) return latest;
     return upsertSession(latest, {
       ...current,
       cwd: prepared.cwd,
       additionalCwds: prepared.additionalCwds,
       workspaceCwd: prepared.workspaceCwd,
+      updatedAt: nextUpdatedAt(current.updatedAt),
     });
   });
   session = findSession(committed, session.id);
@@ -147,7 +150,8 @@ export async function stopManagedSession(id: string): Promise<void> {
   await updateRegistry((latest) => {
     const latestSession = findSession(latest, id);
     if (isSubagentSession(latestSession)) throw new Error(`Cannot stop subagent row: ${latestSession.title}`);
-    return { ...latest, sessions: latest.sessions.map((item) => item.id === latestSession.id ? { ...item, status: "stopped", updatedAt: Date.now() } : item) };
+    if (latestSession.status === "stopped") return latest;
+    return { ...latest, sessions: latest.sessions.map((item) => item.id === latestSession.id ? { ...item, status: "stopped", updatedAt: nextUpdatedAt(item.updatedAt) } : item) };
   });
 }
 
@@ -155,7 +159,8 @@ export async function restartManagedSession(id: string): Promise<void> {
   await stopManagedSession(id);
   await updateRegistry((registry) => {
     const session = findSession(registry, id);
-    return { ...registry, sessions: registry.sessions.map((item) => item.id === session.id ? { ...item, status: "starting", updatedAt: Date.now() } : item) };
+    if (session.status === "starting") return registry;
+    return { ...registry, sessions: registry.sessions.map((item) => item.id === session.id ? { ...item, status: "starting", updatedAt: nextUpdatedAt(item.updatedAt) } : item) };
   });
   await startManagedSession(id);
 }
@@ -176,7 +181,7 @@ export async function restartManagedSessionFresh(id: string): Promise<void> {
         acknowledgedAt: undefined,
         error: undefined,
         activeTheme: undefined,
-        updatedAt: Date.now(),
+        updatedAt: nextUpdatedAt(item.updatedAt),
       } : item),
     };
   });
