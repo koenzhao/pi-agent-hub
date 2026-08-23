@@ -12,7 +12,7 @@ import { loadRegistry } from "./core/registry.js";
 import { dashboardEnv, openDashboard } from "./app/dashboard.js";
 import { runTui } from "./app/run-tui.js";
 import { deleteManagedSession } from "./app/delete-session.js";
-import { addManagedSession, forkManagedSession, restartManagedSession, startManagedSession, stopManagedSession } from "./app/session-commands.js";
+import { addManagedSession, forkManagedSession, restartManagedSession, startManagedSession, stopManagedSession } from "./app/session-lifecycle.js";
 import { startMcpPool } from "./mcp/pool-daemon.js";
 
 const command = process.argv[2] ?? "dashboard";

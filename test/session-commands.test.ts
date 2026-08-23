@@ -12,11 +12,11 @@ import {
   addManagedSession,
   forkManagedSession,
   managedPiCommand,
-  renameManagedSession,
   restartManagedSessionFresh,
   startManagedSession,
   stopManagedSession,
-} from "../src/app/session-commands.js";
+} from "../src/app/session-lifecycle.js";
+import { renameManagedSession } from "../src/app/session-commands.js";
 import type { ManagedSession } from "../src/core/types.js";
 
 const execFileAsync = promisify(execFile);
@@ -379,9 +379,10 @@ test("lifecycle commands reject subagent registry rows", async () => {
   try {
     await seedRegistry({ version: 1, sessions: [session({ kind: "subagent", parentId: "parent", agentName: "worker" })] });
 
-    await assert.rejects(() => startManagedSession("source-session"), /Cannot start subagent row: source/);
-    await assert.rejects(() => stopManagedSession("source-session"), /Cannot stop subagent row: source/);
-    await assert.rejects(() => forkManagedSession("source-session"), /Cannot fork subagent row: source/);
+    await assert.rejects(() => startManagedSession("source-session"), /start managed session source-session: Cannot start subagent row: source/);
+    await assert.rejects(() => stopManagedSession("source-session"), /stop managed session source-session: Cannot stop subagent row: source/);
+    await assert.rejects(() => forkManagedSession("source-session"), /fork managed session source-session: Cannot fork subagent row: source/);
+    await assert.rejects(() => startManagedSession("missing"), /start managed session missing: Unknown session: missing/);
   } finally {
     if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
     else process.env.PI_AGENT_HUB_DIR = oldDir;

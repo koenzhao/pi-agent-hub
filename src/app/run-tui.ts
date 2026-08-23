@@ -22,7 +22,8 @@ import { createSidePaneLifecycle, type SidePaneLifecycle } from "./side-pane-lif
 import { DASHBOARD_SESSION, dashboardEnv } from "./dashboard.js";
 import { consumeDashboardAction } from "./dashboard-action.js";
 import { deleteManagedSession, deleteManagedSubagentSessions } from "./delete-session.js";
-import { addManagedSession, forkManagedSession, renameManagedSession, restartManagedSession, restartManagedSessionFresh, syncManagedSessionStatusBars } from "./session-commands.js";
+import { addManagedSession, forkManagedSession, restartManagedSession, restartManagedSessionFresh } from "./session-lifecycle.js";
+import { renameManagedSession, syncManagedSessionStatusBars } from "./session-commands.js";
 import { discardWorktreeSession, finishWorktreeSession } from "./worktree-session.js";
 import { cleanupRetiredSessionMetadata } from "./state-migration.js";
 import { primaryWorktree, sessionWorktrees } from "../core/worktree.js";

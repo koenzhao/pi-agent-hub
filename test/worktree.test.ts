@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { discardWorktreeSession, finishWorktreeSession } from "../src/app/worktree-session.js";
-import { createOwnedWorktree, createOwnedWorktrees, finishOwnedWorktree, branchSlug } from "../src/core/worktree.js";
+import { createOwnedWorktree, createOwnedWorktrees, finishOwnedWorktree, branchSlug, PartialWorktreeFailure } from "../src/core/worktree.js";
 import { createSessionRecord, loadRegistry, updateRegistry } from "../src/core/registry.js";
 import { heartbeatPath, registryPath, worktreesDir } from "../src/core/paths.js";
 import type { ManagedSession } from "../src/core/types.js";
@@ -216,7 +216,16 @@ test("partial worktree recovery updates the latest surviving registry row", asyn
   const oldPath = process.env.PATH;
   process.env.PATH = `${bin}:${oldPath ?? ""}`;
   try {
-    await assert.rejects(discardWorktreeSession(session.id, { env }), /Remove failed/);
+    let caught: unknown;
+    try {
+      await discardWorktreeSession(session.id, { env });
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof PartialWorktreeFailure);
+    assert.match(caught.message, /discard worktree session partial: Remove failed/);
+    assert.equal(caught.finished.length, 1);
+    assert.equal(caught.remaining.length, 1);
   } finally {
     if (oldPath === undefined) delete process.env.PATH;
     else process.env.PATH = oldPath;
