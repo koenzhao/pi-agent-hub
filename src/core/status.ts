@@ -1,6 +1,5 @@
-import { readJsonOr } from "./atomic-json.js";
-import { heartbeatPath } from "./paths.js";
 import { nextUpdatedAt } from "./session-version.js";
+export { readHeartbeat } from "./heartbeat.js";
 import type { ManagedSession, SessionStatus, Heartbeat, StatusInput } from "./types.js";
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -11,15 +10,6 @@ export interface ComputedStatus {
   status: SessionStatus;
   note?: string;
   error?: string;
-}
-
-export async function readHeartbeat(sessionId: string): Promise<Heartbeat | undefined> {
-  try {
-    return await readJsonOr<Heartbeat | undefined>(heartbeatPath(sessionId), undefined);
-  } catch (error) {
-    if (error instanceof SyntaxError) return undefined;
-    throw error;
-  }
 }
 
 export function computeStatus(input: StatusInput): ComputedStatus {

@@ -8,7 +8,6 @@ import { ARCHIVE_PRUNE_AFTER_MS, moveToBucket, restoreBucket, sessionSection } f
 import { assignGroupOrder, compareSessionPriority, nextOrderInGroup, orderedSessions } from "../core/session-order.js";
 import { createSessionTreeIndex, orderedSessionRows, isSubagentSession, sessionCascadeIds } from "../core/session-tree.js";
 import { readPiSessionName } from "../core/pi-session-name.js";
-import { parseSessionContext } from "../core/session-context.js";
 import { applyComputedStatus, computeStatus, isFreshHeartbeat, markAcknowledged, readHeartbeat } from "../core/status.js";
 import { capturePane, sessionPresence, sessionPresenceSnapshot, type TmuxPresence, type TmuxPresenceResult } from "../core/tmux.js";
 import type { SessionsRegistry, ManagedSession, RuntimeSession, PiAgentHubContextV1, SessionBucket, WorkflowModeDisplay, Heartbeat } from "../core/types.js";
@@ -110,7 +109,7 @@ export class SessionsController {
     for (const [id, observation] of observations) {
       const latest = latestById.get(id);
       if (appliedObservationIds.has(id)) {
-        const context = parseSessionContext(observation.heartbeat?.context);
+        const context = observation.heartbeat?.context;
         if (context) this.sessionContexts.set(id, context);
         else this.sessionContexts.delete(id);
         const activeMode = observation.presence === "present" && isFreshHeartbeat(observation.heartbeat, now)

@@ -6,10 +6,11 @@ import { sessionsStateDir } from "../core/paths.js";
 import { loadThemeCommand } from "../core/theme-command.js";
 import { colorFromAnsi } from "../core/theme-color.js";
 import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_STALE_MS } from "../core/status.js";
+import { parseWorkflowEntry } from "../core/heartbeat.js";
 import { registerMcpTools } from "../mcp/register-tools.js";
 import { parseSessionContext } from "../core/session-context.js";
 import { writeJsonAtomic } from "../core/atomic-json.js";
-import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, SessionPlanSummary, WorkflowActivityDisplay, WorkflowModeDisplay, WorkflowRuntimeSnapshot, WorkflowStep } from "../core/types.js";
+import type { ActiveThemeSnapshot, ActiveThemeToken, Heartbeat, WorkflowRuntimeSnapshot } from "../core/types.js";
 
 type PiTheme = {
   name?: string;
@@ -46,7 +47,6 @@ const SESSION_CONTEXT_ENTRY = "pi-agent-hub-context";
 const STARTUP_HEARTBEAT_DELAYS_MS = [250, 1_000, 3_000];
 const SETTLED_HEARTBEAT_DELAYS_MS = [1_000, 3_000, 6_000];
 const THEME_COMMAND_INTERVAL_MS = 1_000;
-const PLAN_TASK_MAX = 10_000;
 
 export default function piAgentHubExtension(pi: ExtensionAPI) {
   const globalState = globalThis as PiAgentHubGlobal;
@@ -209,7 +209,7 @@ function workflowSnapshot(ctx: PiContext): WorkflowRuntimeSnapshot | undefined {
     for (let i = entries.length - 1; i >= 0; i--) {
       const entry = entries[i] as { type?: string; customType?: string; data?: unknown } | undefined;
       if (entry?.type !== "custom" || entry.customType !== WORKFLOW_RUNTIME_ENTRY) continue;
-      return parseWorkflowSnapshot(entry.data);
+      return parseWorkflowEntry(entry.data);
     }
   } catch {}
   return undefined;
@@ -228,101 +228,6 @@ function sessionContextSnapshot(ctx: PiContext) {
   return undefined;
 }
 
-function parseWorkflowSnapshot(value: unknown): WorkflowRuntimeSnapshot | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const data = value as Record<string, unknown>;
-  if (typeof data.activeStep !== "string" || !data.activeStep.trim()) return undefined;
-  if (typeof data.updatedAt !== "number" || !Number.isFinite(data.updatedAt)) return undefined;
-  if (!Array.isArray(data.steps) || !data.steps.length) return undefined;
-
-  const steps: WorkflowStep[] = [];
-  const ids = new Set<string>();
-  for (const value of data.steps) {
-    if (!value || typeof value !== "object") return undefined;
-    const step = value as Record<string, unknown>;
-    if (typeof step.id !== "string" || typeof step.short !== "string") return undefined;
-    const id = step.id.trim();
-    const short = step.short.trim();
-    if (!id || !short || ids.has(id)) return undefined;
-    if (step.label !== undefined && (typeof step.label !== "string" || !step.label.trim())) return undefined;
-    ids.add(id);
-    steps.push({ id, short, ...(typeof step.label === "string" ? { label: step.label.trim() } : {}) });
-  }
-
-  const activeIndex = steps.findIndex((step) => step.id === data.activeStep);
-  if (activeIndex < 0) return undefined;
-  const ticketId = typeof data.ticketId === "string" ? data.ticketId.trim() : "";
-  const currentStepComplete = typeof data.currentStepComplete === "boolean" ? data.currentStepComplete : undefined;
-  const activeMode = parseWorkflowMode(data.activeMode);
-  const activity = parseWorkflowActivity(data.activity);
-  const plan = parseWorkflowPlan(data.plan);
-  return {
-    steps,
-    activeIndex,
-    ...(currentStepComplete !== undefined ? { currentStepComplete } : {}),
-    ...(activeMode ? { activeMode } : {}),
-    ...(activity ? { activity } : {}),
-    ...(plan ? { plan } : {}),
-    ...(ticketId ? { ticketId } : {}),
-    updatedAt: data.updatedAt,
-  };
-}
-
-function parseWorkflowMode(value: unknown): WorkflowModeDisplay | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const mode = value as Record<string, unknown>;
-  if (typeof mode.id !== "string" || typeof mode.short !== "string") return undefined;
-  const id = mode.id.trim();
-  const short = mode.short.trim();
-  if (!id || !short) return undefined;
-  if (mode.label !== undefined && (typeof mode.label !== "string" || !mode.label.trim())) return undefined;
-  if (mode.detail !== undefined && (typeof mode.detail !== "string" || !mode.detail.trim())) return undefined;
-  return {
-    id,
-    short,
-    ...(typeof mode.label === "string" ? { label: mode.label.trim() } : {}),
-    ...(typeof mode.detail === "string" ? { detail: mode.detail.trim() } : {}),
-  };
-}
-
-function parseWorkflowActivity(value: unknown): WorkflowActivityDisplay | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const activity = value as Record<string, unknown>;
-  const id = typeof activity.id === "string" ? activity.id.trim() : "";
-  const label = typeof activity.label === "string" ? activity.label.trim() : "";
-  if (!id || !label || [...id].length > 80 || [...label].length > 120) return undefined;
-  const pass = activity.pass;
-  if (pass !== undefined && (!Number.isInteger(pass) || (pass as number) < 1 || (pass as number) > 999)) return undefined;
-  return { id, label, ...(typeof pass === "number" ? { pass } : {}) };
-}
-
-function parseWorkflowPlan(value: unknown): SessionPlanSummary | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const data = value as Record<string, unknown>;
-  const tasks = parseCount(data.tasks);
-  const phase = data.phase && typeof data.phase === "object" ? data.phase as Record<string, unknown> : undefined;
-  const title = phase && typeof phase.title === "string" ? phase.title.trim() : "";
-  const index = phase?.index;
-  const count = phase?.count;
-  const parsedPhase = title && positiveInt(index) && positiveInt(count) && index <= count && [...title].length <= 160 ? { title, index, count } : undefined;
-  const phases = Array.isArray(data.phases) && data.phases.length <= 100 ? data.phases.map(parseCount) : undefined;
-  const parsedPhases = phases?.every(Boolean) ? phases as { completed: number; total: number }[] : undefined;
-  const validPhases = parsedPhases && parsedPhases.reduce((sum, item) => sum + item.total, 0) <= PLAN_TASK_MAX
-    ? parsedPhases
-    : undefined;
-  const nextStep = typeof data.nextStep === "string" && data.nextStep.trim() && [...data.nextStep.trim()].length <= 240 ? data.nextStep.trim() : undefined;
-  const plan = { ...(parsedPhase ? { phase: parsedPhase } : {}), ...(tasks ? { tasks } : {}), ...(validPhases?.length ? { phases: validPhases } : {}), ...(nextStep ? { nextStep } : {}) };
-  return Object.keys(plan).length ? plan : undefined;
-}
-
-function parseCount(value: unknown): { completed: number; total: number } | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const count = value as Record<string, unknown>;
-  return nonnegativeInt(count.completed) && nonnegativeInt(count.total) && count.completed <= count.total ? { completed: count.completed, total: count.total } : undefined;
-}
-
-function positiveInt(value: unknown): value is number { return Number.isInteger(value) && (value as number) > 0 && (value as number) <= 100; }
-function nonnegativeInt(value: unknown): value is number { return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= PLAN_TASK_MAX; }
 function normalizedName(value: string | undefined): string | undefined { return value?.trim() || undefined; }
 
 function activeTheme(ctx: PiContext): ActiveThemeSnapshot | undefined {

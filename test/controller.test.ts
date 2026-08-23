@@ -295,6 +295,51 @@ test("stable refreshes do not rewrite the registry", async () => {
   });
 });
 
+test("refresh rejects mismatched heartbeat identity and falls back to tmux", async () => {
+  await withTempSessionsDir(async () => {
+    const now = 1_000;
+    const registry = { version: 1 as const, sessions: [session("running", { id: "api" })] };
+    await updateRegistry(() => registry);
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
+    await writeFile(heartbeatPath("api"), `${JSON.stringify({
+      managedSessionId: "other", cwd: "/tmp/api", state: "error", stateSince: now, updatedAt: now,
+      message: "must not reach status",
+    })}\n`, "utf8");
+    const controller = new SessionsController(registry, async () => "", async () => "present");
+
+    await controller.refresh(now);
+
+    assert.equal(controller.snapshot().registry.sessions[0]?.status, "waiting");
+    assert.equal(controller.snapshot().registry.sessions[0]?.error, undefined);
+  });
+});
+
+test("refresh keeps live status while dropping malformed optional metadata", async () => {
+  await withTempSessionsDir(async () => {
+    const now = 1_000;
+    const registry = { version: 1 as const, sessions: [session("running", { id: "api" })] };
+    await updateRegistry(() => registry);
+    await mkdir(join(process.env.PI_AGENT_HUB_DIR!, "heartbeats"), { recursive: true });
+    await writeFile(heartbeatPath("api"), `${JSON.stringify({
+      managedSessionId: "api", cwd: "/tmp/api", state: "waiting", stateSince: now - 10, updatedAt: now,
+      piSessionName: 42,
+      context: { version: 2, updatedAt: now },
+      workflow: { steps: [], activeIndex: 0, updatedAt: now },
+      activeTheme: { name: 1, tokens: { unknown: "ignored" } },
+    })}\n`, "utf8");
+    const controller = new SessionsController(registry, async () => "", async () => "present");
+
+    await controller.refresh(now);
+
+    const snapshot = controller.snapshot();
+    assert.equal(snapshot.registry.sessions[0]?.status, "waiting");
+    assert.equal(snapshot.registry.sessions[0]?.lastActivityAt, now - 10);
+    assert.equal(snapshot.registry.sessions[0]?.activeTheme, undefined);
+    assert.equal(snapshot.registry.sessions[0]?.workflow, undefined);
+    assert.equal(snapshot.sessions[0]?.context, undefined);
+  });
+});
+
 test("refresh projects active workflow mode only from a fresh heartbeat with confirmed tmux presence", async () => {
   await withTempSessionsDir(async () => {
     const now = 1_000_000;
