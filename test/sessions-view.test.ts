@@ -90,7 +90,8 @@ test("help overlay opens and closes", () => {
   assert.match(help, /pi agent hub help/);
   assert.match(help, /Status legend/);
   assert.match(help, /Alt\+Q/);
-  assert.match(help, /Ctrl\+Q/);
+  assert.match(help, /Ctrl\+←/);
+  assert.match(help, /Enter\/→ open\/switch/);
   assert.match(help, /Alt\+R/);
   assert.match(help, /i toggle/);
   assert.match(help, /p send/);
@@ -105,7 +106,7 @@ test("help overlay opens and closes", () => {
   assert.match(help, /Active and Backlog keep project\/group headers/);
   assert.match(help, /Archived shows 5 parent cascades/);
   assert.match(help, /Board view lanes canonical workflow sessions by producer step, then OTHER ACTIVE/);
-  assert.match(help, /subagent trees: ←\/→ collapse\/expand selected · Shift\+←\/→ all/);
+  assert.match(help, /subagent trees: Shift\+←\/→ collapse\/expand selected/);
   assert.match(help, /subagent trees start collapsed; Space toggles one board tree/);
   view.handleInput("\u001b");
   assert.doesNotMatch(view.render(80).join("\n"), /pi agent hub help/);
@@ -386,41 +387,41 @@ test("Space expands and collapses the selected board parent tree", () => {
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
 });
 
-test("left and right arrows expand and collapse the selected project tree", () => {
+test("shift left and right arrows expand and collapse the selected project tree", () => {
   const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
   const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
   const controller = new SessionsController({ version: 1, sessions: [parent, child] });
   const view = new SessionsView(controller, () => {});
 
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
-  view.handleInput("\u001b[C");
+  view.handleInput("\u001b[1;2C");
   assert.match(stripAnsi(view.render(120).join("\n")), /api[\s\S]*worker/);
 
   view.handleInput("j");
   assert.equal(controller.snapshot().selectedId, "child");
-  view.handleInput("\u001b[D");
+  view.handleInput("\u001b[1;2D");
   assert.equal(controller.snapshot().selectedId, "parent");
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
 });
 
-test("left and right arrows collapse and expand the selected board tree", () => {
+test("shift left and right arrows collapse and expand the selected board tree", () => {
   const parent = { ...session("parent", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } };
   const child = { ...session("child", "other"), kind: "subagent" as const, parentId: "parent", agentName: "worker" };
   const controller = new SessionsController({ version: 1, sessions: [parent, child] });
   const view = new SessionsView(controller, () => {});
 
   view.handleInput("S");
-  view.handleInput("\u001b[C");
+  view.handleInput("\u001b[1;2C");
   assert.match(stripAnsi(view.render(120).join("\n")), /api ▾[\s\S]*worker/);
 
   view.handleInput("j");
   assert.equal(controller.snapshot().selectedId, "child");
-  view.handleInput("\u001b[D");
+  view.handleInput("\u001b[1;2D");
   assert.equal(controller.snapshot().selectedId, "parent");
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /worker/);
 });
 
-test("shift arrows expand and collapse all project trees", () => {
+test("shift arrows expand and collapse only the selected project tree", () => {
   const sessions = [
     session("a", "api"),
     { ...session("a-child", "api"), kind: "subagent" as const, parentId: "a", agentName: "api-worker" },
@@ -432,13 +433,13 @@ test("shift arrows expand and collapse all project trees", () => {
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /api-worker|docs-worker/);
   view.handleInput("\u001b[1;2C");
   assert.match(stripAnsi(view.render(120).join("\n")), /api-worker/);
-  assert.match(stripAnsi(view.render(120).join("\n")), /docs-worker/);
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /docs-worker/);
 
   view.handleInput("\u001b[1;2D");
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /api-worker|docs-worker/);
 });
 
-test("shift arrows expand and collapse all board trees", () => {
+test("shift arrows expand and collapse only the selected board tree", () => {
   const sessions = [
     { ...session("a", "api"), workflow: { ...VIEW_WORKFLOW, activeIndex: 1 } },
     { ...session("a-child", "api"), kind: "subagent" as const, parentId: "a", agentName: "api-worker" },
@@ -451,12 +452,9 @@ test("shift arrows expand and collapse all board trees", () => {
   view.handleInput("S");
   view.handleInput("\u001b[1;2C");
   assert.match(stripAnsi(view.render(120).join("\n")), /api-worker/);
-  assert.match(stripAnsi(view.render(120).join("\n")), /docs-worker/);
+  assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /docs-worker/);
 
-  controller.selectSession("b-child");
-  view.render(120);
   view.handleInput("\u001b[1;2D");
-  assert.equal(controller.snapshot().selectedId, "b");
   assert.doesNotMatch(stripAnsi(view.render(120).join("\n")), /api-worker|docs-worker/);
 });
 

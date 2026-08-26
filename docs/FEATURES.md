@@ -13,7 +13,7 @@ Enter to open/switch
   ↓
 work in Pi
   ↓
-Ctrl+Q returns to the dashboard
+Ctrl+← returns to the dashboard
 ```
 
 ## Core capabilities
@@ -21,7 +21,7 @@ Ctrl+Q returns to the dashboard
 | Capability | How to use it | Why it matters |
 | --- | --- | --- |
 | Long-running sessions | `n` creates, `Enter` opens | Sessions keep running in tmux instead of disappearing with a terminal. |
-| Dashboard return | `Ctrl+Q` inside a managed session | Jump back to the hub without stopping the agent. |
+| Dashboard return | `Ctrl+←` inside a managed session | Jump back to the hub without stopping the agent. |
 | In-session rename | `Alt+R` inside a managed session | Open the dashboard rename dialog for the current session, then return to it after saving. |
 | Direct send | `p` in the dashboard | Paste and submit a one-line message into the selected live session without opening it. |
 | Custom dashboard shortcuts | `dashboard.shortcuts` in config | Bind safe Pi slash-command sends, such as `/session-name refresh`, to dashboard keys. |
@@ -31,7 +31,7 @@ Ctrl+Q returns to the dashboard
 | Hub-owned worktree sessions | `Ctrl+T` in the new-session form, `w` to finish | Create Git worktrees under hub state for one or more repos and explicitly finish, forget, or discard them. |
 | Project Skills | `s` picker | Attach Pi skills to the selected session's primary repo. |
 | Project MCP servers | `m` picker | Enable MCP tools for the selected session's primary repo. |
-| Subagent rows | Automatic when `pi-tmux-subagents` reports them | Expand or collapse selected trees with `←`/`→`; use Shift with those arrows for all trees in the current grouping. |
+| Subagent rows | Automatic when `pi-tmux-subagents` reports them | Expand or collapse the selected tree with `Shift+←`/`Shift+→`. |
 | Workflow rail + board | Automatic when `workflow-runtime` reports its ordered steps; `S` changes grouping and `v` changes density | Supervise every Active session: canonical workflow trees in producer lanes, all others in `OTHER ACTIVE`, with grouped compact or junction cards, running-subagent counts, plan context, and explicit attention. |
 
 ## Dashboard keys
@@ -39,11 +39,11 @@ Ctrl+Q returns to the dashboard
 | Key | Action |
 | --- | --- |
 | `n` | Create a new Pi session |
-| `Enter` | Open/switch to the selected live session, or restart a stopped/error session |
+| `Enter` / `→` | Open/switch to the selected live session, or restart a stopped/error session |
 | `1`–`4` | Assign, replace, move, or swap the corresponding fixed quadrant panel while staying in the sidebar |
 | `x`, then `1`–`4` | Close the corresponding panel |
 | `F`, then `1`–`4`, or `Alt+1`–`Alt+4` | Focus the corresponding open panel |
-| `Alt+Q` or `Ctrl+Q` | Return from a focused panel to the sidebar |
+| `Alt+Q` or `Ctrl+←` | Return from a focused panel to the sidebar |
 | `o` | Reset side panels to the selected session, or close it when it is the only panel |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |
@@ -127,7 +127,7 @@ Use `1`–`4` in the dashboard to place the selected live session in a fixed scr
 
 The dashboard remains a narrow left sidebar while panel geometry expands from the occupied quadrants. A single panel fills the content region. `1`+`2` produces side-by-side columns, while `1`+`3` produces stacked rows. Opposite corners such as `1`+`4` expand into two full-height columns rather than leaving blank screen regions. Three occupied quadrants split only the column containing two panels, and all four form an even 2×2 grid. Closing a panel re-expands survivors without changing their numbers. `[n]` pane-title badges keep quadrant identity visible when expansion moves a pane away from its literal corner.
 
-Press `F` then `1`–`4` to focus an open quadrant from the sidebar. Guarded `Alt+1`–`Alt+4` tmux bindings provide the same jump from anywhere in the dashboard session, including inside another panel; an empty target is a no-op. Press `Alt+Q` to return to the sidebar, with `Ctrl+Q` retained as a fallback. Press `o` to reset any current arrangement to one panel showing the selected session. If that session is already the sole panel in any quadrant, `o` closes it. A persistent strip below the dashboard summary maps all four slots to panel titles, including holes and sessions hidden by the current filter. The focused slot and its row `◫1`–`◫4` indicator use the theme accent; inactive indicators are muted. Panel borders use matching `[n] <title>` labels, with an accent border and reverse-color title badge on the focused pane. While any side panel is open, the sidebar omits its built-in details/preview column so the live panels remain the only content preview.
+Press `F` then `1`–`4` to focus an open quadrant from the sidebar. Guarded `Alt+1`–`Alt+4` tmux bindings provide the same jump from anywhere in the dashboard session, including inside another panel; an empty target is a no-op. Press `Alt+Q` to return to the sidebar, with `Ctrl+←` retained as a fallback. Press `o` to reset any current arrangement to one panel showing the selected session. If that session is already the sole panel in any quadrant, `o` closes it. A persistent strip below the dashboard summary maps all four slots to panel titles, including holes and sessions hidden by the current filter. The focused slot and its row `◫1`–`◫4` indicator use the theme accent; inactive indicators are muted. Panel borders use matching `[n] <title>` labels, with an accent border and reverse-color title badge on the focused pane. While any side panel is open, the sidebar omits its built-in details/preview column so the live panels remain the only content preview.
 
 All `1`–`4` assignment, replacement, move, and swap actions leave focus on the sidebar so several sessions can be placed without returning between each action. Use `F` then `1`–`4` or `Alt+1`–`Alt+4` when you want to focus a panel. Explicit close, narrow-width refusal, and `o` reset also leave focus on the sidebar. A single mouse click selects a session row or any visible line in its card; a double-click opens/switches to a live session or restarts a stopped/error session. The mouse wheel moves selection. Hub enables tmux mouse mode only on the dashboard session while it is running and unsets that session override on quit.
 
@@ -143,7 +143,7 @@ Return shortcuts from a managed `pi-agent-hub-*` session:
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+Q` | Return to the dashboard |
+| `Ctrl+←` | Return to the dashboard |
 | `Alt+R` | Return to the dashboard rename dialog for the current session, then switch back after saving |
 
 ## New session form

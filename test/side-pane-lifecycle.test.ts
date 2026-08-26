@@ -269,10 +269,10 @@ async function seedSwitchBinding(stateDir: string): Promise<void> {
     ownerPid: process.pid,
     controlSession: "pi-agent-hub",
     targetSession: "pi-agent-hub-api",
-    returnKey: "C-q",
+    returnKey: "C-Left",
     restorePath: returnRestore,
     keyBindings: [
-      { key: "C-q", restorePath: returnRestore },
+      { key: "C-Left", restorePath: returnRestore },
       { key: "M-r", restorePath: renameRestore },
     ],
   }));
@@ -382,7 +382,7 @@ test("closing the final pane restores dashboard chrome, bindings, and the manage
 
   assert.ok(value.events.includes("status:pi-agent-hub:on"));
   assert.ok(value.events.includes("border:off"));
-  assert.ok(value.events.includes("unbind:C-q"));
+  assert.ok(value.events.includes("unbind:C-Left"));
   assert.ok(value.events.includes("status:pi-agent-hub-api:on"));
   assert.ok(value.events.includes("render"));
   assert.deepEqual(value.lifecycle.snapshot(), {
@@ -428,7 +428,7 @@ test("a failed first open keeps panel mode and bindings when tmux reports a surv
   assert.equal(value.lifecycle.snapshot().dashboardStatusVisible, false);
   assert.equal(value.events.includes("status:pi-agent-hub:on"), false);
   assert.equal(value.events.includes("border:off"), false);
-  assert.ok(value.events.includes("bind:C-q"));
+  assert.ok(value.events.includes("bind:C-Left"));
 });
 
 test("too-narrow first assignment restores normal dashboard chrome without opening a pane", async (t) => {
@@ -458,7 +458,7 @@ test("handoff restores managed chrome before switching and closes only the match
   await value.lifecycle.handoff("pi-agent-hub-api");
 
   const managed = eventIndex(value.events, "managed:api:on");
-  const unbound = eventIndex(value.events, "unbind:C-q");
+  const unbound = eventIndex(value.events, "unbind:C-Left");
   const switched = eventIndex(value.events, "switch:pi-agent-hub-api");
   const closed = eventIndex(value.events, "kill:%2");
   assert.ok(managed < unbound && unbound < switched && switched < closed);
@@ -467,7 +467,7 @@ test("handoff restores managed chrome before switching and closes only the match
   assert.ok(value.exec.commands.includes("switch-client -c /dev/ttys001 -t pi-agent-hub-api"));
   assert.ok(value.exec.commands.includes("resize-window -t pi-agent-hub-api -x 160 -y 59"));
   assert.ok(value.exec.commands.includes("set-option -w -t pi-agent-hub-api window-size latest"));
-  const returnBinding = value.exec.commands.find((command) => command.startsWith("bind-key -n C-q "));
+  const returnBinding = value.exec.commands.find((command) => command.startsWith("bind-key -n C-Left "));
   const renameBinding = value.exec.commands.find((command) => command.startsWith("bind-key -n M-r "));
   assert.match(returnBinding ?? "", /pi-agent-hub tui/);
   assert.match(returnBinding ?? "", /\/repo\/dashboard/);
@@ -519,9 +519,9 @@ test("teardown restores both bindings then continues past footer failure through
 
   await value.lifecycle.stop();
 
-  const firstReturnUnbind = eventIndex(value.events, "unbind:C-q");
+  const firstReturnUnbind = eventIndex(value.events, "unbind:C-Left");
   const renameUnbind = eventIndex(value.events, "unbind:M-r");
-  const sidebarReturnUnbind = value.events.indexOf("unbind:C-q", firstReturnUnbind + 1);
+  const sidebarReturnUnbind = value.events.indexOf("unbind:C-Left", firstReturnUnbind + 1);
   assert.ok(firstReturnUnbind < renameUnbind && renameUnbind < sidebarReturnUnbind);
   const footerAttempt = value.exec.commands.indexOf("set-option -t pi-agent-hub-api status on");
   const killed = eventIndex(value.events, "kill:%2");
