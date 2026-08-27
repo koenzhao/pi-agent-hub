@@ -8,6 +8,25 @@ New here? See [Features](docs/FEATURES.md) for the dashboard workflow and core c
 
 ![pi-agent-hub dashboard](assets/pi-agent-hub-dashboard.png)
 
+## This fork
+
+Forked from [masta-g3/pi-agent-hub](https://github.com/masta-g3/pi-agent-hub). Additions in this fork:
+
+**Features**
+
+- **Dashboard keybinding rework** — `→` opens/switches (Enter alias); `Ctrl+←` returns from a managed session (was `Ctrl+Q`); `>` / `<` expand/collapse the selected subagent tree.
+- **`pi-hub send <id|title> <text>`** — paste a message into a specific live session from the CLI; multiline-safe via bracketed paste.
+- **`pi-hub add -t <title> --prompt <text>`** — scripted session creation with a caller-chosen title (drives Pi's native `--name` and the tmux status bar) and a one-shot initial prompt delivered as Pi's first user message. See [the FRD](docs/FRD-cli-add-title-and-initial-prompt.md).
+- **`pi-hub revive`** — post-reboot recovery: restarts every active session, resuming each saved Pi conversation. Pairs with a tmux-resurrect save filter and a systemd user unit for fully automatic restore.
+- **Auto-name on start** — new/forked sessions get Pi's native `--name` (repo basename) at spawn, no manual `R` rename. Toggle: `pi-hub config set name-on-start false`.
+
+**Issues found and fixed**
+
+- **K/J reorder was a silent no-op** (pre-existing upstream): idle rows only counted as reorderable on exact activity-timestamp ties, which effectively never occur. Idle/acknowledged tiers are now persisted-order-driven so `K`/`J` (and `Shift+↑`/`↓`) actually reorder; tier edges show a flash message. Unacknowledged-waiting rows remain activity-driven (newest first).
+- **Tree expand keys collided with tmux window switching**: `Shift+←`/`Shift+→` are commonly bound to previous/next window in tmux configs, so the keys never reached the dashboard. Moved to printable `>` / `<`.
+- **Zero-turn restart lost the auto-name**: Pi writes its session file lazily (first real turn), so restarting a session before any turn resumed nothing and dropped the name. `--name` now also applies when the recorded session file is missing on disk.
+- **Git-source installs did not self-build**: `pi install git:...` runs only `npm install`; added a `prepare` script and moved the build toolchain to `dependencies` so clones build `dist/` automatically.
+
 ## Why pi-agent-hub?
 
 Most agent managers try to become the runtime. `pi-agent-hub` stays small: Pi runs the agents, tmux keeps them alive, and the hub gives you one keyboard-driven dashboard to manage them.
