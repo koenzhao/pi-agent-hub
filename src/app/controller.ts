@@ -198,11 +198,12 @@ export class SessionsController {
     });
   }
 
-  async reorderSelected(delta: -1 | 1): Promise<void> {
-    if (this.filter) return;
+  async reorderSelected(delta: -1 | 1): Promise<boolean> {
+    if (this.filter) return false;
     const selected = this.selected();
-    if (!selected || isSubagentSession(selected)) return;
-    if (sessionSection(selected) === "archived") return;
+    if (!selected || isSubagentSession(selected)) return false;
+    if (sessionSection(selected) === "archived") return false;
+    let changed = false;
     await this.mutateRegistry((latest) => {
       const current = latest.sessions.find((session) => session.id === selected.id);
       if (!current || isSubagentSession(current)) return latest;
@@ -217,8 +218,10 @@ export class SessionsController {
       const index = ids.indexOf(current.id);
       const targetIndex = ids.indexOf(target.id);
       [ids[index], ids[targetIndex]] = [ids[targetIndex]!, ids[index]!];
+      changed = true;
       return { ...latest, sessions: assignGroupOrder(latest.sessions, ids, current.group, section, Date.now()) };
     });
+    return changed;
   }
 
   async moveSessionToBucket(id: string, bucket: SessionBucket, now = Date.now()): Promise<void> {

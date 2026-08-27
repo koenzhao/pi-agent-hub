@@ -181,7 +181,7 @@ test("reorderSelected swaps selected session within its group and clamps at bord
   });
 });
 
-test("reorderSelected stays within the selected priority and activity tie", async () => {
+test("reorderSelected stays within the selected priority tier", async () => {
   await withTempSessionsDir(async () => {
     const registry = {
       version: 1 as const,
@@ -196,9 +196,10 @@ test("reorderSelected stays within the selected priority and activity tie", asyn
 
     controller.move(1);
     assert.equal(controller.snapshot().selectedId, "idle-a");
-    await controller.reorderSelected(-1);
-    await controller.reorderSelected(1);
-    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => [item.id, item.order]), [["error", 0], ["idle-a", 1], ["idle-b", 2]]);
+    assert.equal(await controller.reorderSelected(1), true);
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => [item.id, item.order]), [["error", 0], ["idle-a", 2], ["idle-b", 1]]);
+    assert.equal(await controller.reorderSelected(1), false);
+    assert.deepEqual(controller.snapshot().registry.sessions.map((item) => [item.id, item.order]), [["error", 0], ["idle-a", 2], ["idle-b", 1]]);
   });
 });
 

@@ -890,7 +890,17 @@ export class SessionsView implements Component {
       return;
     }
     const reorder = this.actions.reorderSelected;
-    this.runAction(() => reorder ? reorder(delta) : this.controller.reorderSelected(delta), "reordering session...");
+    this.runAction(() => {
+      const result = reorder ? reorder(delta) : this.controller.reorderSelected(delta);
+      const showNoTarget = (changed: unknown) => {
+        if (changed === false) this.message = "no row to swap with in this priority tier";
+      };
+      if (!isPromise(result)) {
+        showNoTarget(result);
+        return;
+      }
+      return result.then(showNoTarget);
+    }, "reordering session...");
   }
 
   private moveSelectedToBucket(bucket: "backlog" | "archived") {

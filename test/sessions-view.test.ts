@@ -231,6 +231,17 @@ test("J K and shift arrows reorder selected session", () => {
   assert.deepEqual(deltas, [1, -1, 1, -1]);
 });
 
+test("reorder explains when the selected priority tier has no swap target", async () => {
+  const view = new SessionsView(new SessionsController({ version: 1, sessions: [session("api", "api")] }), () => {}, {
+    reorderSelected: () => Promise.resolve(false),
+  });
+
+  view.handleInput("J");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(stripAnsi(view.render(100).join("\n")), /no row to swap with in this priority tier/);
+});
+
 test("archived sessions explain that chronological order cannot be changed", () => {
   const archived = { ...session("api", "api"), bucket: "archived" as const, bucketChangedAt: 100 };
   const deltas: number[] = [];
