@@ -12,6 +12,7 @@ import { loadRegistry } from "./core/registry.js";
 import { dashboardEnv, openDashboard } from "./app/dashboard.js";
 import { runTui } from "./app/run-tui.js";
 import { deleteManagedSession } from "./app/delete-session.js";
+import { reviveSessions } from "./app/revive.js";
 import { addManagedSession, forkManagedSession, restartManagedSession, startManagedSession, stopManagedSession } from "./app/session-lifecycle.js";
 import { startMcpPool } from "./mcp/pool-daemon.js";
 
@@ -48,6 +49,9 @@ async function main() {
     case "restart":
       await restart(args[0]);
       return;
+    case "revive":
+      await revive();
+      return;
     case "delete":
       await deleteCommand(args[0]);
       return;
@@ -79,6 +83,7 @@ Usage:
   ${CLI_COMMAND} start <session-id>
   ${CLI_COMMAND} stop <session-id>
   ${CLI_COMMAND} restart <session-id>
+  ${CLI_COMMAND} revive               restart all active sessions after a reboot (resumes saved Pi conversations)
   ${CLI_COMMAND} delete <session-id>
   ${CLI_COMMAND} fork <session-id> [-g group]
   ${CLI_COMMAND} mcp-pool
@@ -134,6 +139,14 @@ async function stop(id: string | undefined) {
 async function restart(id: string | undefined) {
   if (!id) throw new Error(`Usage: ${CLI_COMMAND} restart <session-id>`);
   await restartManagedSession(id);
+}
+
+async function revive() {
+  if (!(await hasTmux())) throw new Error("tmux is required for revive");
+  const result = await reviveSessions();
+  console.log(`restarted ${result.restarted.length} active session(s)${result.restarted.length ? `: ${result.restarted.join(", ")}` : ""}`);
+  if (result.killedStaleDashboard) console.log("removed stale dashboard tmux session (run `pi-hub` to recreate it)");
+  if (result.skipped.length) console.log(`skipped ${result.skipped.length} subagent/backlog/archived row(s)`);
 }
 
 async function deleteCommand(id: string | undefined) {

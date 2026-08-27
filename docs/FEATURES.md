@@ -119,6 +119,10 @@ Running `pi-hub` uses one stable tmux session named `pi-agent-hub`:
 
 The dashboard runs the current CLI file's `tui` command inside tmux so it does not recursively create dashboards or depend on a stale `pi-hub` on PATH. It also applies its own tmux status bar instead of inheriting global tmux theme chrome.
 
+### Reboot recovery
+
+`pi-hub revive` is the post-reboot recovery command: it restarts every active non-subagent session (each resumes its saved Pi conversation), skips Backlog/Archived/subagent rows, and removes a stale `pi-agent-hub` tmux session restored as a bare shell so the next `pi-hub` recreates the TUI. When tmux-resurrect/continuum manage boot-time restore, exclude `pi-agent-hub*` sessions from saves (resurrect `post-save-layout` hook) and run `pi-hub revive` from a systemd user service after `tmux.service`.
+
 When the dashboard is running inside tmux, `Enter` switches the current tmux client to the selected live session and briefly shows the equivalent `tmux switch-client -t <session>` command. On a stopped or error session, `Enter` restarts it instead of attempting to attach. Opening a `waiting` session marks it read before attaching, so it can show `idle` after you return; `a` remains the manual mark-read shortcut.
 
 ### Sidebar workspace
