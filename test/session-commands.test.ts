@@ -175,6 +175,54 @@ test("addManagedSession creates multi-repo worktree sessions in a source-pi work
   }
 });
 
+test("addManagedSession delivers a custom title and initial prompt only on fresh start", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-add-prompt-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  const repo = join(root, "sample-repo");
+  await mkdir(bin);
+  await mkdir(repo);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\n[ "$1" = "has-session" ] && exit 1\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  process.env.PI_AGENT_HUB_DIR = join(root, "hub");
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    const prompt = "it's a `test$`";
+    const created = await addManagedSession({ cwd: repo, title: "  Mail scan: TM-3402  ", initialPrompt: prompt });
+    const saved = (await loadRegistry()).sessions.find((item) => item.id === created.id)!;
+    let commands = await readFile(log, "utf8");
+
+    assert.equal(saved.title, "Mail scan: TM-3402");
+    assert.match(commands, /--name' 'Mail scan: TM-3402'/);
+    assert.ok(commands.includes("'it'\\''s a `test$`'"));
+    assert.match(commands, /status-right .*Mail scan: TM-3402/);
+
+    const sessionFile = join(root, "saved.jsonl");
+    await writeFile(sessionFile, "{}\n", "utf8");
+    await updateRegistry((registry) => ({
+      ...registry,
+      sessions: registry.sessions.map((item) => item.id === created.id ? { ...item, sessionFile } : item),
+    }));
+    await writeFile(log, "", "utf8");
+    await stopManagedSession(created.id);
+    await startManagedSession(created.id);
+    commands = await readFile(log, "utf8");
+    assert.match(commands, /--session/);
+    assert.doesNotMatch(commands, /--name/);
+    assert.ok(!commands.includes(prompt));
+
+    const fallback = await addManagedSession({ cwd: repo, title: "" });
+    assert.equal(fallback.title, "sample-repo");
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});
+
 test("addManagedSession injects worktree guidance for a single-repo worktree", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-add-single-wt-"));
   const bin = join(root, "bin");

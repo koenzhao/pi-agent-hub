@@ -22,6 +22,8 @@ import type { ManagedSession, ManagedWorktree } from "../core/types.js";
 export interface SessionInput {
   cwd: string;
   group?: string;
+  title?: string;
+  initialPrompt?: string;
   additionalCwds?: string[];
   worktree?: { branch: string };
 }
@@ -33,7 +35,7 @@ export interface ForkInput {
 async function addManagedSessionImpl(input: SessionInput): Promise<ManagedSession> {
   const originalCwd = resolve(input.cwd);
   const originalAdditionalCwds = input.additionalCwds ?? [];
-  let record = createSessionRecord({ cwd: originalCwd, group: input.group, additionalCwds: input.additionalCwds });
+  let record = createSessionRecord({ cwd: originalCwd, group: input.group, title: input.title, additionalCwds: input.additionalCwds });
   try {
     if (input.worktree) {
       const created = await createOwnedWorktrees({ cwds: [record.cwd, ...(record.additionalCwds ?? [])], sessionId: record.id, branch: input.worktree.branch });
@@ -57,7 +59,7 @@ async function addManagedSessionImpl(input: SessionInput): Promise<ManagedSessio
       record.order = nextOrderInGroup(registry.sessions, record.group);
       return { ...registry, sessions: [...registry.sessions, record] };
     });
-    await startManagedSessionImpl(record.id);
+    await startManagedSessionImpl(record.id, input.initialPrompt);
   } catch (error) {
     const rollbackError = await rollbackStartedRecord(record).catch((cleanupError: unknown) => cleanupError);
     if (rollbackError) throw new Error(`${errorMessage(error)}; rollback failed: ${errorMessage(rollbackError)}`);
@@ -74,6 +76,7 @@ async function addManagedSessionImpl(input: SessionInput): Promise<ManagedSessio
 
 async function startManagedSessionImpl(
   id: string,
+  initialPrompt?: string,
   materializeWorkspace: (session: ManagedSession) => Promise<ManagedSession> = ensureMultiRepoWorkspace,
 ): Promise<void> {
   const registry = await loadRegistry();
@@ -110,6 +113,7 @@ async function startManagedSessionImpl(
     extensionPath: extensionPath(),
     sessionFile: session.sessionFile,
     ...(!sessionFileExists && (await effectiveNameOnStart()) ? { name: session.title } : {}),
+    ...(!sessionFileExists && initialPrompt !== undefined ? { initialPrompt } : {}),
   });
   const worktreeGuidance = renderWorktreeGuidance(session);
   await newSession({
@@ -433,7 +437,7 @@ export async function startManagedSession(
   id: string,
   materializeWorkspace: (session: ManagedSession) => Promise<ManagedSession> = ensureMultiRepoWorkspace,
 ): Promise<void> {
-  return withLifecycleContext("start managed session", id, () => startManagedSessionImpl(id, materializeWorkspace));
+  return withLifecycleContext("start managed session", id, () => startManagedSessionImpl(id, undefined, materializeWorkspace));
 }
 
 export async function stopManagedSession(id: string): Promise<void> {
