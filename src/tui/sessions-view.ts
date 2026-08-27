@@ -207,11 +207,11 @@ export class SessionsView implements Component {
       return;
     }
     const filterActive = Boolean(this.controller.snapshot().filter?.trim());
-    if (!filterActive && matchesKey(data, Key.shift("right"))) {
+    if (!filterActive && data === ">") {
       this.setSelectedSubagents(true);
       return;
     }
-    if (!filterActive && matchesKey(data, Key.shift("left"))) {
+    if (!filterActive && data === "<") {
       this.setSelectedSubagents(false);
       return;
     }
@@ -1078,7 +1078,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  q quit                     Esc cancel/clear",
     "  K/J reorder in group      v cycle row density",
     "  S toggle project/stage grouping",
-    "  subagent trees: Shift+←/→ collapse/expand selected",
+    "  subagent trees: > expand \u00b7 < collapse selected",
     "  mouse click select · double-click open/switch · wheel move",
     "",
     heading("Sessions"),
