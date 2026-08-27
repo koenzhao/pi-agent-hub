@@ -21,6 +21,7 @@ Most agent managers try to become the runtime. `pi-agent-hub` stays small: Pi ru
 | Project-scoped skills/MCP | Pick skills and MCP servers for the selected session's primary repo. |
 | Multi-repo workspaces | Extra repos are symlinked into a runtime workspace; source repos are not moved or owned. |
 | Hub-owned worktrees | Create isolated branch sessions for one or more repos; finish, forget, or discard them explicitly from the dashboard. |
+| Reboot recovery | `pi-hub revive` restarts all active sessions after a reboot, resuming each saved Pi conversation. |
 | Small surface area | No cloud service, no custom agent runtime, no hidden repo scanning. |
 
 ## Quick start
