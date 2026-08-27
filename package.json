@@ -44,17 +44,16 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@earendil-works/pi-tui": "^0.83.0",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/node": "^20.19.0",
+    "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.83.0"
   },
-  "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.83.0",
-    "@types/node": "^20.19.0",
-    "typescript": "^6.0.3"
-  },
+  "devDependencies": {},
   "bin": {
     "pi-agent-hub": "dist/cli.js",
     "pi-hub": "dist/cli.js"
