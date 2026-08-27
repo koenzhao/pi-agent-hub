@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemePreference, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemePreference, setSessionPrelude, setSkillPoolDirs, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "../src/core/config.js";
+import { configPath, effectiveDashboardShortcuts, effectiveDashboardThemePreference, effectiveMcpCatalogPath, effectiveNameOnStart, effectiveSessionPrelude, effectiveSkillPoolDirs, effectiveWorktreeDefault, setDashboardThemePreference, setNameOnStart, setSessionPrelude, setSkillPoolDirs, setWorktreeDefault, unsetNameOnStart, unsetSessionPrelude, unsetWorktreeDefault } from "../src/core/config.js";
 import { loadMcpCatalog } from "../src/mcp/config.js";
 import { listSkillPool } from "../src/skills/catalog.js";
 
@@ -60,6 +60,25 @@ test("worktree default is validated and preserves unrelated session config", asy
 
   await writeFile(configPath(env), JSON.stringify({ version: 1, session: { worktreeDefault: "yes" } }), "utf8");
   await assert.rejects(() => effectiveWorktreeDefault(env), /Invalid session\.worktreeDefault/);
+});
+
+test("name-on-start default is true and is validated and round-trips", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-config-"));
+  const env = { PI_AGENT_HUB_DIR: root };
+  await writeFile(configPath(env), JSON.stringify({ version: 1, session: { prelude: "echo setup" } }), "utf8");
+
+  assert.equal(await effectiveNameOnStart(env), true);
+
+  await setNameOnStart(false, env);
+  assert.equal(await effectiveNameOnStart(env), false);
+  assert.equal(await effectiveSessionPrelude(env), "echo setup");
+
+  await unsetNameOnStart(env);
+  assert.equal(await effectiveNameOnStart(env), true);
+  assert.equal(await effectiveSessionPrelude(env), "echo setup");
+
+  await writeFile(configPath(env), JSON.stringify({ version: 1, session: { nameOnStart: "yes" } }), "utf8");
+  await assert.rejects(() => effectiveNameOnStart(env), /Invalid session\.nameOnStart/);
 });
 
 test("unsetting the final session setting removes the empty session object", async () => {

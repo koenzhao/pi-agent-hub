@@ -15,6 +15,7 @@ export interface SessionsConfig {
   session?: {
     prelude?: string;
     worktreeDefault?: boolean;
+    nameOnStart?: boolean;
   };
   dashboard?: {
     themeSync?: boolean;
@@ -56,6 +57,10 @@ export async function effectiveSessionPrelude(env: NodeJS.ProcessEnv = process.e
 
 export async function effectiveWorktreeDefault(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   return (await loadSessionsConfig(env)).session?.worktreeDefault ?? true;
+}
+
+export async function effectiveNameOnStart(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  return (await loadSessionsConfig(env)).session?.nameOnStart ?? true;
 }
 
 export async function effectiveDashboardThemePreference(env: NodeJS.ProcessEnv = process.env): Promise<DashboardThemePreference> {
@@ -109,6 +114,16 @@ export async function unsetWorktreeDefault(env: NodeJS.ProcessEnv = process.env)
   await writeJsonAtomic(configPath(env), withoutSessionProperty(config, "worktreeDefault"));
 }
 
+export async function setNameOnStart(enabled: boolean, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const config = await loadSessionsConfig(env);
+  await writeJsonAtomic(configPath(env), { ...config, session: { ...config.session, nameOnStart: enabled } });
+}
+
+export async function unsetNameOnStart(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const config = await loadSessionsConfig(env);
+  await writeJsonAtomic(configPath(env), withoutSessionProperty(config, "nameOnStart"));
+}
+
 export async function setDashboardThemePreference(preference: DashboardThemePreference, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const theme = preference.theme?.trim();
   if (!preference.syncPi && !theme) throw new Error("dashboard theme cannot be blank");
@@ -129,6 +144,7 @@ function validateConfig(config: SessionsConfig): void {
   if (config.session !== undefined && !isPlainObject(config.session)) throw new Error("Invalid session config in pi-agent-hub config");
   if (config.session?.prelude !== undefined && typeof config.session.prelude !== "string") throw new Error("Invalid session.prelude in pi-agent-hub config");
   if (config.session?.worktreeDefault !== undefined && typeof config.session.worktreeDefault !== "boolean") throw new Error("Invalid session.worktreeDefault in pi-agent-hub config");
+  if (config.session?.nameOnStart !== undefined && typeof config.session.nameOnStart !== "boolean") throw new Error("Invalid session.nameOnStart in pi-agent-hub config");
   if (config.dashboard !== undefined && !isPlainObject(config.dashboard)) throw new Error("Invalid dashboard config in pi-agent-hub config");
   if (config.dashboard?.themeSync !== undefined && typeof config.dashboard.themeSync !== "boolean") throw new Error("Invalid dashboard.themeSync in pi-agent-hub config");
   if (config.dashboard?.theme !== undefined && typeof config.dashboard.theme !== "string") throw new Error("Invalid dashboard.theme in pi-agent-hub config");

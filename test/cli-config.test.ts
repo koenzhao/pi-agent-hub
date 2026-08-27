@@ -36,6 +36,27 @@ test("pi-hub config manages worktree-default", async () => {
   assert.match(unset.stdout, /unset worktree-default/);
 });
 
+test("pi-hub config manages name-on-start", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-cli-config-"));
+  const env = { PI_AGENT_HUB_DIR: root };
+
+  const set = await runCli(["config", "set", "name-on-start", "false"], env);
+  assert.equal(set.code, 0, set.stderr);
+  assert.match(set.stdout, /disabled name-on-start/);
+
+  const get = await runCli(["config", "get"], env);
+  assert.equal(get.code, 0, get.stderr);
+  assert.equal(JSON.parse(get.stdout).session.nameOnStart, false);
+
+  const unset = await runCli(["config", "unset", "name-on-start"], env);
+  assert.equal(unset.code, 0, unset.stderr);
+  assert.match(unset.stdout, /unset name-on-start/);
+
+  const after = await runCli(["config", "get"], env);
+  assert.equal(after.code, 0, after.stderr);
+  assert.equal(JSON.parse(after.stdout).session?.nameOnStart ?? true, true);
+});
+
 test("pi-hub config manages session-prelude", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-cli-config-"));
   const env = { PI_AGENT_HUB_DIR: root };

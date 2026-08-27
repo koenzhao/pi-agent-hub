@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { cliTuiCommand, hasTmux, inspectSidebarReturnBinding, inspectSwitchReturnBinding } from "./core/tmux.js";
-import { configPath, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, loadSessionsConfig, setSessionPrelude, setWorktreeDefault, unsetSessionPrelude, unsetWorktreeDefault } from "./core/config.js";
+import { configPath, effectiveMcpCatalogPath, effectiveSessionPrelude, effectiveSkillPoolDirs, loadSessionsConfig, setNameOnStart, setSessionPrelude, setWorktreeDefault, unsetNameOnStart, unsetSessionPrelude, unsetWorktreeDefault } from "./core/config.js";
 import { extensionPath } from "./core/extension-path.js";
 import { formatCliInstallDoctor, formatCliInstallWarning, inspectCliInstall, shouldWarnForCommand } from "./core/install-diagnostics.js";
 import { CLI_COMMAND } from "./core/names.js";
@@ -93,6 +93,8 @@ Usage:
   ${CLI_COMMAND} config unset session-prelude
   ${CLI_COMMAND} config set worktree-default true|false
   ${CLI_COMMAND} config unset worktree-default
+  ${CLI_COMMAND} config set name-on-start true|false
+  ${CLI_COMMAND} config unset name-on-start
 `);
 }
 
@@ -201,6 +203,18 @@ async function configCommand(argv: string[]) {
   if (action === "unset" && argv[1] === "worktree-default") {
     await unsetWorktreeDefault();
     console.log("unset worktree-default");
+    return;
+  }
+  if (action === "set" && argv[1] === "name-on-start") {
+    const value = argv[2];
+    if (value !== "true" && value !== "false") throw new Error(`Usage: ${CLI_COMMAND} config set name-on-start true|false`);
+    await setNameOnStart(value === "true");
+    console.log(`${value === "true" ? "enabled" : "disabled"} name-on-start`);
+    return;
+  }
+  if (action === "unset" && argv[1] === "name-on-start") {
+    await unsetNameOnStart();
+    console.log("unset name-on-start");
     return;
   }
   throw new Error(`Usage: ${CLI_COMMAND} config get|set|unset ...`);
