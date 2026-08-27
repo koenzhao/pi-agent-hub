@@ -107,6 +107,7 @@ pi-hub list
 pi-hub add . -g default
 pi-hub add ./api --add-cwd ../web --add-cwd ../shared
 pi-hub add "$WORKDIR" -g mailscan -t "mailscan:t268:TM-3402" --prompt "/start-task TM-3402"
+pi-hub send <session-id|title> "reply with a summary"   # paste a message into a live session
 pi-hub delete <session-id>
 pi-hub mcp-pool     # run the pooled MCP socket daemon
 pi-hub config get
