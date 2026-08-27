@@ -15,6 +15,8 @@ import { deleteManagedSession } from "./app/delete-session.js";
 import { reviveSessions } from "./app/revive.js";
 import { addManagedSession, forkManagedSession, restartManagedSession, startManagedSession, stopManagedSession } from "./app/session-lifecycle.js";
 import { startMcpPool } from "./mcp/pool-daemon.js";
+import { parseAddArgs } from "./cli-add-args.js";
+export { parseAddArgs } from "./cli-add-args.js";
 
 const command = process.argv[2] ?? "dashboard";
 const args = process.argv.slice(3);
@@ -79,7 +81,8 @@ Usage:
   ${CLI_COMMAND}              open dashboard tmux session
   ${CLI_COMMAND} tui          run TUI directly
   ${CLI_COMMAND} list
-  ${CLI_COMMAND} add <cwd> [-g group] [--add-cwd path ...]
+  ${CLI_COMMAND} add <cwd> [-t title] [-g group] [--add-cwd path ...] [--prompt text]
+    ${CLI_COMMAND} add . -t "My session" --prompt "/start-task TM-3402"
   ${CLI_COMMAND} start <session-id>
   ${CLI_COMMAND} stop <session-id>
   ${CLI_COMMAND} restart <session-id>
@@ -120,11 +123,16 @@ async function list() {
 }
 
 async function add(argv: string[]) {
-  const cwdArg = argv[0];
-  if (!cwdArg) throw new Error(`Usage: ${CLI_COMMAND} add <cwd> [-g group] [--add-cwd path ...]`);
-  const group = flag(argv, "-g") ?? flag(argv, "--group");
-  const additionalCwds = flags(argv, "--add-cwd");
-  const record = await addManagedSession({ cwd: cwdArg, group, additionalCwds });
+  let input: ReturnType<typeof parseAddArgs>;
+  try {
+    input = parseAddArgs(argv);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Missing cwd") {
+      throw new Error(`Usage: ${CLI_COMMAND} add <cwd> [-t title] [-g group] [--add-cwd path ...] [--prompt text]`);
+    }
+    throw error;
+  }
+  const record = await addManagedSession(input);
   console.log(record.id);
 }
 
@@ -259,15 +267,9 @@ function currentCliFile(): string {
 
 function flag(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name);
-  return index === -1 ? undefined : argv[index + 1];
-}
-
-function flags(argv: string[], name: string): string[] {
-  const values: string[] = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === name && argv[i + 1]) values.push(argv[i + 1]!);
-  }
-  return values;
+  if (index !== -1) return argv[index + 1];
+  const prefix = `${name}=`;
+  return argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
 main().catch((error: unknown) => {
