@@ -375,7 +375,8 @@ export async function runTui(): Promise<void> {
       return mutateRegistry(() => controller.renameGroup(from, to));
     },
     reorderSelected(delta) {
-      return mutateRegistry(() => controller.reorderSelected(delta));
+      let changed = false;
+      return mutateRegistry(async () => { changed = await controller.reorderSelected(delta); }).then(() => changed);
     },
     sendMessage(tmuxSession, message) {
       return sendTextToSession(tmuxSession, message);

@@ -28,6 +28,19 @@ test("duplicate persisted orders keep registry order", () => {
   assert.deepEqual(orderedSessions(sessions).map((item) => item.id), ["b", "a", "c"]);
 });
 
+test("idle rows use persisted order while unacknowledged waiting rows use activity", () => {
+  const sessions = [
+    session("idle-new", "default", 1, "idle", 400),
+    session("idle-old", "default", 0, "idle", 100),
+    session("waiting-old", "default", 0, "waiting", 200),
+    session("waiting-new", "default", 1, "waiting", 300),
+  ];
+
+  assert.deepEqual(orderedSessions(sessions).map((item) => item.id), [
+    "waiting-new", "waiting-old", "idle-old", "idle-new",
+  ]);
+});
+
 test("unacknowledged waiting sessions outrank running and acknowledged idle rows", () => {
   const sessions = [
     session("idle", "default", 0, "idle", 500),

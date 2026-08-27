@@ -36,7 +36,8 @@ export function compareSessionPriority(
   const bRank = sessionPriorityRank(b);
   const rankDifference = aRank - bRank;
   if (rankDifference) return rankDifference;
-  return aRank === 1 || aRank === 3 ? compareActivity(a.lastActivityAt, b.lastActivityAt) : 0;
+  // Unacknowledged waiting is an activity queue; idle/acknowledged rows use persisted order.
+  return aRank === 1 ? compareActivity(a.lastActivityAt, b.lastActivityAt) : 0;
 }
 
 function compareActivity(a: number | undefined, b: number | undefined): number {
