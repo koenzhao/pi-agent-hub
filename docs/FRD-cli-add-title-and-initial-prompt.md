@@ -1,6 +1,6 @@
 # FRD: `pi-hub add` — `-t <title>` and `--prompt <text>`
 
-**Status:** Draft (requirements only — not implemented)
+**Status:** Implemented (`feat/cli-add-title-prompt`, commit `9ebc8a9`)
 **Date:** 2026-08-27
 **Requester:** Koen Zhao
 **Driver use case:** `mail-scan` skill spawns `claude --bg` sessions per Jira TM ticket; each should get a mirror pi-hub session with identical title, group, working directory, and initial task prompt — created atomically from a script, with no dashboard interaction and no tmux paste race.
