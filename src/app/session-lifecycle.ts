@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { access, rm, unlink } from "node:fs/promises";
 import { PRIMARY_CWD_ENV, SESSION_ID_ENV, STATE_ENV, SUBAGENT_PROMPT_APPEND_ENV, WORKTREE_GUIDANCE_ENV } from "../core/names.js";
 import { resolve } from "node:path";
-import { effectiveSessionPrelude } from "../core/config.js";
+import { effectiveNameOnStart, effectiveSessionPrelude } from "../core/config.js";
 import { buildPiArgs } from "../core/pi-process.js";
 import { extensionPath } from "../core/extension-path.js";
 import { isErrno } from "../core/atomic-json.js";
@@ -99,7 +99,11 @@ async function startManagedSessionImpl(
     });
   });
   session = findSession(committed, session.id);
-  const piArgs = buildPiArgs({ extensionPath: extensionPath(), sessionFile: session.sessionFile });
+  const piArgs = buildPiArgs({
+    extensionPath: extensionPath(),
+    sessionFile: session.sessionFile,
+    ...(!session.sessionFile && (await effectiveNameOnStart()) ? { name: session.title } : {}),
+  });
   const worktreeGuidance = renderWorktreeGuidance(session);
   await newSession({
     name: session.tmuxSession,
@@ -182,7 +186,11 @@ async function forkManagedSessionImpl(sourceId: string, input: ForkInput = {}): 
     record.order = nextOrderInGroup(latest.sessions, record.group);
     return { ...latest, sessions: [...latest.sessions, record] };
   });
-  const piArgs = buildPiArgs({ extensionPath: extensionPath(), forkFrom: sourceFile });
+  const piArgs = buildPiArgs({
+    extensionPath: extensionPath(),
+    forkFrom: sourceFile,
+    ...((await effectiveNameOnStart()) ? { name: record.title } : {}),
+  });
   await newSession({
     name: record.tmuxSession,
     cwd: effectiveSessionCwd(record),

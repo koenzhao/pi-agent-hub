@@ -21,6 +21,7 @@ Ctrl+Q returns to the dashboard
 | Capability | How to use it | Why it matters |
 | --- | --- | --- |
 | Long-running sessions | `n` creates, `Enter` opens | Sessions keep running in tmux instead of disappearing with a terminal. |
+| Auto session name | on by default; `config set name-on-start false` to disable | Hub passes Pi `--name <repo-basename>` for new/forked sessions so the dashboard title is set immediately without pressing `R`. |
 | Dashboard return | `Ctrl+Q` inside a managed session | Jump back to the hub without stopping the agent. |
 | In-session rename | `Alt+R` inside a managed session | Open the dashboard rename dialog for the current session, then return to it after saving. |
 | Direct send | `p` in the dashboard | Paste and submit a one-line message into the selected live session without opening it. |

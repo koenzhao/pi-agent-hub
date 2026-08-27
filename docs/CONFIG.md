@@ -5,7 +5,7 @@ This page covers runtime state, global config, themes, Skills, and MCP configura
 ## Runtime state
 
 - Global state: `PI_AGENT_HUB_DIR` or `<PI_CODING_AGENT_DIR>/pi-agent-hub` or `~/.pi/agent/pi-agent-hub`
-- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, `session.worktreeDefault`, dashboard theme sync/override, dashboard shortcuts)
+- Config: `config.json` (`skills.poolDirs`, `mcp.catalogPath`, optional managed-session `session.prelude`, `session.worktreeDefault`, `session.nameOnStart`, dashboard theme sync/override, dashboard shortcuts)
 - Registry: `registry.json`
 - Heartbeats: `heartbeats/<session-id>.json`
 - Latest one-time managed-session theme request: `theme-command.json`
@@ -149,6 +149,15 @@ New-session forms open with worktree mode on. Set `session.worktreeDefault` to `
 ```bash
 pi-hub config set worktree-default false
 pi-hub config unset worktree-default
+```
+
+## New-session name on start
+
+By default Hub passes Pi's `--name <title>` flag when starting a brand-new or forked managed session, so Pi's native session display name is set immediately to the provisional title (the primary repo folder basename) instead of waiting for you to press `R`. Set `session.nameOnStart` to `false` to disable it and let Pi keep its own default name until you rename manually. Resuming a saved session (restart) never passes `--name`, so an existing conversation's name is preserved.
+
+```bash
+pi-hub config set name-on-start false
+pi-hub config unset name-on-start
 ```
 
 ## Session prelude
