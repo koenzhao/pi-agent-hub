@@ -246,6 +246,19 @@ export async function sendTextToSession(name: string, text: string, exec: TmuxEx
   await exec.exec("tmux", ["send-keys", "-t", name, "Enter"]);
 }
 
+/**
+ * Multiline-safe variant of sendTextToSession: bracketed paste (-p) keeps the
+ * body as one editor input instead of submitting at embedded newlines, and -r
+ * suppresses tmux's LF→CR translation (which would otherwise act as Enter).
+ * Matches the proven pi-tmux-subagents delivery path.
+ */
+export async function sendMultilineToSession(name: string, text: string, exec: TmuxExec = realTmuxExec): Promise<void> {
+  const buffer = `pi-agent-hub-send-${process.pid}`;
+  await exec.exec("tmux", ["set-buffer", "-b", buffer, "--", text]);
+  await exec.exec("tmux", ["paste-buffer", "-p", "-d", "-r", "-b", buffer, "-t", name]);
+  await exec.exec("tmux", ["send-keys", "-t", name, "Enter"]);
+}
+
 type TmuxStatusOption = readonly [key: string, value: string];
 
 function statusBarArgs(options: {

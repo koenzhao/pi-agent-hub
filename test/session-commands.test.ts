@@ -542,3 +542,82 @@ test("startManagedSession passes --name when the recorded sessionFile is missing
     else process.env.PATH = oldPath;
   }
 });
+
+test("resolveMessageTarget resolves by id, unique prefix, and exact title", async () => {
+  const { resolveMessageTarget } = await import("../src/app/session-commands.js");
+  const registry = {
+    version: 1 as const,
+    sessions: [
+      session({ id: "aaaa1111-0000-4000-8000-000000000000", title: "api" }),
+      session({ id: "bbbb2222-0000-4000-8000-000000000000", title: "docs" }),
+      session({ id: "aaaa9999-0000-4000-8000-000000000000", title: "api2" }),
+    ],
+  };
+
+  assert.equal(resolveMessageTarget(registry, "aaaa1111-0000-4000-8000-000000000000").title, "api");
+  assert.equal(resolveMessageTarget(registry, "bbbb").title, "docs");
+  assert.equal(resolveMessageTarget(registry, "API").title, "api");
+  assert.throws(() => resolveMessageTarget(registry, "aaaa"), /Ambiguous session id/);
+  assert.throws(() => resolveMessageTarget(registry, "nope"), /Unknown session/);
+});
+
+test("sendMessageToSession pastes multiline text with bracketed paste", async () => {
+  const { sendMessageToSession } = await import("../src/app/session-commands.js");
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-send-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  await mkdir(bin);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  process.env.PI_AGENT_HUB_DIR = root;
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    await seedRegistry({ version: 1, sessions: [session({ id: "target-session", title: "api", tmuxSession: "pi-agent-hub-target" })] });
+
+    const sent = await sendMessageToSession("target-session", "line1\nline2 'quoted' $HOME");
+    assert.equal(sent.title, "api");
+    const commands = await readFile(log, "utf8");
+    assert.match(commands, /set-buffer/);
+    assert.ok(commands.includes("line1\nline2 'quoted' $HOME"));
+    assert.match(commands, /paste-buffer -p -d -r -b \S+ -t pi-agent-hub-target/);
+    assert.match(commands, /send-keys -t pi-agent-hub-target Enter/);
+
+    await assert.rejects(() => sendMessageToSession("target-session", "   "), /cannot be blank/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});
+
+test("sendMessageToSession rejects subagent rows and stopped sessions", async () => {
+  const { sendMessageToSession } = await import("../src/app/session-commands.js");
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-send-guard-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  await mkdir(bin);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nif [ "$1" = "has-session" ]; then exit 1; fi\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  process.env.PI_AGENT_HUB_DIR = root;
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    await seedRegistry({ version: 1, sessions: [
+      session({ id: "parent-session", title: "parent" }),
+      session({ id: "child-session", title: "child", kind: "subagent", parentId: "parent-session" }),
+    ] });
+
+    await assert.rejects(() => sendMessageToSession("child-session", "hi"), /not messageable/);
+    // has-session exits 1 → tmux session gone → not running
+    await assert.rejects(() => sendMessageToSession("parent-session", "hi"), /not running/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});

@@ -12,6 +12,7 @@ import { loadRegistry } from "./core/registry.js";
 import { dashboardEnv, openDashboard } from "./app/dashboard.js";
 import { runTui } from "./app/run-tui.js";
 import { deleteManagedSession } from "./app/delete-session.js";
+import { sendMessageToSession } from "./app/session-commands.js";
 import { reviveSessions } from "./app/revive.js";
 import { addManagedSession, forkManagedSession, restartManagedSession, startManagedSession, stopManagedSession } from "./app/session-lifecycle.js";
 import { startMcpPool } from "./mcp/pool-daemon.js";
@@ -51,6 +52,9 @@ async function main() {
     case "restart":
       await restart(args[0]);
       return;
+    case "send":
+      await send(args);
+      return;
     case "revive":
       await revive();
       return;
@@ -87,6 +91,7 @@ Usage:
   ${CLI_COMMAND} stop <session-id>
   ${CLI_COMMAND} restart <session-id>
   ${CLI_COMMAND} revive               restart all active sessions after a reboot (resumes saved Pi conversations)
+  ${CLI_COMMAND} send <session-id|title> <text>   paste a message into a live session's prompt (multiline-safe)
   ${CLI_COMMAND} delete <session-id>
   ${CLI_COMMAND} fork <session-id> [-g group]
   ${CLI_COMMAND} mcp-pool
@@ -157,6 +162,14 @@ async function revive() {
   console.log(`restarted ${result.restarted.length} active session(s)${result.restarted.length ? `: ${result.restarted.join(", ")}` : ""}`);
   if (result.killedStaleDashboard) console.log("removed stale dashboard tmux session (run `pi-hub` to recreate it)");
   if (result.skipped.length) console.log(`skipped ${result.skipped.length} subagent/backlog/archived row(s)`);
+}
+
+async function send(argv: string[]) {
+  const target = argv[0];
+  const text = argv.slice(1).join(" ");
+  if (!target || !text.trim()) throw new Error(`Usage: ${CLI_COMMAND} send <session-id|title> <text>`);
+  const result = await sendMessageToSession(target, text);
+  console.log(`sent to ${result.id.slice(0, 8)}\t${result.title}`);
 }
 
 async function deleteCommand(id: string | undefined) {
