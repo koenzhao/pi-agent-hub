@@ -454,3 +454,43 @@ test("forkManagedSession does not register a fork when source history is not sav
     else process.env.PI_AGENT_HUB_DIR = oldDir;
   }
 });
+
+test("startManagedSession passes --name when the recorded sessionFile is missing on disk", async () => {
+  const oldDir = process.env.PI_AGENT_HUB_DIR;
+  const oldPath = process.env.PATH;
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-hub-name-on-start-"));
+  const bin = join(root, "bin");
+  const log = join(root, "tmux.log");
+  await mkdir(bin);
+  await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nif [ "$1" = "has-session" ]; then exit 1; fi\nexit 0\n`, "utf8");
+  await chmod(join(bin, "tmux"), 0o755);
+  process.env.PI_AGENT_HUB_DIR = root;
+  process.env.PATH = `${bin}:${oldPath ?? ""}`;
+  try {
+    // Zero-turn session: registry recorded the planned sessionFile path, but
+    // Pi has not created the file yet. Restart must still set --name.
+    const zeroTurn = session({ sessionFile: join(root, "missing-session-file.jsonl") });
+    await seedRegistry({ version: 1, sessions: [zeroTurn] });
+    await startManagedSession(zeroTurn.id);
+    let commands = await readFile(log, "utf8");
+    assert.match(commands, /--name/);
+    assert.match(commands, /--session/);
+
+    // Existing sessionFile: resume path, no --name override.
+    await writeFile(join(root, "tmux2.log"), "", "utf8");
+    const existingFile = join(root, "existing-session.jsonl");
+    await writeFile(existingFile, "{}", "utf8");
+    const resumable = session({ id: "resumable-session", tmuxSession: "pi-agent-hub-resumable", sessionFile: existingFile });
+    await updateRegistry((latest) => ({ ...latest, sessions: [resumable] }));
+    await writeFile(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(join(root, "tmux2.log"))}\nif [ "$1" = "has-session" ]; then exit 1; fi\nexit 0\n`, "utf8");
+    await startManagedSession(resumable.id);
+    commands = await readFile(join(root, "tmux2.log"), "utf8");
+    assert.match(commands, /--session/);
+    assert.doesNotMatch(commands, /--name/);
+  } finally {
+    if (oldDir === undefined) delete process.env.PI_AGENT_HUB_DIR;
+    else process.env.PI_AGENT_HUB_DIR = oldDir;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+});

@@ -99,10 +99,17 @@ async function startManagedSessionImpl(
     });
   });
   session = findSession(committed, session.id);
+  // Pi writes the session file lazily (first real turn), so a recorded
+  // sessionFile may not exist yet (zero-turn session). Treat a missing file
+  // as a fresh start: keep passing the path for identity continuity, but
+  // also set --name so the new conversation still gets its start name.
+  const sessionFileExists = session.sessionFile
+    ? await access(session.sessionFile, constants.F_OK).then(() => true, () => false)
+    : false;
   const piArgs = buildPiArgs({
     extensionPath: extensionPath(),
     sessionFile: session.sessionFile,
-    ...(!session.sessionFile && (await effectiveNameOnStart()) ? { name: session.title } : {}),
+    ...(!sessionFileExists && (await effectiveNameOnStart()) ? { name: session.title } : {}),
   });
   const worktreeGuidance = renderWorktreeGuidance(session);
   await newSession({
