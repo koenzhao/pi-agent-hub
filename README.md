@@ -17,7 +17,7 @@ Most agent managers try to become the runtime. `pi-agent-hub` stays small: Pi ru
 | Pi-native | Uses Pi sessions, extensions, skills, MCP, and project state directly. |
 | tmux-native | Sessions keep running as normal tmux sessions; you can attach, switch, or recover manually. |
 | One stable dashboard | `pi-hub` always brings you back to the same control center. |
-| Return shortcuts | `Ctrl+Q` jumps from a managed session back to the dashboard; `Alt+R` opens rename from inside a session. |
+| Return shortcuts | `Ctrl+←` jumps from a managed session back to the dashboard; `Alt+R` opens rename from inside a session. |
 | Project-scoped skills/MCP | Pick skills and MCP servers for the selected session's primary repo. |
 | Multi-repo workspaces | Extra repos are symlinked into a runtime workspace; source repos are not moved or owned. |
 | Hub-owned worktrees | Create isolated branch sessions for one or more repos; finish, forget, or discard them explicitly from the dashboard. |
@@ -38,11 +38,11 @@ Common dashboard keys (see [Features](docs/FEATURES.md#dashboard-keys) for the f
 | Key | Action |
 | --- | --- |
 | `n` | Create a new Pi session |
-| `Enter` | Open/switch to the selected live session, or restart a stopped/error session |
+| `Enter` / `→` | Open/switch to the selected live session, or restart a stopped/error session |
 | `1`–`4` | Assign, replace, move, swap, or focus a fixed quadrant panel |
 | `x`, then `1`–`4` | Close the corresponding panel |
 | `F`, then `1`–`4`, or `Alt+1`–`Alt+4` | Focus the corresponding open panel |
-| `Alt+Q` / `Ctrl+Q` | Return from a panel to the sidebar |
+| `Alt+Q` / `Ctrl+←` | Return from a panel to the sidebar |
 | `o` | Reset side panels to the selected session, or close it when it is the only panel |
 | `/` | Filter sessions |
 | `p` | Send a one-line message to the selected live session without opening it |

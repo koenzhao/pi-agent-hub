@@ -274,7 +274,7 @@ export async function configureManagedSessionStatusBar(options: {
   visible?: boolean;
 }, exec: TmuxExec = realTmuxExec): Promise<void> {
   const chrome = tmuxChromeFromTheme(options.theme);
-  const statusRight = `#[fg=${chrome.hintColor}]ctrl+q return · alt+r rename#[default] │ 📁 ${tmuxFormatText(options.title)} | ${tmuxFormatText(projectDisplayName(options.cwd))} `;
+  const statusRight = `#[fg=${chrome.hintColor}]ctrl+← return · alt+r rename#[default] │ 📁 ${tmuxFormatText(options.title)} | ${tmuxFormatText(projectDisplayName(options.cwd))} `;
   await exec.exec("tmux", statusBarArgs({
     name: options.name,
     chrome,
@@ -381,7 +381,7 @@ export async function switchClientWithReturn(
   options: SwitchClientOptions,
   exec: TmuxExec = realTmuxExec,
 ): Promise<void> {
-  const returnKey = options.returnKey ?? "C-q";
+  const returnKey = options.returnKey ?? "C-Left";
   const managedPrefix = options.managedPrefix ?? MANAGED_SESSION_PREFIX;
   const stateDir = options.stateDir ?? join(sessionsStateDir(), "return-key");
   const activePath = join(stateDir, "active.json");
@@ -507,7 +507,7 @@ export async function installSidebarReturnBinding(options: {
   const activePath = join(stateDir, "active.json");
   await withFileLock(activePath, async () => {
     const restorePath = join(stateDir, "previous.tmux");
-    const returnKey = options.returnKey ?? "C-q";
+    const returnKey = options.returnKey ?? "C-Left";
     const keys = [...new Set([returnKey, "M-q", "M-1", "M-2", "M-3", "M-4"])];
     await removeSidebarReturnBindingUnlocked({ stateDir, refuseLiveForeignOwner: true }, exec);
     const previous = await Promise.all(keys.map((key) => currentKeyBinding(key, exec)));

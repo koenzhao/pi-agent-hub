@@ -190,7 +190,7 @@ export class SessionsView implements Component {
     if (this.archiveDisclosureSelected || this.selectedSection) {
       if (matchesKey(data, Key.down) || data === "j") this.moveSelection(1);
       else if (matchesKey(data, Key.up) || data === "k") this.moveSelection(-1);
-      else if (isEnterKey(data)) this.selectedSection ? this.toggleSection(this.selectedSection) : this.toggleArchiveDisclosure();
+      else if (isEnterKey(data) || matchesKey(data, Key.right)) this.selectedSection ? this.toggleSection(this.selectedSection) : this.toggleArchiveDisclosure();
       else if (matchesKey(data, Key.slash)) this.startFilter();
       else if (data === "n") this.startNewDialog();
       else if (data === "i") this.detailsExpanded = !this.detailsExpanded;
@@ -208,18 +208,10 @@ export class SessionsView implements Component {
     }
     const filterActive = Boolean(this.controller.snapshot().filter?.trim());
     if (!filterActive && matchesKey(data, Key.shift("right"))) {
-      this.setAllSubagents(true);
-      return;
-    }
-    if (!filterActive && matchesKey(data, Key.shift("left"))) {
-      this.setAllSubagents(false);
-      return;
-    }
-    if (!filterActive && matchesKey(data, Key.right)) {
       this.setSelectedSubagents(true);
       return;
     }
-    if (!filterActive && matchesKey(data, Key.left)) {
+    if (!filterActive && matchesKey(data, Key.shift("left"))) {
       this.setSelectedSubagents(false);
       return;
     }
@@ -240,7 +232,7 @@ export class SessionsView implements Component {
       this.clearPendingRestart();
       this.moveSelection(-1);
     }
-    else if (isEnterKey(data)) this.attachSelected();
+    else if (isEnterKey(data) || matchesKey(data, Key.right)) this.attachSelected();
     else if (matchesKey(data, Key.slash)) this.startFilter();
     else if (data === "n") this.startNewDialog();
     else if (data === "f") this.startForkDialog();
@@ -674,7 +666,7 @@ export class SessionsView implements Component {
         this.message = plan.message;
         return;
       }
-      this.flashMessage(`switching: ${plan.command} · Ctrl+Q returns`);
+      this.flashMessage(`switching: ${plan.command} · Ctrl+← returns`);
       try {
         const result = switchInsideTmux(selected.tmuxSession);
         if (isPromise(result)) void result.catch((error: unknown) => { this.message = `switch failed: ${errorMessage(error)}`; });
@@ -832,20 +824,6 @@ export class SessionsView implements Component {
     else expandedIds.delete(parentId);
     this.viewStateRevision += 1;
     if (!expanded && selectedId !== parentId && this.controller.selectSession(parentId)) this.actions.selectionChanged?.();
-    this.listScrollTop = 0;
-  }
-
-  private setAllSubagents(expanded: boolean) {
-    const expandedIds = this.grouping === "stage" ? this.expandedBoardParentIds : this.expandedProjectParentIds;
-    if (expanded) {
-      for (const parentId of this.subagentParentIds()) expandedIds.add(parentId);
-    } else expandedIds.clear();
-    this.viewStateRevision += 1;
-    if (!expanded) {
-      const selectedId = this.controller.snapshot().selectedId;
-      const parentId = this.topLevelBoardParentId(selectedId);
-      if (parentId && selectedId !== parentId && this.controller.selectSession(parentId)) this.actions.selectionChanged?.();
-    }
     this.listScrollTop = 0;
   }
 
@@ -1094,13 +1072,13 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     heading("pi agent hub help"),
     "",
     heading("Navigation"),
-    "  ↑↓/j/k move selection     Enter open/switch     / filter",
+    "  ↑↓/j/k move selection     Enter/→ open/switch     / filter",
     "  1-4 assign (stay here)    x then 1-4 close panel",
     "  F then 1-4 or Alt+1-4 focus panel     o reset to one panel",
     "  q quit                     Esc cancel/clear",
     "  K/J reorder in group      v cycle row density",
     "  S toggle project/stage grouping",
-    "  subagent trees: ←/→ collapse/expand selected · Shift+←/→ all",
+    "  subagent trees: Shift+←/→ collapse/expand selected",
     "  mouse click select · double-click open/switch · wheel move",
     "",
     heading("Sessions"),
@@ -1119,7 +1097,7 @@ function renderHelp(width: number, theme?: SessionsTheme): string[] {
     "  pickers: ←→/Tab switch columns; theme: live preview, Enter apply, Esc cancel",
     "",
     heading("Return from managed sessions and panels"),
-    "  Alt+Q panel to sidebar     Ctrl+Q return fallback     Alt+R rename session",
+    "  Alt+Q panel to sidebar     Ctrl+← return to dashboard     Alt+R rename session",
     "",
     heading("Sections and views"),
     "  Active and Backlog keep project/group headers; Archived is flat and chronological",
